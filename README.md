@@ -74,7 +74,7 @@ More technical details about unvirsal scaling and super-linear radial function c
 # Usage
 SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, highly similar to `mlp` of MLIP. See the [user manual of MLIP](https://gitlab.com/ashapeev/mlip-2/-/blob/master/doc/manual/manual.pdf?ref_type=heads) for details. **The following are some frequently used commands:**  
 * **Basic model training**  
-To train a model, you run `mlp-sus2 train` with prepared dataset `trainset.cfg`, untrained model `untrained_sus2mlip` and training options:
+To train a model, you should run `mlp-sus2 train` with prepared dataset `trainset.cfg`, untrained model `untrained_sus2mlip` and training options:
 ```bash
 mlp-sus2 train untrained_sus2mlip trainset.cfg --curr-pot-name=current.mtp
 ```
@@ -83,3 +83,12 @@ To evaluate a tarined model `trained_sus2mlip` on a specified dataset `target.cf
 ```bash
 mlp-sus2 calc-errors trained_sus2mlip target.cfg
 ```
+# External Tools
+## LAMMPS
+SUS2-MLIP models can be used in LAMMPS simulation via the interface [interface-lammps-mlip-v2](https://gitlab.com/ashapeev/interface-lammps-mlip-2/-/tree/master?ref_type=heads).
+## PySUS2
+PySUS2 is a comprehensive suite of tools and Python modules developed based on the SUS2-MLIP model, designed for atomistic simulations. It supports a range of functionalities including structure relaxation, phonon dispersion analysis, and lattice thermal conductivity calculations.  
+(in progress)
+## AEE-DAS
+AEE-DAS (Atomic Environment Encoding based Dual Adaptive Sampling) is a Python tool designed to facilitate active learning in SUS2-MLIP modeling. It also helps with the integration and optimization of the database, making it easier for researchers and developers to work with.  
+(in progress)
