@@ -1,0 +1,208 @@
+#!/bin/bash
+#
+# MLIP configure script
+
+# output file for config makefile.
+MKFILE=make/config.mk
+
+# Defaults
+# prefix=/usr/local
+prefix=.
+prefix_fortran=/usr/local/gfortran/lib
+debug=
+mpi=0
+lossless_cfg=0
+compiler=gnu
+blas=embedded
+blasroot=
+prognamesuf=
+public=
+selftest=1
+cxxflag=
+
+# halt
+Halt() { echo -e "Error: $*" 1>&2; exit 1; }
+
+# check installed package
+Check() { which ${1} 2> /dev/null; }
+
+# usage output function
+Usage() 
+{
+  echo $header
+  cat >&1 <<EndUsage 
+Usage: ./configure [options]
+Options:
+  --prefix=<path>              installation prefix path (e.g., /home/...)
+  --prefix_fortran=<path>      install path to fortran
+  --no-mpi                     disable MPI libraries [autodetect]
+  --no-selftest                disable selftest implementation
+  --lossless-cfg               turn on lossless configuration file writing
+  --compiler=[intel|gnu]       which compilers to use [autodetect]
+  --blas=NAME                  BLAS library [autodetect]
+  --program-suffix=<suffix>    program name suffix
+BLAS option names:
+  mkl                          Intel MKL library
+  openblas                     OpenBLAS library
+  embedded                     Embedded BLAS 
+EndUsage
+  exit 1
+}
+
+# autodetect mpi support
+test $(Check mpicc) && mpi=1
+# autodetect compiler and blas library ( intel and mkl only )
+test $(Check icc) && compiler="intel"
+[[ "${compiler}" = "intel" ]] && test ${MKLROOT} && blas=mkl
+
+# LP64 or non-LP64 for the Intel MKL
+arch=$(arch)
+if [[ "${arch}" == i386 || "${arch}" == i486 || "${arch}" == i586 || "${arch}" == i686 ]]; then
+  arch_lp64=0
+else
+  arch_lp64=1
+fi
+
+# options
+for arg in "$@"; do
+    case "${arg}" in
+    --prefix=* )
+        prefix=$(echo $arg | sed 's/--prefix=//') ;;
+    --no-mpi )
+        mpi=0 ;;
+    --lossless-cfg )
+        lossless_cfg=1 ;;
+    --no-selftest )
+        selftest=0 ;;
+    --enable-debug )
+        debug=1 ;;
+    --compiler=* )
+        compiler=$(echo $arg | sed 's/--compiler=//') ;;
+    --blas=*)
+        blas=$(echo $arg | sed 's/--blas=//') ;;
+    --blas-root=* )
+        blasroot=$(echo $arg | sed 's/--blas-root=//') ;;
+    --prefix_fortran=*)
+        prefix_fortran=$(echo $arg | sed 's/--prefix_fortran=//') ;;
+    --help )
+        Usage ;;
+
+    * ) Halt "unknown option - \"$arg\"." ;;
+    esac
+done
+
+echo 'Generating makefile configuration ...'
+
+cat > ${MKFILE} <<MKEOF
+# Directories
+PREFIX = $prefix
+BIN_DIR = \$(PREFIX)/bin
+LIB_DIR = \$(PREFIX)/lib
+FORTRAN_DIR = $prefix_fortran
+MKEOF
+
+if [ "${debug}" == 1 ]; then
+  compileflag="-DDEBUG -g"
+fi
+
+if [ "${lossless_cfg}" == 1 ]; then
+  compileflag="-DMLIP_LOSSLESS_CFG"
+fi
+
+case "${compiler}" in
+    intel )
+        echo "" >> ${MKFILE}
+        echo "# Compilers for the executable" >> ${MKFILE}
+        if [ $mpi = 1 ]; then
+            echo "CC_EXE  = mpiicc" >> ${MKFILE}
+            echo "CXX_EXE = mpiicpc" >> ${MKFILE}
+            echo "FC_EXE  = mpiifort" >> ${MKFILE}
+        else
+            echo "CC_EXE  = icc" >> ${MKFILE}
+            echo "CXX_EXE = icpc" >> ${MKFILE}
+            echo "FC_EXE  = ifort" >> ${MKFILE}
+        fi
+        echo "" >> ${MKFILE}
+        echo "# Compilers for the library" >> ${MKFILE}
+        echo "CC_LIB  = icc" >> ${MKFILE}
+        echo "CXX_LIB = icpc" >> ${MKFILE}
+        echo "FC_LIB  = ifort" >> ${MKFILE}
+        ;;
+    gnu )
+        echo "" >> ${MKFILE}
+        echo "# Compilers for the executable" >> ${MKFILE}
+        if [ $mpi = 1 ]; then
+            fc=mpif90;
+            test $(Check mpifc) && fc=mpifc
+            echo "CC_EXE  = mpicc" >> ${MKFILE}
+            echo "CXX_EXE = mpicxx" >> ${MKFILE}
+            echo "FC_EXE  = ${fc}" >> ${MKFILE}
+        else
+            echo "CC_EXE  = gcc" >> ${MKFILE}
+            echo "CXX_EXE = g++" >> ${MKFILE}
+            echo "FC_EXE  = gfortran" >> ${MKFILE}
+        fi
+        echo "" >> ${MKFILE}
+        echo "# Compilers for the library" >> ${MKFILE}
+        echo "CC_LIB  = gcc" >> ${MKFILE}
+        echo "CXX_LIB = g++" >> ${MKFILE}
+        echo "FC_LIB  = gfortran" >> ${MKFILE}
+        ;;
+    * ) Halt "unknown compiler \"${compiler}\"." ;;
+esac
+echo "" >> ${MKFILE}
+echo "# Compile and link flags" >> ${MKFILE}
+echo "CPPFLAGS += -O3 ${compileflag}" >> ${MKFILE}
+echo "FFLAGS += -O3 ${compileflag}" >> ${MKFILE}
+if [ "${mpi}" == 1 ]; then
+	cxxflag+=" -DMLIP_MPI"
+fi
+if [ "${selftest}" == 0 ]; then
+	cxxflag+=" -DMLIP_NO_SELFTEST"
+fi
+if [ -n "${cxxflag}" ]; then
+  echo "CXXFLAGS +=${cxxflag}" >> ${MKFILE}
+fi
+
+case "${compiler}" in
+    intel )
+        linklib="-lifcore"
+        ;;
+    gnu )
+        #"FFLAGS += -fbounds-check"
+        echo "\$FORTRAN_DIR = ${path_to_fortran}" >> ${MKFILE}
+        linklib="-L\$(FORTRAN_DIR) -lgfortran"
+esac
+case "${blas}" in
+    mkl ) 
+        if [[ "${arch_lp64}" = 1 ]]; then
+            mkllib="intel64"
+        else
+            mkllib="ia32"
+        fi
+        echo "LDFLAGS += -L${MKLROOT}/lib/${mkllib} -lmkl_rt ${linklib}" >> ${MKFILE}
+        echo "CPPFLAGS += -I${MKLROOT}/include" >> ${MKFILE}
+        echo "CXXFLAGS += -DMLIP_INTEL_MKL " >> ${MKFILE}
+        ;;
+    openblas )
+        echo "LDFLAGS += -L${blasroot}/lib -l:libopenblas.a ${linklib}" >> ${MKFILE}
+        echo "CPPFLAGS += -I${blasroot}/include" >> ${MKFILE}
+        ;;
+    embedded )
+        echo "LDFLAGS += \$(LIB_DIR)/lib_mlip_cblas.a ${linklib}" >> ${MKFILE}
+        echo "LIB_BLAS += \$(LIB_DIR)/lib_mlip_cblas.a" >> ${MKFILE}
+        echo "CPPFLAGS += -I./cblas" >> ${MKFILE}
+        ;;
+    * ) Halt "unknown BLAS library name \"${blas}\"." ;;
+esac
+echo "" >> ${MKFILE}
+
+echo "# Extra variables" >> ${MKFILE}
+if [[ -n ${prognamesuf}  ]]; then
+    echo "NAME_SUFFIX = ${prognamesuf}" >> ${MKFILE}
+fi
+
+if [[ ${blas} == "embedded"  ]]; then
+echo "TARGET_PRERQ = \$(LIB_DIR)/lib_mlip_cblas.a" >> ${MKFILE}
+fi
+echo 'Configuration complete.'
