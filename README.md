@@ -56,13 +56,24 @@ radial_basis_type = RBChebyshev_sss
         max_dist = 6.0
         ...
 ```
-There are two tags `L` and `scaling_map`.   
+There are two new hyperparameters `L` and `scaling_map`.   
 `L` reffers to the max level of moment tensor.  (**DON'T CHANGE**)  
-`scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively.  
-η determines the dimensions on which global scaling are applied as follow:  
-$$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$$
-![image](https://github.com/user-attachments/assets/f89a39ec-26a1-40f7-aa76-2e569f6dbb79)  
-More details about unvirsal scaling can be found in our paper: 
+`scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively. η determines the dimensions on which the global scaling are applied:  
+ $$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$$  
+  
+**Note**: `min_dist` in our model do not affect the mapping from pair distance *r* to *x∈[-1,1]* due to the nonlinearity-embedded universal radial fuction, but it determines the inintialization of scaling factor. Setting `min_dist = 0.0` is usually a good choice.  
+  
+
+
+At `untrained_sus2mlip/`, we prepared 6 sets of untrained basis corresponding to `L∈{2,3} & *k*∈{2,3}`. In both model, the interactions are considered up to the 5-body. Further details regarding the scalar basis in each model are provided in the table below.
+![QQ_1735905101839](https://github.com/user-attachments/assets/c2c17d17-81ab-4d2d-ab61-8eb3f0e9d882)  
+
+More technical details about unvirsal scaling and super-linear radial function can be found in our paper: 
 > Super-Linear Machine Learning Interatomic Potentials with Physics-Informed Universal Scaling and Ultra-Small Parameterization https://doi.org/xxxx
- 
-**Note**: `min_dist` in our model do not affect the mapping from pair distance *r* to *x∈[-1,1]* due to the nonlinearity-embedded universal radial fuction, but it determines the inintialization of scaling factor. Setting `min_dist = 0.0` is usually a good choice. 
+
+# Usage
+SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, highly similar to `mlp` in MLIP-2.
+## model training
+```bash
+mlp-sus2 train untrained_sus2mlip trainset.cfg -curr-pot-name=current.mtp
+```
