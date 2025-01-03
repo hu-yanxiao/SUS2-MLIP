@@ -11,7 +11,7 @@ You can install SUS2-MLIP by running:
  make libinterface ## get lib/libinterface.a for external tool e.g. LAMMPS and pysus2mlip
 ```
 # Format of Datasets
-Like the original MLIP-2 package, SUS2-MLIP reads material structures and their properties from `cfg` files.  
+Like the original MLIP package, SUS2-MLIP reads material structures and their properties from `cfg` files.  
   
 Format of `cfg` file: 
 ```bash
@@ -39,7 +39,7 @@ PlusStress:  xx          yy          zz          yz          xz          xy
 ```
 The scripts for converting formats between `cfg` and `ase readable files (e.g. extxyz)` can be found in `./python_tool/`
 # Untrained Models
-**:red_circle: PLEASE NOTE :red_circle:**: Although the implementation of SUS2-MLIP is based on MLIP-2, there are significant and fundamental differences between the two. Consequently, the original models in `untrained_mtps/` cannot be utilized within the current framework.
+**:red_circle: PLEASE NOTE :red_circle:**: Although the implementation of SUS2-MLIP is based on MLIP package, there are significant and fundamental differences between the two. Consequently, the original models in `untrained_mtps/` cannot be utilized within the current framework.
 
 Format of `.mtp` files for SUS2-MLIP:
 ```bash
@@ -58,22 +58,28 @@ radial_basis_type = RBChebyshev_sss
 ```
 There are two new hyperparameters `L` and `scaling_map`.   
 `L` reffers to the max level of moment tensor.  (**DON'T CHANGE**)  
-`scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively. η determines the dimensions on which the global scaling are applied:  
+`scaling_map = L` or `K` or `LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively. η determines the dimensions on which the global scaling are applied:  
  $$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$$  
   
 **Note**: `min_dist` in our model do not affect the mapping from pair distance *r* to *x∈[-1,1]* due to the nonlinearity-embedded universal radial fuction, but it determines the inintialization of scaling factor. Setting `min_dist = 0.0` is usually a good choice.  
   
 
 
-At `untrained_sus2mlip/`, we prepared 6 sets of untrained basis corresponding to `L∈{2,3} & *k*∈{2,3}`. In both model, the interactions are considered up to the 5-body. Further details regarding the scalar basis in each model are provided in the table below.
+At `untrained_sus2mlip/`, we prepared 6 sets of untrained basis corresponding to `L∈{2,3} & k∈{2,3}`. In both model, the interactions are considered up to the 5-body. Further details regarding the scalar basis in each model are provided in the table below.
 ![QQ_1735905101839](https://github.com/user-attachments/assets/c2c17d17-81ab-4d2d-ab61-8eb3f0e9d882)  
 
 More technical details about unvirsal scaling and super-linear radial function can be found in our paper: 
 > Super-Linear Machine Learning Interatomic Potentials with Physics-Informed Universal Scaling and Ultra-Small Parameterization https://doi.org/xxxx
 
 # Usage
-SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, highly similar to `mlp` in MLIP-2.
-## model training
+SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, highly similar to `mlp` of MLIP. See the [user manual of MLIP](https://gitlab.com/ashapeev/mlip-2/-/blob/master/doc/manual/manual.pdf?ref_type=heads) for details. **The following are some frequently used commands:**  
+* **Basic model training**  
+To train a model, you run `mlp-sus2 train` with prepared dataset `trainset.cfg`, untrained model `untrained_sus2mlip` and training options:
 ```bash
-mlp-sus2 train untrained_sus2mlip trainset.cfg -curr-pot-name=current.mtp
+mlp-sus2 train untrained_sus2mlip trainset.cfg --curr-pot-name=current.mtp
+```
+* **Evaluating trained models**  
+To evaluate a tarined model `trained_sus2mlip` on a specified dataset `target.cfg`, you run:  
+```bash
+mlp-sus2 calc-errors trained_sus2mlip target.cfg
 ```
