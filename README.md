@@ -51,7 +51,6 @@ L = 2
 scaling_map = LK
 species_count = 2
 potential_tag =
-radial_basis_type = RBChebyshev_sss
         min_dist = 0.0
         max_dist = 6.0
         ...
@@ -85,7 +84,8 @@ mlp-sus2 calc-errors trained_sus2mlip target.cfg
 ```
 # External Tools
 ## LAMMPS
-SUS2-MLIP models can be used in LAMMPS simulation via the interface [interface-lammps-mlip-v2](https://gitlab.com/ashapeev/interface-lammps-mlip-2/-/tree/master?ref_type=heads).
+SUS2-MLIP models can be used in LAMMPS simulation via the interface [interface-lammps-mlip-v2](https://gitlab.com/ashapeev/interface-lammps-mlip-2/-/tree/master?ref_type=heads).  
+**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp` can enhance efficiency by approximately 10%.
 ## PySUS2
 PySUS2 is a comprehensive suite of tools and Python modules developed based on the SUS2-MLIP model, designed for atomistic simulations. It supports a range of functionalities including structure relaxation, phonon dispersion analysis, and lattice thermal conductivity calculations.  
 (in progress)
