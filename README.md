@@ -61,5 +61,8 @@ There are two tags `L` and `scaling_map`.
 `scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively.  
 η determines the dimensions on which global scaling are applied as follow:  
 $$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$$
-![image](https://github.com/user-attachments/assets/f89a39ec-26a1-40f7-aa76-2e569f6dbb79)
-
+![image](https://github.com/user-attachments/assets/f89a39ec-26a1-40f7-aa76-2e569f6dbb79)  
+More details about unvirsal scaling can be found in our paper: 
+> Super-Linear Machine Learning Interatomic Potentials with Physics-Informed Universal Scaling and Ultra-Small Parameterization https://doi.org/xxxx
+ 
+**Note**: `min_dist` in our model do not affect the mapping from pair distance *r* to *x∈[-1,1]* due to the nonlinearity-embedded universal radial fuction, but it determines the inintialization of scaling factor. Setting `min_dist = 0.0` is usually a good choice. 
