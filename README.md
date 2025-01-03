@@ -59,4 +59,7 @@ radial_basis_type = RBChebyshev_sss
 There are two tags `L` and `scaling_map`.   
 `L` reffers to the max level of moment tensor.  (**DON'T CHANGE**)  
 `scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively.  
-$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$
+η determines the dimensions on which global scaling are applied as follow:  
+$$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$$
+![image](https://github.com/user-attachments/assets/f89a39ec-26a1-40f7-aa76-2e569f6dbb79)
+
