@@ -1,6 +1,6 @@
 # SUS2-MLIP
 SUS2-MLIP:**S**uper-Linear Machine Learning Interatomic Potentials with Physics-Informed **U**niversal **S**caling and **U**ltra-**S**mall Parameterization. 
-This model is realized through the modified mlip-2 package (https://gitlab.com/ashapeev/mlip-2/-/tree/master?ref_type=heads).
+This model is realized through the modified [MLIP-2](https://gitlab.com/ashapeev/mlip-2/-/tree/master?ref_type=heads) package.
 ![image](https://github.com/user-attachments/assets/0aaaa76f-b4f8-459e-b8ec-1ddc08849693)
 
 # Installation
@@ -10,8 +10,9 @@ You can install SUS2-MLIP by running:
  make mlp  ## get bin/sus2mlip
  make libinterface ## get lib/libinterface.a for external tool e.g. LAMMPS and pysus2mlip
 ```
-# training datasets
-Like the original mlip-2 package, SUS2-MLIP reads material structures and their properties from `cfg` files.  
+# Format of Datasets
+Like the original MLIP-2 package, SUS2-MLIP reads material structures and their properties from `cfg` files.  
+  
 Format of `cfg` file: 
 ```bash
 BEGIN_CFG  
@@ -36,4 +37,29 @@ PlusStress:  xx          yy          zz          yz          xz          xy
         1.1012082011734257      -0.7401052299730059     0.2790165512621857      0.0012779654132595323   -0.0002538647260112984          -2.4887947553777763e-10
 
 ```
-The python scripts for format conversion between `cfg` to `ASE (https://wiki.fysik.dtu.dk/ase/index.html)` readable files `e.g. extxyz` can be found in `./python_tool/`
+The scripts for converting formats between `cfg` and `ase readable files (e.g. extxyz)` can be found in `./python_tool/`
+# Untrained Models
+**:red_circle: PLEASE NOTE :red_circle:**: Although the implementation of SUS2-MLIP is based on MLIP-2, there are significant and fundamental differences between the two. Consequently, the original models in `untrained_mtps/` cannot be utilized within the current framework.
+
+Format of `.mtp` files for SUS2-MLIP:
+```bash
+MTP
+version = 1.1.0
+potential_name = sus2mlip_l2k2
+scaling = 0.01
+L = 2
+scaling_map = LK
+species_count = 2
+potential_tag =
+radial_basis_type = RBChebyshev_sss
+        min_dist = 0.0
+        max_dist = 6.0
+        ...
+```
+There are two tags `L` and `scaling_map`.   
+`L` reffers to the max level of moment tensor.  (**DON'T CHANGE**)  
+`scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively.  
+![image](https://github.com/user-attachments/assets/c861a7df-2260-483e-bbb3-b562180ff94a)
+$\[
+r_{Ij,\eta}^{*}=\alpha_{Z_{I}Z_{j},\eta}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},\eta}\right)
+\]$
