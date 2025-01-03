@@ -59,7 +59,4 @@ radial_basis_type = RBChebyshev_sss
 There are two tags `L` and `scaling_map`.   
 `L` reffers to the max level of moment tensor.  (**DON'T CHANGE**)  
 `scaling_map = L or K or LK` corresponds to 𝜂=(𝐿,𝐾), 𝜂=𝐿 and 𝜂=𝐾 respectively.  
-![image](https://github.com/user-attachments/assets/c861a7df-2260-483e-bbb3-b562180ff94a)
-$\[
-r_{Ij,\eta}^{*}=\alpha_{Z_{I}Z_{j},\eta}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},\eta}\right)
-\]$
+$r_{Ij,{\color{red}\eta}}^{*}=\alpha_{Z_{I}Z_{j},{\color{red}\eta}}\left(r_{Ij}-r_{0}^{Z_{I}Z_{j},{\color{red}\eta}}\right)$
