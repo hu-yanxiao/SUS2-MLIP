@@ -107,12 +107,12 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	double weight_energy = 1.0;
 	if (opts["energy-weight"] != "")
 		weight_energy = stod(opts["energy-weight"]);
-        double weight_std = 0.2;
+        double weight_std = 0.0;
                 if(opts["std-weight"] != "")
                         weight_std = stod(opts["std-weight"]);
         
 
-        double weight_stdd = 0.0001;
+        double weight_stdd = 0.0000;
                 if(opts["stdd-weight"] != "")
                         weight_stdd = stod(opts["stdd-weight"]);
 
@@ -391,10 +391,10 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
   //              trainer.Train(training_set);
    //             if (prank == 0) {mtpr.Save("loop_4.mtp");}
 
-	//	if (prank == 0){
-	//		mtpr.Save(trained_fnm);
+		if (prank == 0){
+			mtpr.Save(trained_fnm);
      //                   mtpr.Save_2("unfixed1.mtp");
-    //                  }
+                      }
      //           Rescale(trainer, mtpr);
      //           if (prank==0){ mtpr.Save_2("unfixed2.mtp");
       //                 }
