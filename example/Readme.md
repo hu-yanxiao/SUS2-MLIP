@@ -1,1 +1,1 @@
-## traing a SUS2-MLIP model for Cu2Se
+## Traing a SUS2-MLIP model for Cu2Se
