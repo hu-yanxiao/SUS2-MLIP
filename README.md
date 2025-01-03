@@ -11,8 +11,8 @@ You can install SUS2-MLIP by running:
  make libinterface ## get lib/libinterface.a for external tool e.g. LAMMPS and pysus2mlip
 ```
 # training datasets
-Like the original mlip-2 package, SUS2-MLIP reads material structures and their properties from .cfg files.  
-Format of cfg file: 
+Like the original mlip-2 package, SUS2-MLIP reads material structures and their properties from `cfg` files.  
+Format of `cfg` file: 
 ```bash
 BEGIN_CFG  
  Size  
@@ -27,5 +27,13 @@ AtomData:  id type       cartes_x      cartes_y      cartes_z     fx          fy
       3      0    10.891125     3.809912     3.110115    -0.009924    -0.001443     0.000004  
       4      0    10.891125    12.489910     3.110114    -0.009924    -0.001443     0.000004  
                                               ...
+    190      2     8.206723     9.099676     3.110114     0.016692     0.018104    -0.000001
+    191      2    16.599205     0.419678     3.110116     0.016692     0.018104    -0.000001
+    192      2    16.599205     9.099676     3.110116     0.016692     0.018104    -0.000001
+Energy
+        -165049.45992
+PlusStress:  xx          yy          zz          yz          xz          xy
+        1.1012082011734257      -0.7401052299730059     0.2790165512621857      0.0012779654132595323   -0.0002538647260112984          -2.4887947553777763e-10
 
 ```
+The python scripts for format conversion between `cfg` to `ASE (https://wiki.fysik.dtu.dk/ase/index.html)` readable files `e.g. extxyz` can be found in `./python_tool/`
