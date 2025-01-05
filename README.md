@@ -64,7 +64,7 @@ There are two new hyperparameters `L` and `scaling_map`.
   
 
 
-At `untrained_sus2mlip/`, we prepared 6 sets of untrained basis corresponding to `L∈{2,3} & k∈{2,3}`. In both model, the interactions are considered up to the 5-body. Further details regarding the scalar basis in each model are provided in the table below.
+At `untrained_sus2mlip/`, we prepared 6 sets of untrained basis corresponding to `L∈{2,3} & k∈{1,3}`. In both model, the interactions are considered up to the 5-body. Further details regarding the scalar basis in each model are provided in the table below.
 ![QQ_1735905101839](https://github.com/user-attachments/assets/c2c17d17-81ab-4d2d-ab61-8eb3f0e9d882)  
 
 More technical details about unvirsal scaling and super-linear radial function can be found in our paper: 
