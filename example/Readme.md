@@ -7,3 +7,7 @@ Run following command to train the SUS2-MLIP model:
 ```bash
 mpirun -n 24 ../bin/mlp-sus2 train untrained.mtp trainset.cfg
 ```
+Evaluate the model：
+```bash
+../bin/mlp-sus2 calc-errors fitted.mtp valid.cfg
+```
