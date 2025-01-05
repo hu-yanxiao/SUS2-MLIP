@@ -5,7 +5,7 @@
 
 Run following command to train the SUS2-MLIP model:
 ```bash
-mpirun -n 24 ../bin/mlp-sus2 train untrained.mtp trainset.cfg
+mpirun -n 24 ../bin/mlp-sus2 train untrained.mtp trainset.cfg --trained-pot-name=fitted.mtp
 ```
 Evaluate the model：
 ```bash
