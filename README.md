@@ -39,7 +39,7 @@ PlusStress:  xx          yy          zz          yz          xz          xy
 ```
 The scripts for converting formats between `cfg` and `ase readable files (e.g. extxyz)` can be found in `./python_tool/`
 # Untrained Models
-**:red_circle: PLEASE NOTE :red_circle:**: Although the implementation of SUS2-MLIP is based on MLIP package, there are significant and fundamental differences between the two. Consequently, the original models in `untrained_mtps/` cannot be utilized within the current framework.
+**:red_circle: PLEASE NOTE :red_circle:**: While the implementation of SUS2-MLIP is built upon the MLIP package, there are notable and fundamental differences between them. As a result, the  models in the `untrained_mtps/` folder cannot be used within our current framework.
 
 Format of `.mtp` files for SUS2-MLIP:
 ```bash
