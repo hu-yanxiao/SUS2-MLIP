@@ -71,7 +71,7 @@ More technical details about unvirsal scaling and super-linear radial function c
 > Super-Linear Machine Learning Interatomic Potentials with Physics-Informed Universal Scaling and Ultra-Small Parameterization https://doi.org/xxxx
 
 # Usage
-SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, highly similar to `mlp` of MLIP. See the [user manual of MLIP](https://gitlab.com/ashapeev/mlip-2/-/blob/master/doc/manual/manual.pdf?ref_type=heads) for details. **The following are some frequently used commands:**  
+SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, similar to `mlp` of MLIP. See the [user manual of MLIP](https://gitlab.com/ashapeev/mlip-2/-/blob/master/doc/manual/manual.pdf?ref_type=heads) for details. **The following are some frequently used commands:**  
 * **Basic model training**  
 To train a model, you should run `mlp-sus2 train` with prepared dataset `trainset.cfg`, untrained model `untrained_sus2mlip` and training options:
 ```bash
