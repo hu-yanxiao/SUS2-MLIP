@@ -412,7 +412,7 @@ void MLMTPR::CalcDescriptors(Configuration& cfg, ofstream& ofs)
 //	    << " pbc 1 1 1 " << "alpha_scalar_moments " << alpha_scalar_moments << endl;
 	for (int ind = 0; ind < cfg.size(); ind++) {
 		Neighborhood& nbh = neighborhoods[ind];
-		CalcBasisFuncsDers(nbh);
+		CalcBasisFuncs(nbh, basis_vals);
 
 		ofs << nbh.my_type;
 //		ofs << '\t' << cfg.pos(ind, 0)
@@ -436,7 +436,42 @@ void MLMTPR::CalcDescriptors(Configuration& cfg, ofstream& ofs)
 	}
 }
 
+void MLMTPR::CalcpartialE(Configuration& cfg, ofstream& ofs)
+{
+	int n = alpha_count + species_count - 1;
 
+	Neighborhoods neighborhoods(cfg,p_RadialBasis->max_dist);
+        ofs << "#start  ";
+	ofs << cfg.size() << endl;
+//	ofs <<  "cell_vec1 " << cfg.lattice[0][0] << " " << cfg.lattice[0][1] << " " << cfg.lattice[0][2]
+//	    << " cell_vec2 " << cfg.lattice[1][0] << " " << cfg.lattice[1][1] << " " << cfg.lattice[1][2]
+//	    << " cell_vec3 " << cfg.lattice[2][0] << " " << cfg.lattice[2][1] << " " << cfg.lattice[2][2]
+//	    << " pbc 1 1 1 " << "alpha_scalar_moments " << alpha_scalar_moments << endl;
+	for (int ind = 0; ind < cfg.size(); ind++) {
+		Neighborhood& nbh = neighborhoods[ind];
+		CalcBasisFuncs(nbh, basis_vals);
+
+		ofs << nbh.my_type;
+//		ofs << '\t' << cfg.pos(ind, 0)
+//		    << '\t' << cfg.pos(ind, 1)
+//		    << '\t' << cfg.pos(ind, 2);
+		for (int i = 0; i < alpha_scalar_moments; i++) {
+			ofs << '\t' << linear_coeffs[1 + i]*basis_vals[1 + i] ;
+		}
+//		ofs << '\t' << nbh.count;
+//		for (int i = 0; i < alpha_scalar_moments; i++) {
+//			for (int j = 0; j < nbh.count; j++) {
+//				ofs << '\t' << basis_ders(1 + i, j, 0) / linear_coeffs[1 + i]
+//				    << '\t' << basis_ders(1 + i, j, 1) / linear_coeffs[1 + i]
+//				    << '\t' << basis_ders(1 + i, j, 2) / linear_coeffs[1 + i];
+//			}
+//		}
+		ofs << endl;
+
+		if (nbh.my_type>=species_count)
+			throw MlipException("Too few species count in the MTP potential!");
+	}
+}
 
 
 
