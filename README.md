@@ -129,3 +129,8 @@ Note that we'll not be able to answer all of your questions.
 As a rule, we are supporting only the documented functionality of MLIP.
 If you think you found a bug or an inconsistency in the documentation or usage examples,
 please create a Gitlab.com issue.
+
+-----------------------------------------------
+## Copyright
+- MLIP：Copyright (c) 2023, Alexander Shapeev (Skoltech)（[BSD 2-Clause License](LICENSE)）。
+- SUS2-MLIP：Copyright (c) 2024, Yanxiao Hu.
