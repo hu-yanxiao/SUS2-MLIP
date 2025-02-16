@@ -132,5 +132,5 @@ please create a Gitlab.com issue.
 
 -----------------------------------------------
 ## Copyright
-- MLIP：Copyright (c) 2023, Alexander Shapeev (Skoltech)（[BSD 2-Clause License](LICENSE)）。
+- MLIP：Copyright (c) 2023, Alexander Shapeev (Skoltech)([BSD 2-Clause License](LICENSE)).
 - SUS2-MLIP：Copyright (c) 2024, Yanxiao Hu.
