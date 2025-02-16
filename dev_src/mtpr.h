@@ -87,7 +87,7 @@ public:
 
 	~MLMTPR();
         void CalcDescriptors(Configuration& cfg, std::ofstream &ofs);
-        void CalcpartialE(Configuration& cfg, ofstream& ofs);
+        void CalcpartialE(Configuration& cfg, std::ofstream &ofs);
 	void ReadMTPBasis(std::ifstream& ifs);		// Read MTP basis from file	
 	void WriteMTPBasis(std::ofstream& ofs);		// Write MTP basis for file
 
