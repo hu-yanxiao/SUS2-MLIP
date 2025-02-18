@@ -54,7 +54,7 @@ void NonLinearRegression::AddLoss(const Configuration & orig)
 	for (int i = 0; i < type_mean.size(); i++) 
 	{
                if (type_num.count(i)>0){
-		_stdd_ += (type_mean[i] - mean_) * (type_mean[i] - mean_) ;
+		_stdd_ += (type_mean[i] - p_mlip->mu_[i]) * (type_mean[i] - p_mlip->mu_[i]) ;
                  }
 	}
         for (int i = 0; i < cfg.size(); i++)
@@ -182,7 +182,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig)
 	{
 	//	_std_ += 20*(cfg.cal_se[i] - mean_) * (cfg.cal_se[i] - mean_) / orig.size() / (20 + orig.force(i).NormSq());
 	        if (type_num.count(i)>0){
-		_stdd_ += (type_mean[i] - mean_) * (type_mean[i] - mean_) ;
+		_stdd_ += (type_mean[i] - p_mlip->mu_[i]) * (type_mean[i] - p_mlip->mu_[i]) ;
                 }
                 //dLdE_i[i] = scaling*2*(cfg.cal_se[i] - mean_) * 20 / orig.size() / (20 + orig.force(i).NormSq());
 	}
@@ -252,7 +252,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig)
 	for (int i = 0; i < cfg.size(); i++)
 	{
 		dLdE_i[i] += dLdE+ std_scaling * 2 * ((cfg.cal_se[i] - type_mean[cfg.type(i)]) * 200 / (200 + orig.force(i).NormSq()) /  orig.size() - 1.0 * type_joint[cfg.type(i)])+
-                                stdd_scaling*2*(type_mean[cfg.type(i)] - mean_) /type_num[cfg.type(i)];
+                                stdd_scaling*2*(type_mean[cfg.type(i)] - p_mlip->mu_[cfg.type(i)]) /type_num[cfg.type(i)];
 		//dLdE_i[i] += dLdE + std_scaling * 2 * ((cfg.cal_se[i] - type_mean[cfg.type(i)])  / orig.size()- 0.0 * type_joint[cfg.type(i)]);
 	}
 	loss_ += std_scaling * _std_+ stdd_scaling *  _stdd_;
