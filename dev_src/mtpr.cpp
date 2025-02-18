@@ -171,6 +171,19 @@ void MLMTPR::Load(const string& filename)
 	inited = true;
         
         ifs >> tmpstr;
+	mu_.resize(species_count);
+        if (tmpstr != "mu_")
+        {
+             for (int i = 0; i <species_count; i++)
+               {mu_[i]=0;}
+        }
+        else
+        {ifs.ignore(4);
+
+                for (int i = 0; i < species_count; i++){
+                        ifs >> mu_[i] >> foo;}
+                        ifs >> tmpstr; }
+	
         if (tmpstr != "shift_coeffs")
         {
 
