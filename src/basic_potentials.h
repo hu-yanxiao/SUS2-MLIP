@@ -20,7 +20,7 @@ public:
 	virtual void CalcEFS(Configuration& cfg) = 0;					// Calculates energy, forces and stresses for cfg
 	virtual void CalcE(Configuration& cfg) {	CalcEFS(cfg);	};	// Calculates energy for cfg
 	virtual ~AnyPotential() {};
-
+	std::vector<double> mu_;
 	// Cheks forces and stresses to be energy derivative by finite differences. Returns true if deviation between FD-calculated and exact force is less than control_delta, 
 	bool CheckEFSConsistency_debug(	Configuration cfg,				// checks whether f = -dE/dx and stress = Lattice^(-T) * dE/d(Lattice) by finite differences
 									double displacement=0.001,		// used in debug purposes
