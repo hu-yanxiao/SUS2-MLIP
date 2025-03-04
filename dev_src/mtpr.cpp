@@ -451,12 +451,12 @@ void MLMTPR::CalcpartialE(Configuration& cfg, ofstream& ofs)
 		Neighborhood& nbh = neighborhoods[ind];
 		CalcBasisFuncs(nbh, basis_vals);
 
-		ofs << nbh.my_type;
+		ofs << regression_coeffs[nbh.my_type]+ linear_coeffs[nbh.my_type];
 //		ofs << '\t' << cfg.pos(ind, 0)
 //		    << '\t' << cfg.pos(ind, 1)
 //		    << '\t' << cfg.pos(ind, 2);
 		for (int i = 0; i < alpha_scalar_moments; i++) {
-			ofs << '\t' << linear_coeffs[1 + i]*basis_vals[1 + i] ;
+			ofs << '\t' << linear_coeffs[species_count + i]*basis_vals[1 + i]*linear_coeffs[nbh.my_type] ;
 		}
 //		ofs << '\t' << nbh.count;
 //		for (int i = 0; i < alpha_scalar_moments; i++) {
