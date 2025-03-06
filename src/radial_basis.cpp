@@ -432,13 +432,15 @@ void RadialBasis_Chebyshev_sss_lmp::RB_Calc(double r, double scal, double s)
 double ksi = tanh(scal*(r-s)/2);
 double der = 1/cosh(scal*(r-s)/2)/cosh(scal*(r-s)/2);
 double mult = der*scal/2;
+	
+
 //double mult_scal_r = 2 * (-scal * (r - s) + 2 * scal * (r - s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) + 1) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
 //double mult_s_r = 2 * scal * scal * (1 - 2 * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
 //double mult_scal = -2 * (-r + s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
 //double mult_s= -2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
         
 rb_vals[0] = scaling * (1 * (r - max_dist) * (r - max_dist));
-rb_ders[0] = 0;
+rb_ders[0] = scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
 //rb_ders[0 + rb_size * 1] = scaling * 0;
 //rb_ders[0 + rb_size * 2] = scaling * 0;
 //rb_ders[0 + rb_size * 3] = scaling * 0;
