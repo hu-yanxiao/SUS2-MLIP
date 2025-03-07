@@ -89,8 +89,8 @@ SUS2-MLIP models can be used in LAMMPS simulation via the interface [interface-l
 ## PySUS2
 PySUS2 is a comprehensive suite of tools and Python modules developed based on the SUS2-MLIP model, designed for atomistic simulations. It supports a range of functionalities including structure relaxation, phonon dispersion analysis, and lattice thermal conductivity calculations.  
 (in progress)
-## AEE-DAS
-AEE-DAS (Atomic Environment Encoding based Dual Adaptive Sampling) is a Python tool designed to facilitate active learning in SUS2-MLIP modeling. It also helps with the integration and optimization of the database, making it easier for researchers and developers to work with.  
+## CSO-AES
+[CSO-AES](https://github.com/hu-yanxiao/CSO-AES/tree/main) (Covering Set Optimization driven Atomic Environment Sampling) is a Python tool designed to facilitate active learning in SUS2-MLIP modeling. It also helps with the integration and optimization of the database, making it easier for researchers and developers to work with.  
 (in progress)
 
 ———————————————————about MLIP——————————————— 
