@@ -165,6 +165,81 @@ void MLIP_calc_cfg(	int n,			// input parameter: number of atoms
 			stresses[foo++] += comm_conf.stresses[a][b];
 }
 
+void MLIP_calc_nbh_(int ii,           // input parameter: number of neighborhoods
+                   int* ilist,         // input parameter: 
+                   int* numneigh,      // input parameter: number of neighbors in each neighborhood (inum integer numbers)
+                   int** firstneigh,   // input parameter: pointer to the first neighbor
+                   int n_local_atoms,  // input parameter: number of local atoms
+                   int n_ghost_atoms,  // input parameter: number of ghost atoms
+                   double** x,         // input parameter: array of coordinates of atoms
+                   int* types,         // input parameter: array of atom types (inum of integer numbers)
+                   double** f,                    // output parameter: forces on atoms (cartesian, n x 3 double numbers)
+                   double& en,                    // output parameter: summ of site energies 
+                  // double* site_en=nullptr,       // output parameter: array of site energies (inum double numbers). if =nullptr while call no site energy calculation is done
+                   double* p_site_energy_ders,
+                   double* dij,
+                   int num_j,
+                   int* j_list,
+                   double* site_en=nullptr
+                   )
+{
+Neighborhood nbh;
+                int i = ilist[ii];
+                double xtmp = x[i][0];
+                double ytmp = x[i][1];
+                double ztmp = x[i][2];
+                int* jlist = firstneigh[i];
+                int jnum = numneigh[i];
+
+                // 1. Construct neighborgood
+                nbh.count = 0;
+                nbh.my_type = types[i]-1;
+                nbh.types.clear();
+                nbh.inds.clear();
+                nbh.vecs.clear();
+                nbh.dists.clear();
+
+                for (int jj=0; jj<jnum; jj++)
+                {
+                        int j = jlist[jj];
+                        j &= NEIGHMASK;
+
+                        double delx = x[j][0] - xtmp;
+                        double dely = x[j][1] - ytmp;
+                        double delz = x[j][2] - ztmp;
+                        double r = sqrt(delx*delx + dely*dely + delz*delz);
+
+                        if (r < cutoff)
+                        {
+                                nbh.count++;
+                                nbh.inds.emplace_back(j);
+                                nbh.vecs.emplace_back(delx,dely,delz);
+                                nbh.dists.emplace_back(r);
+                                nbh.types.emplace_back(types[j]-1);
+                        }
+                }
+                j_list=&nbh.inds[0];
+                num_j=nbh.count;
+                // 2. Calculate site energy and their derivatives
+                try
+                {
+                        p_mlip->CalcSiteEnergyDers(nbh);
+                }
+                catch (MlipException& excp)
+                {
+                        Message(excp.What());
+                        exit(9993);
+                }
+                 p_site_energy_ders = &p_mlip->buff_site_energy_ders_[0][0];
+                 dij=&nbh.vecs[0][0];
+                en += p_mlip->buff_site_energy_;
+                if (site_en != nullptr)
+                        site_en[i] = p_mlip->buff_site_energy_;
+
+
+}
+
+
 void MLIP_calc_nbh(int inum,           // input parameter: number of neighborhoods
                    int* ilist,         // input parameter: 
                    int* numneigh,      // input parameter: number of neighbors in each neighborhood (inum integer numbers)
