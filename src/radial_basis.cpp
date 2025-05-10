@@ -320,15 +320,15 @@ void RadialBasis_Chebyshev_ssss::RB_Calc(double r, double scal, double s)
         }
 #endif
 //double ksi = -1 + 2 / (1 + exp(-scal * (r - s)));
-double logr= log(r+1);
+double logr= log(r);
 double ksi = tanh(scal*(logr-s)/2);
 double der = 1/cosh(scal*(logr-s)/2)/cosh(scal*(logr-s)/2);
 double dder = -2*ksi*der;
 //double mult= 2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
-double mult = der*scal/2/(r+1);
+double mult = der*scal/2/r;
 //double mult_scal_r = 2 * (-scal * (r - s) + 2 * scal * (r - s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) + 1) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-double mult_s_r=-dder*scal*scal/4/(r+1);
-double mult_scal_r = der/2/(r+1)+dder*(logr-s)*scal/4/(r+1);
+double mult_s_r=-dder*scal*scal/4/r;
+double mult_scal_r = der/2/r+dder*(logr-s)*scal/4/r;
 //double mult_s_r = 2 * scal * scal * (1 - 2 * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
 //double mult_s_r=-dder*r*scal/4 ;
 //double mult_scal = -2 * (-r + s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
