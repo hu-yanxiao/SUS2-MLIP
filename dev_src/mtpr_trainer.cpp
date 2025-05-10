@@ -674,7 +674,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 				loss_prev = bfgs_f;
 				//logstrm1 << "BFGS iter " << num_step << ": f=" << bfgs_f << "\t joint_std^2:" << std_l/std_scaling <<  "\t center_std^2:"  << stdd_l/stdd_scaling << "\t" << mean_1_l << "\t" << mean_2_l << "\t" << mean_3_l << "\t efs:" << bfgs_f - std_l - stdd_l <<endl;
-				logstrm1 << "BFGS iter " << std::setw(6) << num_step << ": f=" << std::fixed << std::setprecision(6) << std::right << bfgs_f << "  joint_std^2:" << std_l/std_scaling <<      "  center_std^2:"  << stdd_l/stdd_scaling << "\t" << std::fixed << std::setprecision(3) << std::right << mean_1_l << "  " << std::fixed << std::setprecision(3) << std::right << mean_2_l << "  " << std::    fixed << std::setprecision(3) << std::right << mean_3_l << "\t efs:" << std::fixed << std::setprecision(3) << std::right << bfgs_f - std_l - stdd_l <<endl;
+				logstrm1 << "BFGS iter " << std::setw(6) << num_step << ": f=" << std::fixed << std::setprecision(6) << std::right << bfgs_f << "  joint_std^2:" << std_l/std_scaling <<      "  center_std^2:"  << stdd_l/stdd_scaling << "\t" << std::fixed << std::setprecision(3) << std::right << mean_1_l << "  " << std::fixed << std::setprecision(3) << std::right << mean_2_l << "  " << std::    fixed << std::setprecision(3) << std::right << mean_3_l << "\t efs:" << std::fixed << std::setprecision(6) << std::right << bfgs_f - std_l - stdd_l <<endl;
 				MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
 
 				//cout << num_step << " " << bfgs_f << endl;
