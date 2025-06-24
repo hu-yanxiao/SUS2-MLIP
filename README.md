@@ -68,7 +68,7 @@ At `untrained_sus2mlip/`, we prepared 6 sets of untrained basis corresponding to
 ![QQ_1735905101839](https://github.com/user-attachments/assets/c2c17d17-81ab-4d2d-ab61-8eb3f0e9d882)  
 
 More technical details about unvirsal scaling and super-linear radial function can be found in our paper: 
-> Super-Linear Machine Learning Interatomic Potentials with Physics-Informed Universal Scaling and Ultra-Small Parameterization https://doi.org/xxxx
+> Super-Linear Machine Learning Interatomic Potentials with Physics-Informed Universal Scaling and Ultra-Small Parameterization [https://doi/10.1073/pnas.2503439122](https://www.pnas.org/doi/10.1073/pnas.2503439122)
 
 # Usage
 SUS2-MLIP models are trained and evaluated using `mlp-sus2` command, similar to `mlp` of MLIP. See the [user manual of MLIP](https://gitlab.com/ashapeev/mlip-2/-/blob/master/doc/manual/manual.pdf?ref_type=heads) for details. **The following are some frequently used commands:**  
