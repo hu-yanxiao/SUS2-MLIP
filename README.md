@@ -99,9 +99,8 @@ PySUS2 is a comprehensive suite of tools and Python modules developed based on t
 MLIP is a software for Machine Learning Interatomic Potentials.
 It has been developed at Skoltech (Moscow) by
 Alexander Shapeev, Evgeny Podryabinkin, Konstantin Gubaev, and Ivan Novikov
+———————————————————about MLIP——————————————— 
 
-## Licence
-See [LICENSE](LICENSE)
 -----------------------------------------------
 ## Copyright
 - MLIP：Copyright (c) 2023, Alexander Shapeev (Skoltech)([BSD 2-Clause License](LICENSE)).
