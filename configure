@@ -183,6 +183,7 @@ case "${blas}" in
         echo "LDFLAGS += -L${MKLROOT}/lib/${mkllib} -lmkl_rt ${linklib}" >> ${MKFILE}
         echo "CPPFLAGS += -I${MKLROOT}/include" >> ${MKFILE}
         echo "CXXFLAGS += -DMLIP_INTEL_MKL " >> ${MKFILE}
+		echo "CXXFLAGS += -O3 -xHost -ipo -no-prec-div -fp-model fast=2 -qoverride-limits -qopt-zmm-usage=high  -qopt-mem-layout-trans=3  -qopt-streaming-stores=auto -fimf-use-svml=true -std=c++11 -qopt-report=5" >> ${MKFILE}
         ;;
     openblas )
         echo "LDFLAGS += -L${blasroot}/lib -l:libopenblas.a ${linklib}" >> ${MKFILE}
