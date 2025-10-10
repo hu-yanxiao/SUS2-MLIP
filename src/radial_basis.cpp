@@ -284,7 +284,7 @@ RadialBasis_Shapeev::RadialBasis_Shapeev(std::ifstream & ifs)
 	InitShapeevRB();
 }
 
-void RadialBasis_Shapeev::RB_Calc(double r, double scal, double s)
+void RadialBasis_Shapeev::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
 	if (r < min_dist) {
@@ -307,7 +307,7 @@ void RadialBasis_Shapeev::RB_Calc(double r, double scal, double s)
 	}
 }
 
-void RadialBasis_Chebyshev_ssss::RB_Calc(double r, double scal, double s)
+void RadialBasis_Chebyshev_ssss::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
         if (r < min_dist) {
@@ -319,49 +319,95 @@ void RadialBasis_Chebyshev_ssss::RB_Calc(double r, double scal, double s)
                         ", min_dist = " + to_string(min_dist) + '\n');
         }
 #endif
-//double ksi = -1 + 2 / (1 + exp(-scal * (r - s)));
-double logr= log(r);
-double ksi = tanh(scal*(logr-s)/2);
-double der = 1/cosh(scal*(logr-s)/2)/cosh(scal*(logr-s)/2);
-double dder = -2*ksi*der;
-//double mult= 2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
-double mult = der*scal/2/r;
-//double mult_scal_r = 2 * (-scal * (r - s) + 2 * scal * (r - s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) + 1) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-double mult_s_r=-dder*scal*scal/4/r;
-double mult_scal_r = der/2/r+dder*(logr-s)*scal/4/r;
-//double mult_s_r = 2 * scal * scal * (1 - 2 * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-//double mult_s_r=-dder*r*scal/4 ;
-//double mult_scal = -2 * (-r + s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-double mult_scal = der *(logr-s)/2;
-//double mult_s= -2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
-double mult_s=-der*scal/2;
-        
-rb_vals[0] = scaling * (1 * (r - max_dist) * (r - max_dist));
-rb_ders[0] = scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
-rb_ders[0 + rb_size * 1] = scaling * 0;
-rb_ders[0 + rb_size * 2] = scaling * 0;
-rb_ders[0 + rb_size * 3] = scaling * 0;
-rb_ders[0 + rb_size * 4] = scaling * 0;
-rb_vals[1] = scaling * (ksi * (r - max_dist) * (r - max_dist));
-rb_ders[1] = scaling * (mult * (r - max_dist) * (r - max_dist) + 2 * ksi * (r - max_dist));
-rb_ders[1 + rb_size * 1] = scaling * mult_scal * (r - max_dist) * (r - max_dist);
-rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * (r - max_dist) * (r - max_dist) + 2 * mult_scal * (r - max_dist));
-rb_ders[1 + rb_size * 3] = scaling * mult_s * (r - max_dist) * (r - max_dist);
-rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * (r - max_dist) * (r - max_dist) + 2 * mult_s * (r - max_dist));
 
-        
+double x=scal*(r-s)*0.5;
+double expm= exp(-x);
+double expp= exp(x);
+double x_plus = 1+x;
+double ksi = -2*(exp((x_plus)*expm-1))+1;
+double der = 2*exp((-1+expm)*(x_plus))*x;
+double dder = -2*exp(-1-2*x+expm*(x_plus))*(expp*(-1+x)+x*x);
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
 
-         for (int i = 2; i < rb_size; i++) {
+
+double denom=x*x+1 ;
+double sq=sqrt(denom);
+double _ksi = x/sq;
+double _der = 1/(denom*sq);
+double _dder = -3*_ksi*_der/sq;
+double _mult = _der*scal/2;
+double _mult_s_r=-_dder*scal*scal/4;
+double _mult_scal_r = _der/2+_dder*x/2;
+double _mult_scal = _der *(r-s)/2;
+double _mult_s=-_mult;
+int shift=rb_size/2;
+
+
+
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+
+
+rb_vals[shift] = scaling * cutoff_f;
+rb_ders[shift] = 0;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[shift + rb_size * 1] = 0;//scaling * 0;
+rb_ders[shift + rb_size * 2] = 0;//scaling * 0;
+rb_ders[shift + rb_size * 3] = 0;//scaling * 0;
+rb_ders[shift + rb_size * 4] = 0;//scaling * 0;
+
+
+
+
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+rb_vals[1+shift] = scaling * (_ksi * cutoff_f);
+rb_ders[1+shift] = scaling * (_mult * cutoff_f + 2 * _ksi * Dr);
+rb_ders[1 +shift+ rb_size * 1] = scaling * _mult_scal * cutoff_f;
+rb_ders[1 + shift+rb_size * 2] = scaling * (_mult_scal_r * cutoff_f + 2 * _mult_scal * Dr);
+rb_ders[1 +shift +rb_size * 3] = scaling * _mult_s * cutoff_f;
+rb_ders[1 +shift +rb_size * 4] = scaling * (_mult_s_r * cutoff_f + 2 * _mult_s * Dr);
+
+
+
+
+         for (int i = 2; i < shift; i++) {
                 rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
                 rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
-				rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
-				rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
-				rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
-				rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+                                rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+                                rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+                                rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+                                rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+
+                rb_vals[i+shift] = 2 * _ksi*rb_vals[shift+i - 1] - rb_vals[shift+i - 2];
+                rb_ders[i+shift] = 2 * (_mult * rb_vals[i - 1+shift] + _ksi * rb_ders[i - 1+shift]) - rb_ders[i - 2+shift];
+                                rb_ders[i + rb_size+shift] = 2 * (_mult_scal * rb_vals[i - 1+shift] + _ksi * rb_ders[i - 1+ rb_size+shift]) - rb_ders[i - 2+ rb_size+shift];
+                                rb_ders[i + 2 * rb_size+shift] = 2 * (_mult_scal_r * rb_vals[i - 1+shift] + _mult * rb_ders[i - 1 + rb_size+shift] + _ksi * rb_ders[i - 1 + rb_size * 2+shift] + _mult_scal * rb_ders[i - 1+shift]) - rb_ders[i - 2 + rb_size * 2+shift];
+                                rb_ders[i + 3 * rb_size+shift] = 2 * (_mult_s * rb_vals[i - 1+shift] + _ksi * rb_ders[i + 3 * rb_size-1+shift])- rb_ders[i + 3 * rb_size-2+shift];
+                                rb_ders[i + 4 * rb_size+shift] = 2 * (_mult_s_r * rb_vals[i - 1+shift] +_mult* rb_ders[i + 3 * rb_size - 1+shift] +_ksi * rb_ders[i + 4 * rb_size - 1+shift] + _mult_s* rb_ders[i - 1+shift]) - rb_ders[i + 4 * rb_size - 2+shift];
+
         }
 	}
 
-void RadialBasis_Chebyshev_sss::RB_Calc(double r, double scal, double s)
+
+
+
+void RadialBasis_Chebyshev_sssss::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
         if (r < min_dist) {
@@ -373,34 +419,347 @@ void RadialBasis_Chebyshev_sss::RB_Calc(double r, double scal, double s)
                         ", min_dist = " + to_string(min_dist) + '\n');
         }
 #endif
-//double ksi = -1 + 2 / (1 + exp(-scal * (r - s)));
-double ksi = tanh(scal*(r-s)/2);
-double der = 1/cosh(scal*(r-s)/2)/cosh(scal*(r-s)/2);
-double dder = -2*ksi*der;
-//double mult= 2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
+
+double x=scal*(r-s)*0.5 ;
+double denom=x*x+1 ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = 1/(denom*sq);
+double dder = -3*ksi*der/sq;
 double mult = der*scal/2;
-//double mult_scal_r = 2 * (-scal * (r - s) + 2 * scal * (r - s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) + 1) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+
+
+
+double _ksi = 2*ksi*ksi-1;
+double _der = 4*ksi*der;
+double _dder = 4*(der*der+ksi*dder);
+double _mult = _der*scal/2;
+double _mult_s_r=-_dder*scal*scal/4;
+double _mult_scal_r = _der/2+_dder*x/2;
+double _mult_scal = _der *(r-s)/2;
+double _mult_s=-_mult;
+
+
+double __ksi = ksi*ksi*ksi;
+double __der = 0.75*ksi*_der;
+double __dder = 6*ksi*der*der+3*ksi*ksi*dder;
+double __mult = __der*scal/2;
+double __mult_s_r=-__dder*scal*scal/4;
+double __mult_scal_r = __der/2+__dder*x/2;
+double __mult_scal = __der *(r-s)/2;
+double __mult_s=-__mult;
+
+
+
+
+int shift=rb_size/3;
+int shift_ = 2*shift;
+
+
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+
+
+rb_vals[shift] = scaling * cutoff_f;
+rb_ders[shift] = 0;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[shift + rb_size * 1] = 0;//scaling * 0;
+rb_ders[shift + rb_size * 2] = 0;//scaling * 0;
+rb_ders[shift + rb_size * 3] = 0;//scaling * 0;
+rb_ders[shift + rb_size * 4] = 0;//scaling * 0;
+
+
+rb_vals[shift_] = scaling * cutoff_f;
+rb_ders[shift_] = 0;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[shift_ + rb_size * 1] = 0;//scaling * 0;
+rb_ders[shift_ + rb_size * 2] = 0;//scaling * 0;
+rb_ders[shift_ + rb_size * 3] = 0;//scaling * 0;
+rb_ders[shift_ + rb_size * 4] = 0;//scaling * 0;
+
+
+
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+rb_vals[1+shift] = scaling * (_ksi * cutoff_f);
+rb_ders[1+shift] = scaling * (_mult * cutoff_f + 2 * _ksi * Dr);
+rb_ders[1 +shift+ rb_size * 1] = scaling * _mult_scal * cutoff_f;
+rb_ders[1 + shift+rb_size * 2] = scaling * (_mult_scal_r * cutoff_f + 2 * _mult_scal * Dr);
+rb_ders[1 +shift +rb_size * 3] = scaling * _mult_s * cutoff_f;
+rb_ders[1 +shift +rb_size * 4] = scaling * (_mult_s_r * cutoff_f + 2 * _mult_s * Dr);
+
+
+rb_vals[1+shift_] = scaling * (__ksi * cutoff_f);
+rb_ders[1+shift_] = scaling * (__mult * cutoff_f + 2 * __ksi * Dr);
+rb_ders[1 +shift_+ rb_size * 1] = scaling * __mult_scal * cutoff_f;
+rb_ders[1 + shift_+rb_size * 2] = scaling * (__mult_scal_r * cutoff_f + 2 * __mult_scal * Dr);
+rb_ders[1 +shift_ +rb_size * 3] = scaling * __mult_s * cutoff_f;
+rb_ders[1 +shift_ +rb_size * 4] = scaling * (__mult_s_r * cutoff_f + 2 * __mult_s * Dr);
+
+
+
+
+         for (int i = 2; i < shift; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+                                rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+                                rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+                                rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+
+                rb_vals[i+shift] = 2 * _ksi*rb_vals[shift+i - 1] - rb_vals[shift+i - 2];
+                rb_ders[i+shift] = 2 * (_mult * rb_vals[i - 1+shift] + _ksi * rb_ders[i - 1+shift]) - rb_ders[i - 2+shift];
+                                rb_ders[i + rb_size+shift] = 2 * (_mult_scal * rb_vals[i - 1+shift] + _ksi * rb_ders[i - 1+ rb_size+shift]) - rb_ders[i - 2+ rb_size+shift];
+                                rb_ders[i + 2 * rb_size+shift] = 2 * (_mult_scal_r * rb_vals[i - 1+shift] + _mult * rb_ders[i - 1 + rb_size+shift] + _ksi * rb_ders[i - 1 + rb_size * 2+shift] + _mult_scal * rb_ders[i - 1+shift]) - rb_ders[i - 2 + rb_size * 2+shift];
+                                rb_ders[i + 3 * rb_size+shift] = 2 * (_mult_s * rb_vals[i - 1+shift] + _ksi * rb_ders[i + 3 * rb_size-1+shift])- rb_ders[i + 3 * rb_size-2+shift];
+                                rb_ders[i + 4 * rb_size+shift] = 2 * (_mult_s_r * rb_vals[i - 1+shift] +_mult* rb_ders[i + 3 * rb_size - 1+shift] +_ksi * rb_ders[i + 4 * rb_size - 1+shift] + _mult_s* rb_ders[i - 1+shift]) - rb_ders[i + 4 * rb_size - 2+shift];
+
+                rb_vals[i+shift_] = 2 * __ksi*rb_vals[shift_+i - 1] - rb_vals[shift_+i - 2];
+                rb_ders[i+shift_] = 2 * (__mult * rb_vals[i - 1+shift_] + __ksi * rb_ders[i - 1+shift_]) - rb_ders[i - 2+shift_];
+                                rb_ders[i + rb_size+shift_] = 2 * (__mult_scal * rb_vals[i - 1+shift_] + __ksi * rb_ders[i - 1+ rb_size+shift_]) - rb_ders[i - 2+ rb_size+shift_];
+                                rb_ders[i + 2 * rb_size+shift_] = 2 * (__mult_scal_r * rb_vals[i - 1+shift_] + __mult * rb_ders[i - 1 + rb_size+shift_] + __ksi * rb_ders[i - 1 + rb_size * 2+shift_] + __mult_scal * rb_ders[i - 1+shift_]) - rb_ders[i - 2 + rb_size * 2+shift_];
+                                rb_ders[i + 3 * rb_size+shift_] = 2 * (__mult_s * rb_vals[i - 1+shift_] + __ksi * rb_ders[i + 3 * rb_size-1+shift_])- rb_ders[i + 3 * rb_size-2+shift_];
+                                rb_ders[i + 4 * rb_size+shift_] = 2 * (__mult_s_r * rb_vals[i - 1+shift_] +__mult* rb_ders[i + 3 * rb_size - 1+shift_] +__ksi * rb_ders[i + 4 * rb_size - 1+shift_] + __mult_s* rb_ders[i - 1+shift_]) - rb_ders[i + 4 * rb_size - 2+shift_];
+        }
+	}
+
+
+
+
+
+void RadialBasis_Bessel_sss::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');}
+#endif
+//int sigma = k%4;
+double x=scal*(r-s)/2 ;
+double ksi = tanh(x);
+double der = 1-ksi*ksi;
+double dder = -2*ksi*der;
+double mult = der*scal/2;
 double mult_s_r=-dder*scal*scal/4;
 double mult_scal_r = der/2+dder*(r-s)*scal/4;
-//double mult_s_r = 2 * scal * scal * (1 - 2 * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-//double mult_s_r=-dder*r*scal/4 ;
-//double mult_scal = -2 * (-r + s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
 double mult_scal = der *(r-s)/2;
-//double mult_s= -2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
 double mult_s=-mult;
-        
-rb_vals[0] = scaling * (1 * (r - max_dist) * (r - max_dist));
-rb_ders[0] = scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
-rb_ders[0 + rb_size * 1] = scaling * 0;
-rb_ders[0 + rb_size * 2] = scaling * 0;
-rb_ders[0 + rb_size * 3] = scaling * 0;
-rb_ders[0 + rb_size * 4] = scaling * 0;
-rb_vals[1] = scaling * (ksi * (r - max_dist) * (r - max_dist));
-rb_ders[1] = scaling * (mult * (r - max_dist) * (r - max_dist) + 2 * ksi * (r - max_dist));
-rb_ders[1 + rb_size * 1] = scaling * mult_scal * (r - max_dist) * (r - max_dist);
-rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * (r - max_dist) * (r - max_dist) + 2 * mult_scal * (r - max_dist));
-rb_ders[1 + rb_size * 3] = scaling * mult_s * (r - max_dist) * (r - max_dist);
-rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * (r - max_dist) * (r - max_dist) + 2 * mult_s * (r - max_dist));
+//double Dr=r-max_dist;
+double Dr=r/max_dist-1;
+double p=6;
+double cutoff_f = 1-(p+1)*(p+2)*pow(Dr,p)*0.5+p*(p+2)*pow(Dr,p+1)-(p+1)*p*pow(Dr,p+2)*0.5 ;
+double cutoff_der = p*(p+1)*(p+2)*(pow(Dr,p)-0.5*(pow(Dr,p+1)+pow(Dr,p-1)))/max_dist ;
+//double cutoff_f=Dr * Dr;
+double PI=3.141592654 ;
+double temp=ksi+1.00001;
+
+
+for (int i = 0; i < rb_size; i++) {
+double N=i+1;
+double w=PI*N/2 ;
+double sin_=sin(w*temp);
+double cos_=cos(w*temp);
+double bessel=sin_/temp;
+double bessel_der=w*cos_/temp-sin_/temp/temp;
+double bessel_ddr=-(w*w*sin_/temp)-2*w*cos_/temp/temp+2*sin_/temp/temp/temp;
+rb_vals[i]=scaling*bessel*cutoff_f;
+rb_ders[i]=scaling*(bessel_der*mult*cutoff_f+bessel*cutoff_der);
+rb_ders[i+rb_size * 1] = scaling * bessel_der * mult_scal * cutoff_f;
+rb_ders[i+rb_size * 2] = scaling * (bessel_ddr* mult*mult_scal * cutoff_f +  bessel_der * mult_scal_r * cutoff_f
++cutoff_der*bessel_der * mult_scal);
+rb_ders[i+rb_size * 3] = scaling * bessel_der * mult_s * cutoff_f;
+rb_ders[i+rb_size * 4] = scaling * (bessel_ddr* mult*mult_s * cutoff_f +  bessel_der * mult_s_r * cutoff_f
++cutoff_der*bessel_der * mult_s);
+}
+
+
+
+}
+
+
+
+
+void RadialBasis_Bessel_sssw::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+                        }
+#endif
+//int sigma = k%4;
+double w=(1+k)*0.1;
+double x=scal*(r-s)/2 ;
+double ksi = tanh(w*x);
+double der = (1-ksi*ksi)*w;
+double dder = -2*ksi*der*w;
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*(r-s)*scal/4;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+//double Dr=r-max_dist;
+double Dr=r/max_dist-1;
+double p=6;
+double cutoff_f = 1-(p+1)*(p+2)*pow(Dr,p)*0.5+p*(p+2)*pow(Dr,p+1)-(p+1)*p*pow(Dr,p+2)*0.5 ;
+double cutoff_der = p*(p+1)*(p+2)*(pow(Dr,p)-0.5*(pow(Dr,p+1)+pow(Dr,p-1)))/max_dist ;
+//double cutoff_f=Dr * Dr;
+double PI=3.141592654 ;
+double temp=ksi+1.00001;
+
+
+for (int i = 0; i < rb_size; i++) {
+double N=i+1;
+double w=PI*N/2 ;
+double sin_=sin(w*temp);
+double cos_=cos(w*temp);
+double bessel=sin_/temp;
+double bessel_der=w*cos_/temp-sin_/temp/temp;
+double bessel_ddr=-(w*w*sin_/temp)-2*w*cos_/temp/temp+2*sin_/temp/temp/temp;
+rb_vals[i]=scaling*bessel*cutoff_f;
+rb_ders[i]=scaling*(bessel_der*mult*cutoff_f+bessel*cutoff_der);
+rb_ders[i+rb_size * 1] = scaling * bessel_der * mult_scal * cutoff_f;
+rb_ders[i+rb_size * 2] = scaling * (bessel_ddr* mult*mult_scal * cutoff_f +  bessel_der * mult_scal_r * cutoff_f
++cutoff_der*bessel_der * mult_scal);
+rb_ders[i+rb_size * 3] = scaling * bessel_der * mult_s * cutoff_f;
+rb_ders[i+rb_size * 4] = scaling * (bessel_ddr* mult*mult_s * cutoff_f +  bessel_der * mult_s_r * cutoff_f
++cutoff_der*bessel_der * mult_s);
+}
+
+
+
+}
+
+
+
+void RadialBasis_Chebyshev_Tri::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+double Pi=3.141592654 ;
+double x=scal*(r-s)*0.05*Pi;
+
+double cos_=cos(x);
+double sin_=sin(x);
+
+double ksi=sin_;
+double der=cos_;
+double dder= -1.0*ksi;
+//int n=k%2;
+//if (n==0){
+ //   ksi = cos_;
+ //   der = -1.0*sin_;
+//} else {
+  //  ksi = sin_;
+ //   der = cos_;
+//}
+//dder = -1.0*ksi;
+
+
+double mult = der*scal*0.05*Pi;
+double mult_s_r=-dder*scal*scal*0.0025*Pi*Pi;
+double mult_scal_r = der*0.05*Pi+dder*scal*0.0025*Pi*(r-s)*Pi;
+double mult_scal = der *(r-s)*0.05*Pi;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+				rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+				rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+				rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+				rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+}
+
+
+
+
+void RadialBasis_Chebyshev_sss::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+
+double x=scal*(r-s)/2 ;
+double ksi = tanh(x);
+double der = 1-ksi*ksi;
+double dder = -2*ksi*der;
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*(r-s)*scal/4;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
 
         
 
@@ -418,7 +777,11 @@ rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * (r - max_dist) * (r - max_dist)
 
 
 
-void RadialBasis_Chebyshev_sss_lmp::RB_Calc(double r, double scal, double s)
+
+
+const std::vector<double> RadialBasis_Chebyshev_sssw::arr = 
+    {1.0, 5.0/7.0, 9.0/7.0, 3.0/7.0, 11.0/7.0, 13.0/7.0};
+void RadialBasis_Chebyshev_sssw::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
         if (r < min_dist) {
@@ -430,49 +793,240 @@ void RadialBasis_Chebyshev_sss_lmp::RB_Calc(double r, double scal, double s)
                         ", min_dist = " + to_string(min_dist) + '\n');
         }
 #endif
-//double ksi = -1 + 2 / (1 + exp(-scal * (r - s)));
-//double mult= 2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
-double ksi = tanh(scal*(r-s)/2);
-double der = 1/cosh(scal*(r-s)/2)/cosh(scal*(r-s)/2);
-double mult = der*scal/2;
-	
 
-//double mult_scal_r = 2 * (-scal * (r - s) + 2 * scal * (r - s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) + 1) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-//double mult_s_r = 2 * scal * scal * (1 - 2 * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-//double mult_scal = -2 * (-r + s) * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s)))/ (1 + exp(-scal * (r - s)));
-//double mult_s= -2 * scal * exp(-scal * (r - s)) / (1 + exp(-scal * (r - s))) / (1 + exp(-scal * (r - s)));
-        
-rb_vals[0] = scaling * (1 * (r - max_dist) * (r - max_dist));
-rb_ders[0] = scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
-//rb_ders[0 + rb_size * 1] = scaling * 0;
-//rb_ders[0 + rb_size * 2] = scaling * 0;
-//rb_ders[0 + rb_size * 3] = scaling * 0;
-//rb_ders[0 + rb_size * 4] = scaling * 0;
-rb_vals[1] = scaling * (ksi * (r - max_dist) * (r - max_dist));
-rb_ders[1] = scaling * (mult * (r - max_dist) * (r - max_dist) + 2 * ksi * (r - max_dist));
-//rb_ders[1 + rb_size * 1] = scaling * mult_scal * (r - max_dist) * (r - max_dist);
-//rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * (r - max_dist) * (r - max_dist) + 2 * mult_scal * (r - max_dist));
-//rb_ders[1 + rb_size * 3] = scaling * mult_s * (r - max_dist) * (r - max_dist);
-//rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * (r - max_dist) * (r - max_dist) + 2 * mult_s * (r - max_dist));
+double x=scal*(r-s)/2 ;
+double tanh_ = tanh(x);
+double sech_ = 1-tanh_*tanh_;
+
+double w=arr[k];
+double ksi;
+double der ;
+double dder ;
+if (w==1.0) {ksi = tanh_;
+der = sech_;
+dder = -2*ksi*der;}
+else {ksi = pow(tanh_,w);
+der = w*pow(tanh_,w-1)*sech_;
+dder=w*sech_*pow(tanh_,w-2)*((w-1)-(w+1)*tanh_*tanh_);
+}
+
+
+
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*(r-s)*scal/4;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+				rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+				rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+				rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+				rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+void RadialBasis_Chebyshev_tanhexp::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+
+int sigma=k;
+
+double x=scal*(r-s)*0.5 ;
+double exp_=exp(-0.5559-x);
+double u=exp_+(k+1)*0.04;
+
+
+double tanh_u=tanh(u);
+double temp = 2*tanh_u-1;
+double ksi= 2*temp*temp - 1;
+double dydu=1-tanh_u*tanh_u;
+double dyddu=-2*tanh_u*dydu;
+double der= -8*temp*exp_*dydu;
+double dder= 8*(exp_*exp_*(2*dydu*dydu+temp*dyddu)+temp*dydu*exp_);
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*(r-s)*scal/4;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+				rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+				rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+				rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+				rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+}
+
+
+
+
+void RadialBasis_Chebyshev_tanhexp_w::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+
+int sigma=k%3;
+
+double x=scal*(r-s)*0.5 ;
+double exp_=exp(-0.5559-x);
+double u;
+
+if (sigma==0) {u=exp_+0.02;}
+else if (sigma==1) {u=exp_+0.15;}
+else if (sigma==2) {u=exp_+0.5;}
+
+double tanh_u=tanh(u);
+double temp = 2*tanh_u-1;
+double ksi= 2*temp*temp - 1;
+double dydu=1-tanh_u*tanh_u;
+double dyddu=-2*tanh_u*dydu;
+double der= -8*temp*exp_*dydu;
+double dder= 8*(exp_*exp_*(2*dydu*dydu+temp*dyddu)+temp*dydu*exp_);
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*(r-s)*scal/4;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+double w=1-ksi;
+double t1=ksi * cutoff_f;
+double t2=mult * cutoff_f + 2 * ksi * Dr;
+rb_vals[0] = scaling * cutoff_f*w;
+rb_ders[0] = (2*Dr*w-mult*cutoff_f)*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = -mult_scal*cutoff_f*scaling;//scaling * 0;
+rb_ders[0 + rb_size * 2] = -(2*Dr*mult_scal+mult_scal_r*cutoff_f)*scaling;//scaling * 0;
+rb_ders[0 + rb_size * 3] = -mult_s*cutoff_f*scaling;//scaling * 0;
+rb_ders[0 + rb_size * 4] = -(2*Dr*mult_s+mult_s_r*cutoff_f)*scaling;//scaling * 0;
+rb_vals[1] = scaling * t1*w;
+rb_ders[1] = scaling * (t2*w-mult*t1);
+rb_ders[1 + rb_size * 1] = scaling * (mult_scal * cutoff_f*w-mult_scal*t1);
+rb_ders[1 + rb_size * 2] = scaling * ((mult_scal_r * cutoff_f + 2 * mult_scal * Dr)*w-mult*(mult_scal * cutoff_f)-mult_scal_r*t1-mult_scal*t2);
+rb_ders[1 + rb_size * 3] = scaling * (mult_s * cutoff_f*w-mult_s*t1);
+rb_ders[1 + rb_size * 4] = scaling * ((mult_s_r * cutoff_f + 2 * mult_s * Dr)*w-mult*(mult_s * cutoff_f)-mult_s_r*t1-mult_s*t2);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+				rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+				rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+				rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+				rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+}
+
+
+
+void RadialBasis_Chebyshev_sss_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+double x= scal*(r-s)/2;
+double ksi = tanh(x);
+double der = 1-ksi*ksi;
+double mult = der*scal/2;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+
+rb_vals[0] = scaling *  cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
 
         
 
          for (int i = 2; i < rb_size; i++) {
                 rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
                 rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
-				//rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
-				//rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
-				//rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
-				//rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
-        }
+				        }
 
 }
 
 
 
 
-
-void RadialBasis_Chebyshev_s::RB_Calc(double r, double scal, double s)
+void RadialBasis_Chebyshev_sssw_lmp::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
         if (r < min_dist) {
@@ -484,29 +1038,147 @@ void RadialBasis_Chebyshev_s::RB_Calc(double r, double scal, double s)
                         ", min_dist = " + to_string(min_dist) + '\n');
         }
 #endif
-double ksi = 1-2*(exp(-scal*((r-min_dist)/(max_dist - min_dist)-1))-1)/(exp(scal)-1);
-double mult = 2*scal*exp(-scal*(-1 + (-min_dist + r)/(max_dist - min_dist)))/((max_dist - min_dist)*(exp(scal) - 1));
-double mult_scal = (-2 + 2*exp(-scal*(-1 + (-min_dist + r)/(max_dist - min_dist))))*exp(scal)/(exp(scal) - 1)/(exp(scal) - 1) - 2*(1 - (-min_dist + r)/(max_dist - min_dist))*exp(-scal*(-1 + (-min_dist + r)/(max_dist - min_dist)))/(exp(scal) - 1);
-double mult_scal_r = 2*(scal*(1 + (min_dist - r)/(max_dist - min_dist)) - scal*exp(scal)/(exp(scal) - 1) + 1)*exp(scal*(1 + (min_dist - r)/(max_dist - min_dist)))/((max_dist - min_dist)*(exp(scal) - 1));
-        rb_vals[0] = scaling * (1 * (ksi - 1)*(ksi - 1));
-        rb_ders[0] = scaling * (0 * (ksi - 1)*(ksi - 1) + 2 * (ksi - 1)*mult);
-		rb_ders[0 + rb_size] = scaling * 2 * (ksi - 1)*mult_scal;
-		rb_ders[0 + 2*rb_size] = scaling *2*((ksi-1)*mult_scal_r+mult_scal*mult) ;
-        rb_vals[1] = scaling * (ksi*(ksi - 1)*(ksi - 1));
-        rb_ders[1] = scaling * (mult * (3*ksi*ksi-4*ksi+1));
-		rb_ders[1 + rb_size] = scaling * (mult_scal * (3*ksi*ksi-4*ksi+1));
-		rb_ders[1 + 2*rb_size] = scaling *(mult_scal_r * (3*ksi*ksi-4*ksi+1)+ mult_scal*mult*(6*ksi-4)) ;
-        for (int i = 2; i < rb_size; i++) {
+
+double x=scal*(r-s)/2 ;
+double tanh_ = tanh(x);
+double sech_ = 1-tanh_*tanh_;
+
+int w=1+2*k;
+double ksi;
+double der ;
+
+if (w==1) {ksi = tanh_;
+der = sech_;
+}
+else {ksi = pow(tanh_,w);
+der = w*pow(tanh_,w-1)*sech_;
+
+}
+
+
+double mult = der*scal/2;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+
+rb_vals[0] = scaling *  cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
                 rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
                 rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
-				rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i + rb_size-1]) - rb_ders[i-2 + rb_size];
-				rb_ders[i + 2*rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] +mult* rb_ders[i + rb_size - 1] +ksi * rb_ders[i + rb_size*2 - 1] + mult_scal* rb_ders[i - 1]) - rb_ders[i + rb_size*2 - 2];
-
-        }
+				        }
 
 }
 
-void RadialBasis_Chebyshev_ss::RB_Calc(double r, double scal, double s)
+
+void RadialBasis_Chebyshev_s_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+
+double x=scal*(r-s)*0.5;
+double expm= exp(-x);
+double expp= exp(x);
+double x_plus = 1+x;
+double ksi = -2*(exp((x_plus)*expm-1))+1;
+double der = 2*exp((-1+expm)*(x_plus))*x;
+
+
+double mult = der*scal/2;
+
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+rb_vals[0] = scaling *  cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                        }
+
+}
+
+
+
+void RadialBasis_Chebyshev_s::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+#endif
+
+double x=scal*(r-s)*0.5;
+double expm= exp(-x);
+double expp= exp(x);
+double x_plus = 1+x;
+double ksi = -2*(exp((x_plus)*expm-1))+1;
+double der = 2*exp((-1+expm)*(x_plus))*x;
+             
+double dder = -2*exp(-1-2*x+expm*(x_plus))*(expp*(-1+x)+x*x);
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * (ksi * cutoff_f);
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+                                rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+                                rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+                                rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+
+}
+
+
+
+
+void RadialBasis_Chebyshev_ss_lmp::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
         if (r < min_dist) {
@@ -517,31 +1189,376 @@ void RadialBasis_Chebyshev_ss::RB_Calc(double r, double scal, double s)
                 ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
                         ", min_dist = " + to_string(min_dist) + '\n');
 #endif
-double ksi = 1-2*(exp(-scal*((r-min_dist)/(max_dist - min_dist)-1))-1)/(exp(scal)-1);
-double mult = 2*scal*exp(-scal*(-1 + (-min_dist + r)/(max_dist - min_dist)))/((max_dist - min_dist)*(exp(scal) - 1));
-double mult_scal = (-2 + 2*exp(-scal*(-1 + (-min_dist + r)/(max_dist - min_dist))))*exp(scal)/(exp(scal) - 1)/(exp(scal) - 1) - 2*(1 - (-min_dist + r)/(max_dist - min_dist))*exp(-scal*(-1 + (-min_dist + r)/(max_dist - min_dist)))/(exp(scal) - 1);
-double mult_scal_r = 2*(scal*(1 + (min_dist - r)/(max_dist - min_dist)) - scal*exp(scal)/(exp(scal) - 1) + 1)*exp(scal*(1 + (min_dist - r)/(max_dist - min_dist)))/((max_dist - min_dist)*(exp(scal) - 1));
-        rb_vals[0] = scaling * (1 * (r - max_dist)*(r - max_dist));
-		rb_ders[0] = scaling * (0 * (r - max_dist)*(r - max_dist) + 2 * (r - max_dist));
-		rb_ders[0 + rb_size*1] = scaling * 0;
-		rb_ders[0 + rb_size * 2] = scaling *0 ;
-        rb_vals[1] = scaling * (ksi*(r - max_dist)*(r - max_dist));
-        rb_ders[1] = scaling * (mult * (r - max_dist)*(r - max_dist) + 2 * ksi*(r - max_dist));
-		rb_ders[1 + rb_size * 1] = scaling * mult_scal * (r - max_dist)*(r - max_dist);
-		rb_ders[1 + rb_size * 2] = scaling *(mult_scal_r * (r - max_dist)*(r - max_dist)+2*mult_scal * (r - max_dist)) ;
-        for (int i = 2; i < rb_size; i++) {
-			rb_vals[i] = 2 * ksi * rb_vals[i - 1] - rb_vals[i - 2];
-			rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
-			rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i + rb_size - 1]) - rb_ders[i - 2 + rb_size];
-			rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i + rb_size - 1] + ksi * rb_ders[i + rb_size * 2 - 1] + mult_scal * rb_ders[i - 1]) - rb_ders[i + rb_size * 2 - 2];
+double x=scal*(r-s)/2 ;
+double denom=x*x+1 ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = 1/(denom*sq);
 
+double mult = der*scal/2;
+
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+
+rb_vals[1] = scaling * ksi * cutoff_f;
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                        }
+
+}
+
+
+
+void RadialBasis_Chebyshev_ssw_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+#endif
+double x=scal*(r-s)/2 ;
+double denom=x*x+exp(k-1) ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = exp(k-1)/(denom*sq);
+
+double mult = der*scal/2;
+
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+
+rb_vals[1] = scaling * ksi * cutoff_f;
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                        }
+
+}
+
+
+
+void RadialBasis_Chebyshev_sigma::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+#endif
+double x=scal*(r-s)*0.5 ;
+double ksi;
+double der;
+double dder;
+int sigma = k%3;
+if (sigma==0)
+{double denom=x*x+1 ;
+double sq=sqrt(denom);
+ksi = x/sq;
+der = 1/(denom*sq);
+dder = -3*ksi*der/sq;
+}
+else if (sigma==1)
+{
+double expm= exp(-x);
+double expp= exp(x);
+double x_plus = 1+x;
+ksi = -2*(exp((x_plus)*expm-1))+1;
+der = 2*exp((-1+expm)*(x_plus))*x;
+dder = -2*exp(-1-2*x+expm*(x_plus))*(expp*(-1+x)+x*x);
+}
+else if (sigma==2)
+{
+double exp_=exp(-0.5559-x);
+double u=exp_+0.02;
+double tanh_u=tanh(u);
+double temp = 2*tanh_u-1;
+ksi= 2*temp*temp - 1;
+double dydu=1-tanh_u*tanh_u;
+double dyddu=-2*tanh_u*dydu;
+der = -8*temp*exp_*dydu;
+dder = 8*(exp_*exp_*(2*dydu*dydu+temp*dyddu)+temp*dydu*exp_);
+}
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * ksi * cutoff_f;
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+                                rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+                                rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+                                rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
         }
 
 }
 
 
 
-void RadialBasis_Chebyshev::RB_Calc(double r, double scal, double s)
+
+void RadialBasis_Chebyshev_ss::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+#endif
+double x=scal*(r-s)/2 ;
+double denom=x*x+1 ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = 1/(denom*sq);
+double dder = -3*ksi*der/sq;
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * ksi * cutoff_f;
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+                                rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+                                rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+                                rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+}
+
+
+
+
+void RadialBasis_Chebyshev_ssw::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+#endif
+double x=scal*(r-s)/2 ;
+double denom=x*x+exp(k-1) ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = exp(k-1)/(denom*sq);
+double dder = -3*ksi*der/sq;
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+double Dr=r-max_dist;
+double cutoff_f=Dr * Dr;
+
+rb_vals[0] = scaling * cutoff_f;
+rb_ders[0] = 2*Dr*scaling;//scaling * (0 * (r - max_dist) * (r - max_dist) + 2 * (r - max_dist));
+rb_ders[0 + rb_size * 1] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 2] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 3] = 0;//scaling * 0;
+rb_ders[0 + rb_size * 4] = 0;//scaling * 0;
+rb_vals[1] = scaling * ksi * cutoff_f;
+rb_ders[1] = scaling * (mult * cutoff_f + 2 * ksi * Dr);
+rb_ders[1 + rb_size * 1] = scaling * mult_scal * cutoff_f;
+rb_ders[1 + rb_size * 2] = scaling * (mult_scal_r * cutoff_f + 2 * mult_scal * Dr);
+rb_ders[1 + rb_size * 3] = scaling * mult_s * cutoff_f;
+rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
+
+
+
+         for (int i = 2; i < rb_size; i++) {
+                rb_vals[i] = 2 * ksi*rb_vals[i - 1] - rb_vals[i - 2];
+                rb_ders[i] = 2 * (mult * rb_vals[i - 1] + ksi * rb_ders[i - 1]) - rb_ders[i - 2];
+                                rb_ders[i + rb_size] = 2 * (mult_scal * rb_vals[i - 1] + ksi * rb_ders[i - 1+ rb_size]) - rb_ders[i - 2+ rb_size];
+                                rb_ders[i + 2 * rb_size] = 2 * (mult_scal_r * rb_vals[i - 1] + mult * rb_ders[i - 1 + rb_size] + ksi * rb_ders[i - 1 + rb_size * 2] + mult_scal * rb_ders[i - 1]) - rb_ders[i - 2 + rb_size * 2];
+                                rb_ders[i + 3 * rb_size] = 2 * (mult_s * rb_vals[i - 1] + ksi * rb_ders[i + 3 * rb_size-1])- rb_ders[i + 3 * rb_size-2];
+                                rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
+        }
+
+}
+
+void RadialBasis_Besselw::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+#endif
+//int sigma = k%4;
+double x=scal*(r-s)/2 ;
+double denom=x*x+1+k ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = (1+k)/(denom*sq);
+double dder = -3*ksi*der/sq;
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+//double Dr=r-max_dist;
+double Dr=r/max_dist-1;
+double p=6;
+double cutoff_f = 1-(p+1)*(p+2)*pow(Dr,p)*0.5+p*(p+2)*pow(Dr,p+1)-(p+1)*p*pow(Dr,p+2)*0.5 ;
+double cutoff_der = p*(p+1)*(p+2)*(pow(Dr,p)-0.5*(pow(Dr,p+1)+pow(Dr,p-1)))/max_dist ;
+//double cutoff_f=Dr * Dr;
+double PI=3.141592654 ;
+double temp=ksi+1.00001;
+
+
+for (int i = 0; i < rb_size; i++) {
+double N=i+1;
+double w=PI*N/2 ;
+double sin_=sin(w*temp);
+double cos_=cos(w*temp);
+double bessel=sin_/temp;
+double bessel_der=w*cos_/temp-sin_/temp/temp;
+double bessel_ddr=-(w*w*sin_/temp)-2*w*cos_/temp/temp+2*sin_/temp/temp/temp;
+rb_vals[i]=scaling*bessel*cutoff_f;
+rb_ders[i]=scaling*(bessel_der*mult*cutoff_f+bessel*cutoff_der);
+rb_ders[i+rb_size * 1] = scaling * bessel_der * mult_scal * cutoff_f;
+rb_ders[i+rb_size * 2] = scaling * (bessel_ddr* mult*mult_scal * cutoff_f +  bessel_der * mult_scal_r * cutoff_f
++cutoff_der*bessel_der * mult_scal);
+rb_ders[i+rb_size * 3] = scaling * bessel_der * mult_s * cutoff_f;
+rb_ders[i+rb_size * 4] = scaling * (bessel_ddr* mult*mult_s * cutoff_f +  bessel_der * mult_s_r * cutoff_f
++cutoff_der*bessel_der * mult_s);
+}
+
+
+
+}
+
+
+void RadialBasis_Bessel::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+        if (r < min_dist) {
+                Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+        }
+        if (r > max_dist) {
+                ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+                        ", min_dist = " + to_string(min_dist) + '\n');
+#endif
+//int sigma = k%4;
+double x=scal*(r-s)/2 ;
+double denom=x*x+1 ;
+double sq=sqrt(denom);
+double ksi = x/sq;
+double der = 1/(denom*sq);
+double dder = -3*ksi*der/sq;
+double mult = der*scal/2;
+double mult_s_r=-dder*scal*scal/4;
+double mult_scal_r = der/2+dder*x/2;
+double mult_scal = der *(r-s)/2;
+double mult_s=-mult;
+//double Dr=r-max_dist;
+double Dr=r/max_dist-1;
+double p=6;
+double cutoff_f = 1-(p+1)*(p+2)*pow(Dr,p)*0.5+p*(p+2)*pow(Dr,p+1)-(p+1)*p*pow(Dr,p+2)*0.5 ;
+double cutoff_der = p*(p+1)*(p+2)*(pow(Dr,p)-0.5*(pow(Dr,p+1)+pow(Dr,p-1)))/max_dist ;
+//double cutoff_f=Dr * Dr;
+double PI=3.141592654 ;
+double temp=ksi+1.00001;
+
+
+for (int i = 0; i < rb_size; i++) {
+double N=i+1;
+double w=PI*N/2 ;
+double sin_=sin(w*temp);
+double cos_=cos(w*temp);
+double bessel=sin_/temp;
+double bessel_der=w*cos_/temp-sin_/temp/temp;
+double bessel_ddr=-(w*w*sin_/temp)-2*w*cos_/temp/temp+2*sin_/temp/temp/temp;
+rb_vals[i]=scaling*bessel*cutoff_f;
+rb_ders[i]=scaling*(bessel_der*mult*cutoff_f+bessel*cutoff_der);
+rb_ders[i+rb_size * 1] = scaling * bessel_der * mult_scal * cutoff_f;
+rb_ders[i+rb_size * 2] = scaling * (bessel_ddr* mult*mult_scal * cutoff_f +  bessel_der * mult_scal_r * cutoff_f
++cutoff_der*bessel_der * mult_scal);
+rb_ders[i+rb_size * 3] = scaling * bessel_der * mult_s * cutoff_f;
+rb_ders[i+rb_size * 4] = scaling * (bessel_ddr* mult*mult_s * cutoff_f +  bessel_der * mult_s_r * cutoff_f
++cutoff_der*bessel_der * mult_s);
+}
+
+
+
+}
+
+
+
+
+void RadialBasis_Chebyshev::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
 	if (r < min_dist) {
@@ -582,7 +1599,7 @@ void RadialBasis_Chebyshev::RB_Calc(double r, double scal, double s)
 	}
 }
 
-void RadialBasis_Chebyshev_repuls::RB_Calc(double r, double scal, double s)
+void RadialBasis_Chebyshev_repuls::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
 	if (r < min_dist) {
@@ -648,7 +1665,7 @@ void RadialBasis_Chebyshev_repuls::RB_Calc(double r, double scal, double s)
 			rb_ders[i] = 0.0;
 }
 
-void RadialBasis_Taylor::RB_Calc(double r, double scal, double s)
+void RadialBasis_Taylor::RB_Calc(double r, double scal, double s, int k)
 {
 #ifdef MLIP_DEBUG
 	if (r < min_dist) {
