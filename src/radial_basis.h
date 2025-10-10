@@ -36,7 +36,7 @@ public:
 	AnyRadialBasis(std::ifstream& ifs);
 	virtual ~AnyRadialBasis() {};
 	
-	virtual void RB_Calc(double r,double scal=0.1, double s= 0.1) = 0;	// calculates values and derivatives
+	virtual void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) = 0;	// calculates values and derivatives
 };
 
 
@@ -57,7 +57,7 @@ public:
 	RadialBasis_Shapeev(double _min_dist, double _max_dist, int _size);
 	RadialBasis_Shapeev(std::ifstream& ifs);
 
-	void RB_Calc(double r, double scal=0.1, double s= 0.1) override;
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 
@@ -75,7 +75,7 @@ public:
 	RadialBasis_Chebyshev(std::ifstream& ifs)
 		: AnyRadialBasis(ifs) {};
 
-	void RB_Calc(double r, double scal=0.1, double s=0.1) override;
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 class RadialBasis_Chebyshev_s : public AnyRadialBasis
@@ -91,7 +91,7 @@ public:
         RadialBasis_Chebyshev_s(std::ifstream& ifs)
                 : AnyRadialBasis(ifs) {};
 
-        void RB_Calc(double r, double scal=0.1, double s=0.1) override;
+        void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 class RadialBasis_Chebyshev_ss : public AnyRadialBasis
@@ -107,9 +107,31 @@ public:
         RadialBasis_Chebyshev_ss(std::ifstream& ifs)
                 : AnyRadialBasis(ifs) {};
 
-        void RB_Calc(double r, double scal=0.1, double s=0.1) override;
+        void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
+
+
+class RadialBasis_Chebyshev_ssw : public AnyRadialBasis
+{
+
+private:
+	static const std::vector<double> arr;
+
+
+public:
+        std::string GetRBTypeString() override
+        {
+                return "RBChebyshev_ssw";
+        }
+
+        RadialBasis_Chebyshev_ssw(double _min_dist, double _max_dist, int _size)
+                : AnyRadialBasis(_min_dist, _max_dist, _size) {};
+        RadialBasis_Chebyshev_ssw(std::ifstream& ifs)
+                : AnyRadialBasis(ifs) {};
+
+        void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
 
 class RadialBasis_Chebyshev_sss : public AnyRadialBasis
 {
@@ -124,7 +146,28 @@ public:
         RadialBasis_Chebyshev_sss(std::ifstream& ifs)
                 : AnyRadialBasis(ifs) {};
 
-        void RB_Calc(double r, double scal=0.1, double s=0.1) override;
+        void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+class RadialBasis_Chebyshev_sssw : public AnyRadialBasis
+{
+
+private:
+        static const std::vector<double> arr;
+
+public:
+        std::string GetRBTypeString() override
+        {
+                return "RBChebyshev_sssw";
+        }
+
+        RadialBasis_Chebyshev_sssw(double _min_dist, double _max_dist, int _size)
+                : AnyRadialBasis(_min_dist, _max_dist, _size) {};
+        RadialBasis_Chebyshev_sssw(std::ifstream& ifs)
+                : AnyRadialBasis(ifs) {};
+
+        void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 
@@ -133,7 +176,7 @@ class RadialBasis_Chebyshev_sss_lmp : public AnyRadialBasis
 public:
 	std::string GetRBTypeString() override
 	{
-		return "RBChebyshev_ssss";
+		return "RBChebyshev_sss_lmp";
 	}
 
 	RadialBasis_Chebyshev_sss_lmp(double _min_dist, double _max_dist, int _size)
@@ -141,7 +184,77 @@ public:
 	RadialBasis_Chebyshev_sss_lmp(std::ifstream& ifs)
 		: AnyRadialBasis(ifs) {};
 
-	void RB_Calc(double r, double scal = 0.1, double s = 0.1) override;
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+class RadialBasis_Chebyshev_sssw_lmp : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_sssw_lmp";
+	}
+
+	RadialBasis_Chebyshev_sssw_lmp(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_sssw_lmp(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+
+class RadialBasis_Chebyshev_ss_lmp : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_ss_lmp";
+	}
+
+	RadialBasis_Chebyshev_ss_lmp(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_ss_lmp(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+class RadialBasis_Chebyshev_ssw_lmp : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_ssw_lmp";
+	}
+
+	RadialBasis_Chebyshev_ssw_lmp(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_ssw_lmp(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+
+
+class RadialBasis_Chebyshev_s_lmp : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_s_lmp";
+	}
+
+	RadialBasis_Chebyshev_s_lmp(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_s_lmp(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 class RadialBasis_Chebyshev_ssss : public AnyRadialBasis
@@ -157,8 +270,164 @@ public:
 	RadialBasis_Chebyshev_ssss(std::ifstream& ifs)
 		: AnyRadialBasis(ifs) {};
 
-	void RB_Calc(double r, double scal = 0.1, double s = 0.1) override;
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
+
+
+class RadialBasis_Chebyshev_sssss : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_sssss";
+	}
+
+	RadialBasis_Chebyshev_sssss(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_sssss(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+
+class RadialBasis_Chebyshev_sigma : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_sigma";
+	}
+
+	RadialBasis_Chebyshev_sigma(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_sigma(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+
+
+class RadialBasis_Bessel : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBBessel";
+	}
+
+	RadialBasis_Bessel(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Bessel(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+class RadialBasis_Besselw : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBBesselw";
+	}
+
+	RadialBasis_Besselw(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Besselw(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+class RadialBasis_Chebyshev_Tri : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_Tri";
+	}
+
+	RadialBasis_Chebyshev_Tri(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_Tri(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+
+class RadialBasis_Bessel_sss : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBBessel_sss";
+	}
+
+	RadialBasis_Bessel_sss(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Bessel_sss(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+class RadialBasis_Bessel_sssw : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBBessel_sssw";
+	}
+
+	RadialBasis_Bessel_sssw(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Bessel_sssw(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+
+class RadialBasis_Chebyshev_tanhexp : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_tanhexp";
+	}
+
+	RadialBasis_Chebyshev_tanhexp(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_tanhexp(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+class RadialBasis_Chebyshev_tanhexp_w : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBChebyshev_tanhexp_w";
+	}
+
+	RadialBasis_Chebyshev_tanhexp_w(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Chebyshev_tanhexp_w(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
 
 
 class RadialBasis_Chebyshev_repuls : public AnyRadialBasis
@@ -174,7 +443,7 @@ public:
 	RadialBasis_Chebyshev_repuls(std::ifstream& ifs)
 		: AnyRadialBasis(ifs) {};
 
-	void RB_Calc(double r, double scal=0.1, double s=0.1) override;
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 
@@ -192,7 +461,7 @@ public:
 	RadialBasis_Taylor(std::ifstream& ifs)
 		: AnyRadialBasis(ifs) {};
 
-	void RB_Calc(double r, double scal=0.1, double s=0.1) override;
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
 #endif // MLIP_RADIAL_BASIS_H
