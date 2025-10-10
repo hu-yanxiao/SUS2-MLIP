@@ -100,12 +100,42 @@ void MLMTPR::Load(const string& filename)
                 p_RadialBasis = new RadialBasis_Chebyshev_s(ifs);
         else if (rbasis_type == "RBChebyshev_ss")
                 p_RadialBasis = new RadialBasis_Chebyshev_ss(ifs);
+        else if (rbasis_type == "RBChebyshev_ssw")
+                p_RadialBasis = new RadialBasis_Chebyshev_ssw(ifs);
         else if (rbasis_type == "RBChebyshev_sss")
                 p_RadialBasis = new RadialBasis_Chebyshev_sss(ifs);
+        else if (rbasis_type == "RBChebyshev_sssw")
+                p_RadialBasis = new RadialBasis_Chebyshev_sssw(ifs);
 		else if (rbasis_type == "RBChebyshev_sss_lmp")
                 p_RadialBasis = new RadialBasis_Chebyshev_sss_lmp(ifs);
+        else if (rbasis_type == "RBChebyshev_ss_lmp")
+                p_RadialBasis = new RadialBasis_Chebyshev_ss_lmp(ifs);
+        else if (rbasis_type == "RBChebyshev_ssw_lmp")
+                p_RadialBasis = new RadialBasis_Chebyshev_ssw_lmp(ifs);
+        else if (rbasis_type == "RBChebyshev_sssw_lmp")
+                p_RadialBasis = new RadialBasis_Chebyshev_sssw_lmp(ifs);
+        else if (rbasis_type == "RBChebyshev_s_lmp")
+                p_RadialBasis = new RadialBasis_Chebyshev_s_lmp(ifs);
         else if (rbasis_type == "RBChebyshev_ssss")
                 p_RadialBasis = new RadialBasis_Chebyshev_ssss(ifs);
+        else if (rbasis_type == "RBChebyshev_sssss")
+                p_RadialBasis = new RadialBasis_Chebyshev_sssss(ifs);
+        else if (rbasis_type == "RBChebyshev_tanhexp")
+                p_RadialBasis = new RadialBasis_Chebyshev_tanhexp(ifs);
+        else if (rbasis_type == "RBChebyshev_tanhexp_w")
+                p_RadialBasis = new RadialBasis_Chebyshev_tanhexp_w(ifs);
+        else if (rbasis_type == "RBChebyshev_sigma")
+                p_RadialBasis = new RadialBasis_Chebyshev_sigma(ifs);
+        else if (rbasis_type == "RBBessel")
+                p_RadialBasis = new RadialBasis_Bessel(ifs);
+        else if (rbasis_type == "RBBessel_sss")
+                p_RadialBasis = new RadialBasis_Bessel_sss(ifs);
+        else if (rbasis_type == "RBBesselw")
+                p_RadialBasis = new RadialBasis_Besselw(ifs);
+        else if (rbasis_type == "RBBessel_sssw")
+                p_RadialBasis = new RadialBasis_Bessel_sssw(ifs);
+        else if (rbasis_type == "RBChebyshev_Tri")
+                p_RadialBasis = new RadialBasis_Chebyshev_Tri(ifs);
 	else if (rbasis_type == "RBShapeev")
 		p_RadialBasis = new RadialBasis_Shapeev(ifs);
 	else if (rbasis_type == "RBTaylor")
@@ -126,6 +156,11 @@ void MLMTPR::Load(const string& filename)
 	ifs.ignore(2);
 	ifs >> radial_func_count;
 	mu_to_K.resize(radial_func_count);
+	mu_to_sigma.resize(radial_func_count);
+	for (int n = 0; n < radial_func_count;n++)
+	{
+		mu_to_sigma[n] = n / L;
+	}
 	if (scaling_map=="K")
 	{
 		K_ = radial_func_count / L;
@@ -189,12 +224,12 @@ void MLMTPR::Load(const string& filename)
 //	ifs >> tmpstr;
         if (tmpstr != "scal_coeffs")
         {
-           double s2=(p_RadialBasis->min_dist+p_RadialBasis->max_dist)/2;
+           double s2=p_RadialBasis->min_dist;
 	   double s1=3.3*2/(-p_RadialBasis->min_dist+p_RadialBasis->max_dist);
 			for (int i = 0; i < pairs_count; i++) {
 				for (int j = 0; j < K_;j++) {
 					regression_coeffs[species_count + j * 2 * pairs_count + pairs_count + i] = s2;
-					regression_coeffs[species_count + j * 2 * pairs_count + i] = s1;
+					regression_coeffs[species_count + j * 2 * pairs_count + i] = 3;
 				}
 			}
                 }
@@ -277,7 +312,11 @@ void MLMTPR::Load(const string& filename)
 		ERROR("Error reading .mtp file");
 	ifs.ignore(4);
 
-	alpha_index_basic = new int[alpha_index_basic_count][4];	
+	alpha_index_basic = new int[alpha_index_basic_count][4];
+	alpha_index_basic_.comp0.resize(alpha_index_basic_count);
+	alpha_index_basic_.comp1.resize(alpha_index_basic_count);
+	alpha_index_basic_.comp2.resize(alpha_index_basic_count);
+	alpha_index_basic_.comp3.resize(alpha_index_basic_count);
 	if (alpha_index_basic == nullptr)
 		ERROR("Memory allocation error");
 
@@ -286,7 +325,11 @@ void MLMTPR::Load(const string& filename)
 	{
 		char tmpch;
 		ifs.ignore(1000, '{');
-		ifs >> alpha_index_basic[i][0] >> tmpch >> alpha_index_basic[i][1] >> tmpch >> alpha_index_basic[i][2] >> tmpch >> alpha_index_basic[i][3];
+		ifs >> alpha_index_basic[i][0]  >> tmpch >> alpha_index_basic[i][1] >> tmpch >> alpha_index_basic[i][2] >> tmpch >> alpha_index_basic[i][3];
+		alpha_index_basic_.comp0[i]=alpha_index_basic[i][0];
+		alpha_index_basic_.comp1[i]=alpha_index_basic[i][1];
+		alpha_index_basic_.comp2[i]=alpha_index_basic[i][2];
+		alpha_index_basic_.comp3[i]=alpha_index_basic[i][3];
 		if (ifs.fail())
 			ERROR("Error reading .mtp file");
 
@@ -315,7 +358,11 @@ void MLMTPR::Load(const string& filename)
 		ERROR("Error reading .mtp file");
 	ifs.ignore(4);
 
-	alpha_index_times = new int[alpha_index_times_count][4];	
+	alpha_index_times = new int[alpha_index_times_count][4];
+	alpha_index_times_.comp0.resize(alpha_index_times_count);
+	alpha_index_times_.comp1.resize(alpha_index_times_count);
+	alpha_index_times_.comp2.resize(alpha_index_times_count);
+	alpha_index_times_.comp3.resize(alpha_index_times_count);
 	if (alpha_index_times == nullptr)
 		ERROR("Memory allocation error");
 
@@ -324,6 +371,10 @@ void MLMTPR::Load(const string& filename)
 		char tmpch;
 		ifs.ignore(1000, '{');
 		ifs >> alpha_index_times[i][0] >> tmpch >> alpha_index_times[i][1] >> tmpch >> alpha_index_times[i][2] >> tmpch >> alpha_index_times[i][3];
+		alpha_index_times_.comp0[i]=alpha_index_times[i][0];
+		alpha_index_times_.comp1[i]=alpha_index_times[i][1];
+		alpha_index_times_.comp2[i]=alpha_index_times[i][2];
+		alpha_index_times_.comp3[i]=alpha_index_times[i][3];
 		if (ifs.fail())
 			ERROR("Error reading .mtp file");
 	}
@@ -392,6 +443,44 @@ void MLMTPR::Load(const string& filename)
 		for (int i = 0; i < alpha_count - 1; i++)
 			ifs >> linear_coeffs[i + species_count] >> foo;
 
+	}
+	radial_list.resize(species_count*species_count,200002,radial_func_count);
+	radial_der_list.resize(species_count*species_count,200002,radial_func_count);
+	radial_list.set(0);
+	radial_der_list.set(0);
+
+	if (rbasis_type == "RBChebyshev_sss_lmp")
+	{
+
+	inv_dr=200000/p_RadialBasis->max_dist;
+	double dr=1/inv_dr;
+	const int C = species_count;
+	const int R = p_RadialBasis->rb_size;
+	int k_;
+	int sigma;
+	double factor;
+	for (int i = 0; i<C; i++ )
+	    {for (int j = 0;j<C; j++ )
+	        {for (int n=0; n<200001; n++)
+	            {for (int mu=0; mu< radial_func_count;mu++)
+	                {k_=mu_to_K[mu];
+	                //sigma=mu_to_sigma[mu];
+
+	                p_RadialBasis->RB_Calc(dr*n, regression_coeffs[C +2* k_ *C*C+ C * i + j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * i + j],sigma);
+	                for (int xi = 0; xi < R; xi++)
+	                {
+	                factor=regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ + R + i] * regression_coeffs[C+2*C*C* K_ + R + j];
+				    radial_list(i*C+j,n,mu)+=p_RadialBasis->rb_vals[xi] * scaling*factor;
+				    radial_der_list(i*C+j,n,mu)+=p_RadialBasis->rb_ders[xi] * scaling*factor;
+			        }
+			        }
+
+
+
+	            }
+	        }
+
+	    }
 	}
 		MemAlloc();
 		DistributeCoeffs();
@@ -804,11 +893,13 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 	int max_alpha_index_basic = 0;
 	for (int i = 0; i < alpha_index_basic_count; i++)
 		max_alpha_index_basic = max(max_alpha_index_basic,
-			alpha_index_basic[i][1] + alpha_index_basic[i][2] + alpha_index_basic[i][3]);
+			alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i]);
 	max_alpha_index_basic++;
 	dist_powers_.resize(max_alpha_index_basic);
 	coords_powers_.resize(max_alpha_index_basic);
-
+	coords_powers_x.resize(max_alpha_index_basic);
+    coords_powers_y.resize(max_alpha_index_basic);
+    coords_powers_z.resize(max_alpha_index_basic);
 	int type_central = Neighborhood.my_type;
 
 	if (type_central>=species_count)
@@ -822,11 +913,16 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 //		int type_outer = Neighborhood.types[j];/
 
 		dist_powers_[0] = 1;
-		coords_powers_[0] = Vector3(1, 1, 1);
+		//coords_powers_[0] = Vector3(1, 1, 1);
+		coords_powers_x[0]=1;
+		coords_powers_y[0]=1;
+		coords_powers_z[0]=1;
 		for (int k = 1; k < max_alpha_index_basic; k++) {
 			dist_powers_[k] = dist_powers_[k - 1] * Neighborhood.dists[j];
-			for (int a = 0; a < 3; a++)
-				coords_powers_[k][a] = coords_powers_[k - 1][a] * NeighbVect_j[a];
+			coords_powers_x[k]=coords_powers_x[k-1]*NeighbVect_j[0];
+			coords_powers_y[k]=coords_powers_y[k-1]*NeighbVect_j[1];
+			coords_powers_z[k]=coords_powers_z[k-1]*NeighbVect_j[2];
+
 		}
 		std::vector<double> val_;
 		std::vector<double> der_;
@@ -835,7 +931,8 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 		FillWithZero(der_);
 		for (int k_=0; k_<K_;k_++)
 		{
-			p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
+		    int sigma=mu_to_sigma[k_];
+			p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
 	//		for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -845,7 +942,7 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 
 		for (int i = 0; i < alpha_index_basic_count; i++) {
 			double val = 0;
-			int mu = alpha_index_basic[i][0];
+			int mu = alpha_index_basic_.comp0[i];
 			int k_=mu_to_K[mu];
 			/* p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -857,13 +954,13 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
 		
-			int k = alpha_index_basic[i][1] + alpha_index_basic[i][2] + alpha_index_basic[i][3];
+			int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 			double powk = 1.0 / dist_powers_[k];
 			val *= powk;		
 
-			double pow0 = coords_powers_[alpha_index_basic[i][1]][0];
-			double pow1 = coords_powers_[alpha_index_basic[i][2]][1];
-			double pow2 = coords_powers_[alpha_index_basic[i][3]][2];
+			double pow0 = coords_powers_x[alpha_index_basic_.comp1[i]];
+			double pow1 = coords_powers_y[alpha_index_basic_.comp2[i]];
+			double pow2 = coords_powers_z[alpha_index_basic_.comp3[i]];
 
 			double mult0 = pow0*pow1*pow2;
 
@@ -873,10 +970,10 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 
 	// Next: calculating non-elementary b_i
 	for (int i = 0; i < alpha_index_times_count; i++) {
-		double val0 = moment_vals[alpha_index_times[i][0]];
-		double val1 = moment_vals[alpha_index_times[i][1]];
-		int val2 = alpha_index_times[i][2];
-		moment_vals[alpha_index_times[i][3]] += val2 * val0 * val1;
+		double val0 = moment_vals[alpha_index_times_.comp0[i]];
+		double val1 = moment_vals[alpha_index_times_.comp1[i]];
+		int val2 = alpha_index_times_.comp2[i];
+		moment_vals[alpha_index_times_.comp3[i]] += val2 * val0 * val1;
 	}
 
 	// Next: copying all b_i corresponding to scalars into separate arrays,
@@ -910,7 +1007,9 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 	max_alpha_index_basic++;
 	dist_powers_.resize(max_alpha_index_basic);
 	coords_powers_.resize(max_alpha_index_basic);
-
+    coords_powers_x.resize(max_alpha_index_basic);
+    coords_powers_y.resize(max_alpha_index_basic);
+    coords_powers_z.resize(max_alpha_index_basic);
 	int type_central = Neighborhood.my_type;
 
 	if (type_central>=species_count)
@@ -928,11 +1027,14 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 	//	int type_outer = Neighborhood.types[j];
 
 		dist_powers_[0] = 1;
-		coords_powers_[0] = Vector3(1, 1, 1);
+		coords_powers_x[0]=1;
+		coords_powers_y[0]=1;
+		coords_powers_z[0]=1;
 		for (int k = 1; k < max_alpha_index_basic; k++) {
 			dist_powers_[k] = dist_powers_[k - 1] * Neighborhood.dists[j];
-			for (int a = 0; a < 3; a++)
-				coords_powers_[k][a] = coords_powers_[k - 1][a] * NeighbVect_j[a];
+			coords_powers_x[k]=coords_powers_x[k-1]*NeighbVect_j[0];
+			coords_powers_y[k]=coords_powers_y[k-1]*NeighbVect_j[1];
+			coords_powers_z[k]=coords_powers_z[k-1]*NeighbVect_j[2];
 		}
 		std::vector<double> val_;
 		std::vector<double> der_;
@@ -943,7 +1045,8 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 		
 		for (int k_=0; k_<K_;k_++)
 		{
-			p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
+		    int sigma=mu_to_sigma[k_];
+			p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++){
 				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
 				der_[k_*R+xi]=p_RadialBasis->rb_ders[xi] * scaling;
@@ -953,7 +1056,7 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 
 			double val = 0;
 			double der = 0;
-			int mu = alpha_index_basic[i][0];
+			int mu = alpha_index_basic_.comp0[i];
 			int k_ = mu_to_K[mu];
 			/* p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -971,14 +1074,14 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 
 			}
 
-			int k = alpha_index_basic[i][1] + alpha_index_basic[i][2] + alpha_index_basic[i][3];
+			int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 			double powk = 1.0 / dist_powers_[k];
 			val *= powk;
 			der = der * powk - k * val / Neighborhood.dists[j];
 
-			double pow0 = coords_powers_[alpha_index_basic[i][1]][0];
-			double pow1 = coords_powers_[alpha_index_basic[i][2]][1];
-			double pow2 = coords_powers_[alpha_index_basic[i][3]][2];
+			double pow0 = coords_powers_x[alpha_index_basic_.comp1[i]];
+			double pow1 = coords_powers_y[alpha_index_basic_.comp2[i]];
+			double pow2 = coords_powers_z[alpha_index_basic_.comp3[i]];
 
 			double mult0 = pow0*pow1*pow2;
 
@@ -991,23 +1094,23 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 
 
 
-			if (alpha_index_basic[i][1] != 0) {
-				moment_ders(i, j, 0) += val * alpha_index_basic[i][1]
-					* coords_powers_[alpha_index_basic[i][1] - 1][0]
+			if (alpha_index_basic_.comp1[i] != 0) {
+				moment_ders(i, j, 0) += val * alpha_index_basic_.comp1[i]
+					* coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 					* pow1
 					* pow2;
 			}
-			if (alpha_index_basic[i][2] != 0) {
-				moment_ders(i, j, 1) += val * alpha_index_basic[i][2]
+			if (alpha_index_basic_.comp2[i] != 0) {
+				moment_ders(i, j, 1) += val * alpha_index_basic_.comp2[i]
 					* pow0
-					* coords_powers_[alpha_index_basic[i][2] - 1][1]
+					* coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 					* pow2;
 			}
-			if (alpha_index_basic[i][3] != 0) {
-				moment_ders(i, j, 2) += val * alpha_index_basic[i][3]
+			if (alpha_index_basic_.comp3[i] != 0) {
+				moment_ders(i, j, 2) += val * alpha_index_basic_.comp3[i]
 					* pow0
 					* pow1
-					* coords_powers_[alpha_index_basic[i][3] - 1][2];
+					* coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 			}
 		}
 	}
@@ -1016,14 +1119,14 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 
 	// Next: calculating non-elementary b_i
 	for (int i = 0; i < alpha_index_times_count; i++) {
-		double val0 = moment_vals[alpha_index_times[i][0]];
-		double val1 = moment_vals[alpha_index_times[i][1]];
-		int val2 = alpha_index_times[i][2];
-		moment_vals[alpha_index_times[i][3]] += val2 * val0 * val1;
+		double val0 = moment_vals[alpha_index_times_.comp0[i]];
+		double val1 = moment_vals[alpha_index_times_.comp1[i]];
+		int val2 = alpha_index_times_.comp2[i];
+		moment_vals[alpha_index_times_.comp3[i]] += val2 * val0 * val1;
 
 		for (int j = 0; j < Neighborhood.count; j++) {
 			for (int a = 0; a < 3; a++) {
-				moment_ders(alpha_index_times[i][3], j, a) += val2 * (moment_ders(alpha_index_times[i][0], j, a) * val1 + val0 * moment_ders(alpha_index_times[i][1], j, a));
+				moment_ders(alpha_index_times_.comp3[i], j, a) += val2 * (moment_ders(alpha_index_times_.comp0[i], j, a) * val1 + val0 * moment_ders(alpha_index_times_.comp1[i], j, a));
 			}
 		}
 	}
@@ -1048,6 +1151,7 @@ void MLMTPR::MemAlloc()
 
 	energy_cmpnts = new double[n];
 	forces_cmpnts.reserve(n * 3);
+
 	stress_cmpnts = (double(*)[3][3])malloc(n * sizeof(stress_cmpnts[0]));
 
 	moment_vals = new double[alpha_moments_count];
@@ -1186,11 +1290,15 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
         buff_site_energy_0 = 0.0;
 	buff_site_energy_ders_.resize(nbh.count);
 	FillWithZero(buff_site_energy_ders_);
-
+    //const auto& radial_list_ref = get_radial_list();
+    //const auto& radial_der_list_ref = get_radial_der_list();
 	int C = species_count;						//number of different species in current potential
 	int K = radial_func_count;						//number of radial functions in current potential
 	int R = p_RadialBasis->rb_size;  //number of Chebyshev polynomials constituting one radial function
-
+    std::vector<double> val_;
+		std::vector<double> der_;
+		val_.resize(K);
+		der_.resize(K);
 
 	linear_coeffs = LinCoeff();
 
@@ -1210,7 +1318,9 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 	max_alpha_index_basic++;
 	dist_powers_.resize(max_alpha_index_basic);
 	coords_powers_.resize(max_alpha_index_basic);
-
+    coords_powers_x.resize(max_alpha_index_basic);
+    coords_powers_y.resize(max_alpha_index_basic);
+    coords_powers_z.resize(max_alpha_index_basic);
 	int type_central = nbh.my_type;
 
 	if (type_central>=species_count)
@@ -1228,14 +1338,84 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 //			p_RadialBasis->rb_ders[xi] *= scaling;
                 int type_outer = nbh.types[j];
                 
-                
+        const double r=nbh.dists[j];
 		dist_powers_[0] = 1;
-		coords_powers_[0] = Vector3(1, 1, 1);
+		coords_powers_x[0]=1;
+		coords_powers_y[0]=1;
+		coords_powers_z[0]=1;
 		for (int k = 1; k < max_alpha_index_basic; k++) {
-			dist_powers_[k] = dist_powers_[k - 1] * nbh.dists[j];
-			for (int a = 0; a < 3; a++)
-				coords_powers_[k][a] = coords_powers_[k - 1][a] * NeighbVect_j[a];
+			dist_powers_[k] = dist_powers_[k - 1] * r;
+			coords_powers_x[k]=coords_powers_x[k-1]*NeighbVect_j[0];
+			coords_powers_y[k]=coords_powers_y[k-1]*NeighbVect_j[1];
+			coords_powers_z[k]=coords_powers_z[k-1]*NeighbVect_j[2];
 		}
+		if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_sss_lmp")
+		{
+		int r_list;
+		r_list=std::floor(r*inv_dr);
+		const int r_next=r_list+1;
+		const int shift=C * type_central + type_outer;
+		const double ddr=r*inv_dr-r_list;
+
+
+
+		for (int m = 0; m < K; m++)
+		{
+		const double v1=radial_list(shift,r_list,m);
+		const double v2=radial_list(shift,r_next,m);
+		const double d1=radial_der_list(shift,r_list,m);
+		const double d2=radial_der_list(shift,r_next,m);
+
+		val_[m] =v1+ddr*(v2-v1);
+		der_[m] = d1+ddr*(d2-d1);
+
+		}
+		for (int i = 0; i < alpha_index_basic_count; i++)
+		{
+		double val = 0, der = 0;
+        const int comp1=alpha_index_basic_.comp1[i];
+        const int comp2=alpha_index_basic_.comp2[i];
+        const int comp3=alpha_index_basic_.comp3[i];
+		const int mu = alpha_index_basic_.comp0[i];
+        val=val_[mu];
+        der=der_[mu];
+		//val =radial_list(C * type_central + type_outer,r_list,mu);
+		//der = radial_der_list(C * type_central + type_outer,r_list,mu);
+        const int k = comp1+comp2+comp3;
+        //int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
+			double powk = 1.0 / dist_powers_[k];
+			val *= powk;
+			der = der * powk - k * val / r;
+
+			double pow0 = coords_powers_x[comp1];
+			double pow1 = coords_powers_y[comp2];
+			double pow2 = coords_powers_z[comp3];
+
+			double mult0 = pow0*pow1*pow2;
+
+			moment_vals[i] += val * mult0;
+			mult0 *= der / r;
+			moment_jacobian_(i, j, 0) += mult0 * NeighbVect_j[0];
+			moment_jacobian_(i, j, 1) += mult0 * NeighbVect_j[1];
+			moment_jacobian_(i, j, 2) += mult0 * NeighbVect_j[2];
+
+
+            moment_jacobian_(i, j, 0) += (comp1 != 0) ?
+            val * comp1 * coords_powers_x[comp1 - 1] * pow1 * pow2 : 0.0;
+
+        moment_jacobian_(i, j, 1) += (comp2 != 0) ?
+            val * comp2 * pow0 * coords_powers_y[alpha_index_basic_.comp2[i] - 1] * pow2 : 0.0;
+
+        moment_jacobian_(i, j, 2) += (comp3 != 0) ?
+            val * comp3 * pow0 * pow1 * coords_powers_z[comp3 - 1] : 0.0;
+
+
+
+        }
+
+
+		}
+		else{
 		std::vector<double> val_;
 		std::vector<double> der_;
 		val_.resize(K_*R);
@@ -1244,7 +1424,8 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 		FillWithZero(der_);
 		for (int k_=0; k_<K_;k_++)
 		{
-			p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
+		    int sigma=mu_to_sigma[k_];
+			p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
 			for (int xi = 0; xi < p_RadialBasis->rb_size * 5; xi++)
@@ -1256,7 +1437,7 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 		for (int i = 0; i < alpha_index_basic_count; i++) {
 
 			double val = 0, der = 0;
-			int mu = alpha_index_basic[i][0];
+			int mu = alpha_index_basic_.comp0[i];
 			int k_ = mu_to_K[mu];
 			/* p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -1273,14 +1454,15 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 
 
-			int k = alpha_index_basic[i][1] + alpha_index_basic[i][2] + alpha_index_basic[i][3];
+
+			int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 			double powk = 1.0 / dist_powers_[k];
 			val *= powk;
 			der = der * powk - k * val / nbh.dists[j];
 
-			double pow0 = coords_powers_[alpha_index_basic[i][1]][0];
-			double pow1 = coords_powers_[alpha_index_basic[i][2]][1];
-			double pow2 = coords_powers_[alpha_index_basic[i][3]][2];
+			double pow0 = coords_powers_x[alpha_index_basic_.comp1[i]];
+			double pow1 = coords_powers_y[alpha_index_basic_.comp2[i]];
+			double pow2 = coords_powers_z[alpha_index_basic_.comp3[i]];
 
 			double mult0 = pow0*pow1*pow2;
 
@@ -1291,24 +1473,27 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 			moment_jacobian_(i, j, 2) += mult0 * NeighbVect_j[2];
 
 			if (alpha_index_basic[i][1] != 0) {
-				moment_jacobian_(i, j, 0) += val * alpha_index_basic[i][1]
-					* coords_powers_[alpha_index_basic[i][1] - 1][0]
+				moment_jacobian_(i, j, 0) += val * alpha_index_basic_.comp1[i]
+					* coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 					* pow1
 					* pow2;
 			}
 			if (alpha_index_basic[i][2] != 0) {
-				moment_jacobian_(i, j, 1) += val * alpha_index_basic[i][2]
+				moment_jacobian_(i, j, 1) += val * alpha_index_basic_.comp2[i]
 					* pow0
-					* coords_powers_[alpha_index_basic[i][2] - 1][1]
+					* coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 					* pow2;
 			}
 			if (alpha_index_basic[i][3] != 0) {
-				moment_jacobian_(i, j, 2) += val * alpha_index_basic[i][3]
+				moment_jacobian_(i, j, 2) += val * alpha_index_basic_.comp3[i]
 					* pow0
 					* pow1
-					* coords_powers_[alpha_index_basic[i][3] - 1][2];
+					* coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 			}
 		}
+
+		}
+
 	
 		//Repulsive term
 		if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls")
@@ -1323,10 +1508,10 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 	// Next: calculating non-elementary b_i
 	for (int i = 0; i < alpha_index_times_count; i++) {
-		double val0 = moment_vals[alpha_index_times[i][0]];
-		double val1 = moment_vals[alpha_index_times[i][1]];
-		int val2 = alpha_index_times[i][2];
-		moment_vals[alpha_index_times[i][3]] += val2 * val0 * val1;
+		double val0 = moment_vals[alpha_index_times_.comp0[i]];
+		double val1 = moment_vals[alpha_index_times_.comp1[i]];
+		int val2 = alpha_index_times_.comp2[i];
+		moment_vals[alpha_index_times_.comp3[i]] += val2 * val0 * val1;
 	}
 
 	// renewing maximum absolute values
@@ -1359,15 +1544,15 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 		// Backpropagation step 2: expressing through basic moments:
 		for (int i = alpha_index_times_count - 1; i >= 0; i--) {
-			double val0 = moment_vals[alpha_index_times[i][0]];
-			double val1 = moment_vals[alpha_index_times[i][1]];
-			int val2 = alpha_index_times[i][2];
+			double val0 = moment_vals[alpha_index_times_.comp0[i]];
+			double val1 = moment_vals[alpha_index_times_.comp1[i]];
+			int val2 = alpha_index_times_.comp2[i];
 
-			site_energy_ders_wrt_moments_[alpha_index_times[i][1]] +=
-				site_energy_ders_wrt_moments_[alpha_index_times[i][3]]
+			site_energy_ders_wrt_moments_[alpha_index_times_.comp1[i]] +=
+				site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]]
 				* val2 * val0;
-			site_energy_ders_wrt_moments_[alpha_index_times[i][0]] +=
-				site_energy_ders_wrt_moments_[alpha_index_times[i][3]]
+			site_energy_ders_wrt_moments_[alpha_index_times_.comp0[i]] +=
+				site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]]
 				* val2 * val1;
 		}
 
@@ -1445,10 +1630,13 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 		int max_alpha_index_basic = 0;
 		for (int i = 0; i < alpha_index_basic_count; i++)
 			max_alpha_index_basic = max(max_alpha_index_basic,
-				alpha_index_basic[i][1] + alpha_index_basic[i][2] + alpha_index_basic[i][3]);
+				alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i]);
 
 		max_alpha_index_basic++;
 		std::vector<double> auto_dist_powers_(max_alpha_index_basic);
+		std::vector<double> auto_coords_powers_x(max_alpha_index_basic);
+		std::vector<double> auto_coords_powers_y(max_alpha_index_basic);
+		std::vector<double> auto_coords_powers_z(max_alpha_index_basic);
 		std::vector<Vector3> auto_coords_powers_(max_alpha_index_basic);
 
 
@@ -1468,14 +1656,19 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 //			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 //				p_RadialBasis->rb_ders[xi] *= scaling;
                         int type_outer = nbh.types[j];
-                        
-                        
+
+
 			auto_dist_powers_[0] = 1;
 			auto_coords_powers_[0] = Vector3(1, 1, 1);
+			auto_coords_powers_x[0]=1;
+			auto_coords_powers_y[0]=1;
+			auto_coords_powers_z[0]=1;
 			for (int k = 1; k < max_alpha_index_basic; k++) {
 				auto_dist_powers_[k] = auto_dist_powers_[k - 1] * nbh.dists[j];
-				for (int a = 0; a < 3; a++)
-					auto_coords_powers_[k][a] = auto_coords_powers_[k - 1][a] * NeighbVect_j[a];
+				auto_coords_powers_x[k] = auto_coords_powers_x[k - 1] * NeighbVect_j[0];
+				auto_coords_powers_y[k] = auto_coords_powers_y[k - 1] * NeighbVect_j[1];
+				auto_coords_powers_z[k] = auto_coords_powers_z[k - 1] * NeighbVect_j[2];
+
 			}
 		std::vector<double> val_;
 		std::vector<double> der_;
@@ -1484,8 +1677,8 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 		FillWithZero(val_);
 		FillWithZero(der_);
 		for (int k_=0; k_<K_;k_++)
-		{
-			p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
+		{   int sigma=mu_to_sigma[k_];
+			p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
 			for (int xi = 0; xi < p_RadialBasis->rb_size * 5; xi++)
@@ -1499,8 +1692,8 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				double val = 0;
 				double der = 0;
 
-				int mu = alpha_index_basic[i][0];
-				int k = alpha_index_basic[i][1] + alpha_index_basic[i][2] + alpha_index_basic[i][3];
+				int mu = alpha_index_basic_.comp0[i];
+				int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 				int k_ = mu_to_K[mu];
 				/* p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
 				for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -1510,9 +1703,9 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 				double powk = 1.0 / auto_dist_powers_[k];
 
-				double pow0 = auto_coords_powers_[alpha_index_basic[i][1]][0];
-				double pow1 = auto_coords_powers_[alpha_index_basic[i][2]][1];
-				double pow2 = auto_coords_powers_[alpha_index_basic[i][3]][2];
+				double pow0 = auto_coords_powers_x[alpha_index_basic_.comp1[i]];
+				double pow1 = auto_coords_powers_y[alpha_index_basic_.comp2[i]];
+				double pow2 = auto_coords_powers_z[alpha_index_basic_.comp3[i]];
 
 				double mult0 = pow0*pow1*pow2;
 
@@ -1533,7 +1726,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						double derx = (NeighbVect_j[0] / nbh.dists[j])*(der_[5*k_*R+xi] * powk*mult0 - val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
 						double dery = (NeighbVect_j[1] / nbh.dists[j])*(der_[5*k_*R+xi] * powk*mult0 - val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
 						double derz = (NeighbVect_j[2] / nbh.dists[j])*(der_[5*k_*R+xi] * powk*mult0 - val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
-                                              
+
 						double derx_s = (NeighbVect_j[0] / nbh.dists[j]) * (der_[5*k_*R+xi + 2 * R] * powk * mult0 - der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
 						double dery_s = (NeighbVect_j[1] / nbh.dists[j]) * (der_[5*k_*R+xi + 2 * R] * powk * mult0 - der_[5*k_*R+xi+ 1 * R] * k * powk * mult0 / nbh.dists[j]);
 						double derz_s = (NeighbVect_j[2] / nbh.dists[j]) * (der_[5*k_*R+xi + 2 * R] * powk * mult0 - der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
@@ -1541,50 +1734,50 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						double dery_ss = (NeighbVect_j[1] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R] * powk * mult0 - der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
 						double derz_ss = (NeighbVect_j[2] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R] * powk * mult0 - der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
 
-						if (alpha_index_basic[i][1] != 0) {
-							derx += val_[k_*R+xi] * powk * alpha_index_basic[i][1]
-								* auto_coords_powers_[alpha_index_basic[i][1] - 1][0]
+						if (alpha_index_basic_.comp1[i] != 0) {
+							derx += val_[k_*R+xi] * powk * alpha_index_basic_.comp1[i]
+								* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1
 								* pow2;
-							derx_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic[i][1]
-								* auto_coords_powers_[alpha_index_basic[i][1] - 1][0]
+							derx_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp1[i]
+								* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1
 								* pow2;
-							derx_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic[i][1]
-								* auto_coords_powers_[alpha_index_basic[i][1] - 1][0]
+							derx_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp1[i]
+								* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1
 								* pow2;
 
 						}
 
-						if (alpha_index_basic[i][2] != 0) {
-							dery += val_[k_*R+xi] * powk * alpha_index_basic[i][2]
+						if (alpha_index_basic_.comp2[i] != 0) {
+							dery += val_[k_*R+xi] * powk * alpha_index_basic_.comp2[i]
 								* pow0
-								* auto_coords_powers_[alpha_index_basic[i][2] - 1][1]
+								* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
-							dery_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic[i][2]
+							dery_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp2[i]
 								* pow0
-								* auto_coords_powers_[alpha_index_basic[i][2] - 1][1]
+								* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
-							dery_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic[i][2]
+							dery_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp2[i]
 								* pow0
-								* auto_coords_powers_[alpha_index_basic[i][2] - 1][1]
+								* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
 						}
 
-						if (alpha_index_basic[i][3] != 0) {
-							derz += val_[k_*R+xi] * powk * alpha_index_basic[i][3]
+						if (alpha_index_basic_.comp3[i] != 0) {
+							derz += val_[k_*R+xi] * powk * alpha_index_basic_.comp3[i]
 								* pow0
 								* pow1
-								* auto_coords_powers_[alpha_index_basic[i][3] - 1][2];
-							derz_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic[i][3]
+								* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+							derz_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp3[i]
 								* pow0
 								* pow1
-								* auto_coords_powers_[alpha_index_basic[i][3] - 1][2];
-							derz_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic[i][3]
+								* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+							derz_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp3[i]
 								* pow0
 								* pow1
-								* auto_coords_powers_[alpha_index_basic[i][3] - 1][2];
+								* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 						}
 
 
@@ -1613,23 +1806,23 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				mom_jacobian_(i, j, 2) += mult0 * NeighbVect_j[2];
 
 
-				if (alpha_index_basic[i][1] != 0) {
-					mom_jacobian_(i, j, 0) += val * alpha_index_basic[i][1]
-						* auto_coords_powers_[alpha_index_basic[i][1] - 1][0]
+				if (alpha_index_basic_.comp1[i] != 0) {
+					mom_jacobian_(i, j, 0) += val * alpha_index_basic_.comp1[i]
+						* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 						* pow1
 						* pow2;
 				}
-				if (alpha_index_basic[i][2] != 0) {
-					mom_jacobian_(i, j, 1) += val * alpha_index_basic[i][2]
+				if (alpha_index_basic_.comp2[i] != 0) {
+					mom_jacobian_(i, j, 1) += val * alpha_index_basic_.comp2[i]
 						* pow0
-						* auto_coords_powers_[alpha_index_basic[i][2] - 1][1]
+						* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 						* pow2;
 				}
-				if (alpha_index_basic[i][3] != 0) {
-					mom_jacobian_(i, j, 2) += val * alpha_index_basic[i][3]
+				if (alpha_index_basic_.comp3[i] != 0) {
+					mom_jacobian_(i, j, 2) += val * alpha_index_basic_.comp3[i]
 						* pow0
 						* pow1
-						* auto_coords_powers_[alpha_index_basic[i][3] - 1][2];
+						* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 				}
 
 			}
@@ -1650,16 +1843,16 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 		// Next: calculating non-elementary b_i
 		for (int i = 0; i < alpha_index_times_count; i++) {
-			double val0 = mom_val[alpha_index_times[i][0]];
-			double val1 = mom_val[alpha_index_times[i][1]];
-			double val2 = alpha_index_times[i][2];
-			mom_val[alpha_index_times[i][3]] += val2 * val0 * val1;
+			double val0 = mom_val[alpha_index_times_.comp0[i]];
+			double val1 = mom_val[alpha_index_times_.comp1[i]];
+			double val2 = alpha_index_times_.comp2[i];
+			mom_val[alpha_index_times_.comp3[i]] += val2 * val0 * val1;
 		}
-	
+
 		// renewing maximum absolute values
 		for (int i = 0; i < alpha_scalar_moments; i++)
 			max_linear[i] = max(max_linear[i],abs(linear_coeffs[species_count + i]*mom_val[alpha_moment_mapping[i]]));
-			
+
 
 		// convolving with coefficients
 		buff_site_energy_ +=   regression_coeffs[nbh.my_type]+ linear_coeffs[nbh.my_type];
@@ -1675,15 +1868,15 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 		// Backpropagation step 2: expressing through basic moments:
 		for (int i = alpha_index_times_count - 1; i >= 0; i--) {
-			double val0 = mom_val[alpha_index_times[i][0]];
-			double val1 = mom_val[alpha_index_times[i][1]];
-			double val2 = alpha_index_times[i][2];
+			double val0 = mom_val[alpha_index_times_.comp0[i]];
+			double val1 = mom_val[alpha_index_times_.comp1[i]];
+			double val2 = alpha_index_times_.comp2[i];
 
-			site_energy_ders_wrt_moments_[alpha_index_times[i][1]] +=
-				site_energy_ders_wrt_moments_[alpha_index_times[i][3]]
+			site_energy_ders_wrt_moments_[alpha_index_times_.comp1[i]] +=
+				site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]]
 				* val2 * val0;
-			site_energy_ders_wrt_moments_[alpha_index_times[i][0]] +=
-				site_energy_ders_wrt_moments_[alpha_index_times[i][3]]
+			site_energy_ders_wrt_moments_[alpha_index_times_.comp0[i]] +=
+				site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]]
 				* val2 * val1;
 		}
 
@@ -1706,12 +1899,12 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 		{
 
 			for (int i = 0; i < alpha_index_times_count; i++) {
-				double val0 = mom_val[alpha_index_times[i][0]];
-				double val1 = mom_val[alpha_index_times[i][1]];
-				double val2 = alpha_index_times[i][2];
+				double val0 = mom_val[alpha_index_times_.comp0[i]];
+				double val1 = mom_val[alpha_index_times_.comp1[i]];
+				double val2 = alpha_index_times_.comp2[i];
 
-				dloss_dsenders[alpha_index_times[i][3]] += dloss_dsenders[alpha_index_times[i][1]] * val2*val0;
-				dloss_dsenders[alpha_index_times[i][3]] += dloss_dsenders[alpha_index_times[i][0]] * val2*val1;
+				dloss_dsenders[alpha_index_times_.comp3[i]] += dloss_dsenders[alpha_index_times_.comp1[i]] * val2*val0;
+				dloss_dsenders[alpha_index_times_.comp3[i]] += dloss_dsenders[alpha_index_times_.comp0[i]] * val2*val1;
 
 
 			}
@@ -1720,7 +1913,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 			for (int i = 0; i < alpha_index_times_count; i++) {
 				//				double val0 = mom_val[alpha_index_times[i][0]];
 				//				double val1 = mom_val[alpha_index_times[i][1]];
-				double val2 = alpha_index_times[i][2];
+				double val2 = alpha_index_times_.comp2[i];
 
 				dloss_dmom[alpha_index_times[i][1]] += dloss_dsenders[alpha_index_times[i][0]] *
 					site_energy_ders_wrt_moments_[alpha_index_times[i][3]] * val2;
@@ -1732,12 +1925,12 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 			}
 
 			for (int i = alpha_index_times_count - 1; i >= 0; i--) {
-				double val0 = mom_val[alpha_index_times[i][0]];
-				double val1 = mom_val[alpha_index_times[i][1]];
-				double val2 = alpha_index_times[i][2];
+				double val0 = mom_val[alpha_index_times_.comp0[i]];
+				double val1 = mom_val[alpha_index_times_.comp1[i]];
+				double val2 = alpha_index_times_.comp2[i];
 
-				dloss_dmom[alpha_index_times[i][0]] += dloss_dmom[alpha_index_times[i][3]] * val2*val1;
-				dloss_dmom[alpha_index_times[i][1]] += dloss_dmom[alpha_index_times[i][3]] * val2*val0;
+				dloss_dmom[alpha_index_times_.comp0[i]] += dloss_dmom[alpha_index_times_.comp3[i]] * val2*val1;
+				dloss_dmom[alpha_index_times_.comp1[i]] += dloss_dmom[alpha_index_times_.comp3[i]] * val2*val0;
 
 			}
 
@@ -1756,11 +1949,11 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
                                         *regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m]  ;
                                         out_grad_accumulator[C+2*C*C*mu_to_K[l] + type_central * C + j] += linear_coeffs[nbh.my_type] * mom_rad_jacobian_s(i, j, l * R + m) * dloss_dmom[i] * 1.0;
                                         out_grad_accumulator[C+ 2 * C * C * mu_to_K[l] +C*C+type_central*C+j]+= linear_coeffs[nbh.my_type] * mom_rad_jacobian_ss(i, j, l*R+m)*dloss_dmom[i]*1.0;
-                                        
+
                                      //   out_grad_accumulator[l*(R+C)+R] =0;
 					if (se_ders_weights != nullptr){																							  //if (wgt_eqtn_forces != 0)		/// CHECK IT CAREFULLY!!!!
 					out_grad_accumulator[C+2*C*C * K_ +l*(R+C)+m] += linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, l*R+m)
-                                        *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]    ; //from basic moment ders 
+                                        *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]    ; //from basic moment ders
                                         out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+type_central] += linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, l*R+m)
                                         *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]*regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m] ;
                                         out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+j] += linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, l*R+m)
@@ -1769,7 +1962,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
                                         out_grad_accumulator[C+ 2 * C * C * mu_to_K[l] + C*C+type_central*C+j]+= linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_ss(i, j, l*R+m)*1.0;
 					//out_grad_accumulator[(C * j + type_central) * R * K + k] += 0.5 * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, k);
 		                }
-                                }	
+                                }
                       	     }
                 if (shift_){
                 out_grad_accumulator[type_central]+= se_weight;}
