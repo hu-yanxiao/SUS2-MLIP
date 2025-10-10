@@ -10,6 +10,12 @@
 #ifndef MLIP_MTPR_H
 #define MLIP_MTPR_H
 
+struct BasicIndices {
+        std::vector<int> comp0, comp1, comp2, comp3;
+    };
+
+
+
 class MLMTPR : virtual public AnyLocalMLIP
 {
 protected:
@@ -21,9 +27,20 @@ protected:
 
 	int alpha_moments_count;						//	/=================================================================================================
 	int alpha_index_basic_count;					//	|                                                                                                |
-	int(*alpha_index_basic)[4];						//	|   Internal representation of Moment Tensor Potential basis                                     |
+	int(*alpha_index_basic_comp0);
+	int(*alpha_index_basic_comp1);
+	int(*alpha_index_basic_comp2);
+	int(*alpha_index_basic_comp3);
+	int(*alpha_index_basic)[4];
+
+
+    			                        //	|   Internal representation of Moment Tensor Potential basis                                     |
 	int alpha_index_times_count;					//	|   These items is required for calculation of basis functions values and their derivatives      |
 	int(*alpha_index_times)[4];						//	|                                                                                                |
+	int(*alpha_index_times_comp0);
+	int(*alpha_index_times_comp1);
+	int(*alpha_index_times_comp2);
+	int(*alpha_index_times_comp3);
 	int *alpha_moment_mapping;						//	\=================================================================================================
 	std::string pot_desc;
 	std::string rbasis_type;
@@ -37,7 +54,12 @@ protected:
 	Array3D moment_jacobian_;
 	std::vector<double> site_energy_ders_wrt_moments_;
 	std::vector<double> dist_powers_;
+	std::vector<double> coords_powers_x;
+	std::vector<double> coords_powers_y;
+	std::vector<double> coords_powers_z;
+
 	std::vector<Vector3> coords_powers_;
+
 
 
 	void CalcSiteEnergyDers(const Neighborhood& nbh) override;
@@ -49,9 +71,20 @@ public:
 							//!< array of radial coefficients
 	int L=0;
 	int K_ = 1;
+
+
+    BasicIndices alpha_index_basic_;
+    BasicIndices alpha_index_times_;
+    Array3D radial_list;
+    Array3D radial_der_list;
+    //const Array3D& get_radial_list() const { return radial_list; }
+    //const Array3D& get_radial_der_list() const { return radial_der_list; }
+    double inv_dr;
+
 	std::vector<double> linear_coeffs;
 	//std::map<int, int> mu_to_K;
 	std::vector<int> mu_to_K;
+	std::vector<int> mu_to_sigma;
 	std::vector<double> linear_mults;					//!< array of multiplers for basis functions
 	std::vector<double> max_linear;						//!< maximum absolute values of basis functions
 	//double cn_cf;
