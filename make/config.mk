@@ -21,5 +21,7 @@ CXXFLAGS += -DMLIP_MPI
 LDFLAGS += -L/home/jinghuang/intel/oneapi/mkl/2022.0.2/lib/intel64 -lmkl_rt -lifcore
 CPPFLAGS += -I/home/jinghuang/intel/oneapi/mkl/2022.0.2/include
 CXXFLAGS += -DMLIP_INTEL_MKL 
+CXXFLAGS += -O3 -xHost -ipo -no-prec-div -fp-model fast=2 -qoverride-limits -qopt-zmm-usage=high  -qopt-mem-layout-trans=3  -qopt-streaming-stores=auto -fimf-use-svml=true -std=c++11 -qopt-report=5
+
 
 # Extra variables
