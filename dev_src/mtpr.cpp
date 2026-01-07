@@ -1711,7 +1711,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 				for (int xi = 0; xi < R; xi++)
 				{
-					double c_ = regression_coeffs[C + 2 * C * C*K_ + mu * (R + C) + xi] * regression_coeffs[C + 2 * C * C * K_ + 0 * (R + C) + R + type_central] * regression_coeffs[C + 2 * C * C * K_ + 0 * (R + C) + R + type_outer];
+					double c_ = regression_coeffs[C + 2 * C * C*K_ + mu * (R + C) + xi] * regression_coeffs[C + 2 * C * C * K_ + mu * (R + C) + R + type_central] * regression_coeffs[C + 2 * C * C * K_ + mu * (R + C) + R + type_outer];
 					val += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +mu* (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +mu * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk;
 					der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +mu * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +mu * (R+C)+ R + type_outer] * der_[5*k_*R+xi];
 
