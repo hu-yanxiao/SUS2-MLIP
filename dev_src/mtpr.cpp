@@ -905,6 +905,20 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 	if (type_central>=species_count)
 			throw MlipException("Too few species count in the MTP potential!");
 
+	double rho=1;
+	std::vector<double> rho_der;
+	double dist=0;
+	rho_der.resize(Neighborhood.count);
+	FillWithZero(rho_der);
+	for (int j = 0; j < Neighborhood.count; j++) {
+		dist=Neighborhood.dists[j];
+		if (dist <= 3)
+		{rho-=(1-dist/3)*(1-dist/3)/12;
+         rho_der[j]=(1-dist/3)/18;
+		}
+	}
+	
+	
 	for (int j = 0; j < Neighborhood.count; j++) {
 		const Vector3& NeighbVect_j = Neighborhood.vecs[j];
                 int type_outer = Neighborhood.types[j];
@@ -952,7 +966,7 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 
 
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
+				val += rho*regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
 		
 			int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 			double powk = 1.0 / dist_powers_[k];
@@ -1014,7 +1028,18 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 
 	if (type_central>=species_count)
 			throw MlipException("Too few species count in the MTP potential!");
-
+	double rho=1;
+	std::vector<double> rho_der;
+	double dist=0;
+	rho_der.resize(Neighborhood.count);
+	FillWithZero(rho_der);
+	for (int j = 0; j < Neighborhood.count; j++) {
+		dist=Neighborhood.dists[j];
+		if (dist <= 3)
+		{rho-=(1-dist/3)*(1-dist/3)/12;
+         rho_der[j]=(1-dist/3)/18;
+		}
+	}
 
 	for (int j = 0; j < Neighborhood.count; j++) {
 		const Vector3& NeighbVect_j = Neighborhood.vecs[j];
@@ -1022,7 +1047,7 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 		// calculates vals and ders for j-th atom in the neighborhood
 	//	p_RadialBasis->RB_Calc(Neighborhood.dists[j]);
 	        int type_outer = Neighborhood.types[j];
-	        
+	        double rho_d=rho_der[j] ;
                 
 	//	int type_outer = Neighborhood.types[j];
 
@@ -1068,8 +1093,8 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 			{
 
 				// here \phi_xi(r) is RadialBasis::vals[xi]
-				val += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi];
-				der += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * der_[k_*R+xi];
+				val += rho*regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi];
+				der += (rho*der_[k_*R+xi]+rho_d*val_[k_*R+xi])*regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] ;
 
 
 			}
@@ -1327,9 +1352,23 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 			throw MlipException("Too few species count in the MTP potential!");
 
 
+	double rho=1;
+	std::vector<double> rho_der;
+	double dist=0;
+	rho_der.resize(nbh.count);
+	FillWithZero(rho_der);
+	for (int j = 0; j < nbh.count; j++) {
+		dist=nbh.dists[j];
+		if (dist <= 3)
+		{rho-=(1-dist/3)*(1-dist/3)/12;
+         rho_der[j]=(1-dist/3)/18;
+		}
+	}
+
+	
 	for (int j = 0; j < nbh.count; j++) {
 		const Vector3& NeighbVect_j = nbh.vecs[j];
-
+		double rho_d=rho_der[j];
 		// calculates vals and ders for j-th atom in the neighborhood
 //		p_RadialBasis->RB_Calc(nbh.dists[j]);
 //		for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -1361,10 +1400,10 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 		for (int m = 0; m < K; m++)
 		{
-		const double v1=radial_list(shift,r_list,m);
-		const double v2=radial_list(shift,r_next,m);
-		const double d1=radial_der_list(shift,r_list,m);
-		const double d2=radial_der_list(shift,r_next,m);
+		const double v1=radial_list(shift,r_list,m)*rho;
+		const double v2=radial_list(shift,r_next,m)*rho;
+		const double d1=radial_der_list(shift,r_list,m)*rho+rho_d*v1;
+		const double d2=radial_der_list(shift,r_next,m)*rho+rho_d*v2;
 
 		val_[m] =v1+ddr*(v2-v1);
 		der_[m] = d1+ddr*(d2-d1);
@@ -1447,8 +1486,8 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 			for (int xi = 0; xi < R; xi++)
 			{
-				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
-				der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * der_[k_*R*5+xi];
+				val += rho*regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
+				der += (der_[k_*R*5+xi]*rho+val_[k_*R+xi]*rho_der)*regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * der_[k_*R*5+xi];
 
 			}
 
@@ -1644,11 +1683,22 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 		if (type_central>=species_count)
 			throw MlipException("Too few species count in the MTP potential!");
-
+		double rho=1;
+		std::vector<double> rho_der;
+		double dist=0;
+		rho_der.resize(nbh.count);
+		FillWithZero(rho_der);
+		for (int j = 0; j < nbh.count; j++) {
+			dist=nbh.dists[j];
+		if (dist <= 3)
+		{rho-=(1-dist/3)*(1-dist/3)/12;
+         rho_der[j]=(1-dist/3)/18;
+		}
+	}
 
 		for (int j = 0; j < nbh.count; j++) {
 			const Vector3& NeighbVect_j = nbh.vecs[j];
-
+			double rho_d=rho_der[j];
 			// calculates vals and ders for j-th atom in the neighborhood
 //			p_RadialBasis->RB_Calc(nbh.dists[j]);
 //			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
@@ -1712,38 +1762,38 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				for (int xi = 0; xi < R; xi++)
 				{
 					double c_ = regression_coeffs[C + 2 * C * C*K_ + mu * (R + C) + xi] * regression_coeffs[C + 2 * C * C * K_ + 0 * (R + C) + R + type_central] * regression_coeffs[C + 2 * C * C * K_ + 0 * (R + C) + R + type_outer];
-					val += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0* (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk;
-					der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * der_[5*k_*R+xi];
+					val += rho*regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0* (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk;
+					der += (rho*der_[5*k_*R+xi]+rho_d*val_[k_*R+xi])*regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] ;
 
-					mom_val[i] += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk*mult0;
+					mom_val[i] += rho*regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk*mult0;
 
-					mom_rad_jacobian_(i, type_outer, mu * R + xi) += val_[k_*R+xi] * powk*mult0;
-                                        mom_rad_jacobian_s(i, type_outer, mu * R + xi) += der_[5*k_*R+xi + 1 * R] * powk*mult0*c_;
-                                        mom_rad_jacobian_ss(i, type_outer, mu * R + xi) += der_[5*k_*R+xi + 3 * R] * powk*mult0* c_;
+					mom_rad_jacobian_(i, type_outer, mu * R + xi) += rho*val_[k_*R+xi] * powk*mult0;
+                                        mom_rad_jacobian_s(i, type_outer, mu * R + xi) += rho*der_[5*k_*R+xi + 1 * R] * powk*mult0*c_;
+                                        mom_rad_jacobian_ss(i, type_outer, mu * R + xi) += rho*der_[5*k_*R+xi + 3 * R] * powk*mult0* c_;
                                         //double c_ = regression_coeffs[C+2*C*C+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C+mu * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C+mu * (R+C)+ R + type_outer];
 					if (se_ders_weights != nullptr)
 					{
-						double derx = (NeighbVect_j[0] / nbh.dists[j])*(der_[5*k_*R+xi] * powk*mult0 - val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
-						double dery = (NeighbVect_j[1] / nbh.dists[j])*(der_[5*k_*R+xi] * powk*mult0 - val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
-						double derz = (NeighbVect_j[2] / nbh.dists[j])*(der_[5*k_*R+xi] * powk*mult0 - val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
+						double derx = (NeighbVect_j[0] / nbh.dists[j])*((rho*der_[5*k_*R+xi]+rho_d*val_[k_*R+xi]) * powk*mult0 - rho*val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
+						double dery = (NeighbVect_j[1] / nbh.dists[j])*((rho*der_[5*k_*R+xi]+rho_d*val_[k_*R+xi]) * powk*mult0 - rho*val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
+						double derz = (NeighbVect_j[2] / nbh.dists[j])*((rho*der_[5*k_*R+xi]+rho_d*val_[k_*R+xi]) * powk*mult0 - rho*val_[k_*R+xi] * k*powk*mult0 / nbh.dists[j]);
 
-						double derx_s = (NeighbVect_j[0] / nbh.dists[j]) * (der_[5*k_*R+xi + 2 * R] * powk * mult0 - der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
-						double dery_s = (NeighbVect_j[1] / nbh.dists[j]) * (der_[5*k_*R+xi + 2 * R] * powk * mult0 - der_[5*k_*R+xi+ 1 * R] * k * powk * mult0 / nbh.dists[j]);
-						double derz_s = (NeighbVect_j[2] / nbh.dists[j]) * (der_[5*k_*R+xi + 2 * R] * powk * mult0 - der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
-						double derx_ss = (NeighbVect_j[0] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R] * powk * mult0 - der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
-						double dery_ss = (NeighbVect_j[1] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R] * powk * mult0 - der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
-						double derz_ss = (NeighbVect_j[2] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R] * powk * mult0 - der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
+						double derx_s = (NeighbVect_j[0] / nbh.dists[j]) * ((der_[5*k_*R+xi + 2 * R]+rho_d*der_[5*k_*R+xi + 1 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
+						double dery_s = (NeighbVect_j[1] / nbh.dists[j]) * ((der_[5*k_*R+xi + 2 * R]+rho_d*der_[5*k_*R+xi + 1 * R]) * powk * mult0 - rho*der_[5*k_*R+xi+ 1 * R] * k * powk * mult0 / nbh.dists[j]);
+						double derz_s = (NeighbVect_j[2] / nbh.dists[j]) * ((der_[5*k_*R+xi + 2 * R]+rho_d*der_[5*k_*R+xi + 1 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
+						double derx_ss = (NeighbVect_j[0] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
+						double dery_ss = (NeighbVect_j[1] / nbh.dists[j]) * ((der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R])* powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
+						double derz_ss = (NeighbVect_j[2] / nbh.dists[j]) * ((der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
 
 						if (alpha_index_basic_.comp1[i] != 0) {
-							derx += val_[k_*R+xi] * powk * alpha_index_basic_.comp1[i]
+							derx += rho*val_[k_*R+xi] * powk * alpha_index_basic_.comp1[i]
 								* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1
 								* pow2;
-							derx_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp1[i]
+							derx_s += rho*der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp1[i]
 								* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1
 								* pow2;
-							derx_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp1[i]
+							derx_ss += rho*der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp1[i]
 								* auto_coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1
 								* pow2;
@@ -1751,30 +1801,30 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						}
 
 						if (alpha_index_basic_.comp2[i] != 0) {
-							dery += val_[k_*R+xi] * powk * alpha_index_basic_.comp2[i]
+							dery += rho*val_[k_*R+xi] * powk * alpha_index_basic_.comp2[i]
 								* pow0
 								* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
-							dery_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp2[i]
+							dery_s += rho*der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp2[i]
 								* pow0
 								* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
-							dery_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp2[i]
+							dery_ss += rho*der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp2[i]
 								* pow0
 								* auto_coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
 						}
 
 						if (alpha_index_basic_.comp3[i] != 0) {
-							derz += val_[k_*R+xi] * powk * alpha_index_basic_.comp3[i]
+							derz += rho*val_[k_*R+xi] * powk * alpha_index_basic_.comp3[i]
 								* pow0
 								* pow1
 								* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
-							derz_s += der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp3[i]
+							derz_s += rho*der_[5*k_*R+xi + 1 * R] * powk * alpha_index_basic_.comp3[i]
 								* pow0
 								* pow1
 								* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
-							derz_ss += der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp3[i]
+							derz_ss += rho*der_[5*k_*R+xi + 3 * R] * powk * alpha_index_basic_.comp3[i]
 								* pow0
 								* pow1
 								* auto_coords_powers_z[alpha_index_basic_.comp3[i] - 1];
