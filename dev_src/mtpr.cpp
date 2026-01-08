@@ -1402,8 +1402,8 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 		{
 		const double v1=radial_list(shift,r_list,m)*rho;
 		const double v2=radial_list(shift,r_next,m)*rho;
-		const double d1=radial_der_list(shift,r_list,m)*rho+rho_d*v1;
-		const double d2=radial_der_list(shift,r_next,m)*rho+rho_d*v2;
+		const double d1=radial_der_list(shift,r_list,m)*rho+rho_d*radial_list(shift,r_list,m);
+		const double d2=radial_der_list(shift,r_next,m)*rho+rho_d*radial_list(shift,r_next,m);
 
 		val_[m] =v1+ddr*(v2-v1);
 		der_[m] = d1+ddr*(d2-d1);
