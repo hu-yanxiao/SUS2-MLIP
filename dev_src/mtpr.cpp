@@ -1487,7 +1487,7 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 			for (int xi = 0; xi < R; xi++)
 			{
 				val += rho*regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
-				der += (der_[k_*R*5+xi]*rho+val_[k_*R+xi]*rho_der)*regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * der_[k_*R*5+xi];
+				der += (der_[k_*R*5+xi]*rho+val_[k_*R+xi]*rho_d)*regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] ;
 
 			}
 
@@ -1780,7 +1780,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						double derx_s = (NeighbVect_j[0] / nbh.dists[j]) * ((der_[5*k_*R+xi + 2 * R]+rho_d*der_[5*k_*R+xi + 1 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
 						double dery_s = (NeighbVect_j[1] / nbh.dists[j]) * ((der_[5*k_*R+xi + 2 * R]+rho_d*der_[5*k_*R+xi + 1 * R]) * powk * mult0 - rho*der_[5*k_*R+xi+ 1 * R] * k * powk * mult0 / nbh.dists[j]);
 						double derz_s = (NeighbVect_j[2] / nbh.dists[j]) * ((der_[5*k_*R+xi + 2 * R]+rho_d*der_[5*k_*R+xi + 1 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 1 * R] * k * powk * mult0 / nbh.dists[j]);
-						double derx_ss = (NeighbVect_j[0] / nbh.dists[j]) * (der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
+						double derx_ss = (NeighbVect_j[0] / nbh.dists[j]) * ((der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
 						double dery_ss = (NeighbVect_j[1] / nbh.dists[j]) * ((der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R])* powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
 						double derz_ss = (NeighbVect_j[2] / nbh.dists[j]) * ((der_[5*k_*R+xi + 4 * R]+rho_d*der_[5*k_*R+xi + 3 * R]) * powk * mult0 - rho*der_[5*k_*R+xi + 3 * R] * k * powk * mult0 / nbh.dists[j]);
 
