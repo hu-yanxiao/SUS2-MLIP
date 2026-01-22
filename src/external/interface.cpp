@@ -7,6 +7,16 @@
  */
 
 
+/* This is a modified version of the interface wrapper of MLIP - MTP based on the 
+   correction about the many body potential heat flux definition stated in Zheyong Fan et al.
+   (2015), " Force and heat currentt formulas for many-body potentials in molecular dynamics 
+   simulation with applications to thermal conductivity calculations", Phys. Rev. B 92, 094301.
+   The effect of this version to the calculation result is discussed in the article "Revisit 
+   Many-body Interaction Heat Current and Thermal Conductivity Calculation in Moment Tensor 
+   Potential/LAMMPS Interface",2024,arXiv:2411.01255
+   Modified by Siu Ting Tai, HKU MECH
+*/
+
 #include "../mlip_wrapper.h"
 #include "../mlip.h"
 
@@ -28,10 +38,10 @@ bool reorder_atoms = true;
 
 // Initilizes MLIP
 void MLIP_init(const char * settings_filename,	// settings filename
-			   const char * log_filename,	// filename for logging communication 
-			   int ntypes,					// Number of atom types 
+			   const char * log_filename,	// filename for logging communication
+			   int ntypes,					// Number of atom types
 			   double& rcut,				// MLIP's cutoff radius returned to driver
-			   int& mode)					// If 0 call of MLIP_calc_nbh() from driver is allowed. 
+			   int& mode)					// If 0 call of MLIP_calc_nbh() from driver is allowed.
 {
 	if (log_filename != nullptr)	// log to file
 	{
@@ -82,11 +92,11 @@ void MLIP_init(const char * settings_filename,	// settings filename
 	//	Message("MLIP has been linked in configuration mode");
 	//else
 	//	Message("MLIP has been linked in neighborhoods mode");
-	
+
 	if (mode &&
 		settings["abinitio"] == "lammps")	// LAMMPS used for EFS calculation; 4 is the LAMMPS abinitio potential
 			reorder_atoms = true;					// atoms in cfg should be ordered according their ids in LAMMPS for consistency
-	else 
+	else
 			reorder_atoms = false;
 
 	if ((AnyLocalMLIP*)MLIP_wrp->p_mlip == nullptr)
@@ -100,7 +110,7 @@ void MLIP_calc_cfg(	int n,			// input parameter: number of atoms
 					double** x,		// input parameter: atomic positions (cartesian, n x 3 double numbers)
 					int* types,		// input parameter: array of atom types (n of integer numbers)
 					int* ids,		// input parameter: array of atom indices (n of integer numbers). Required to reorder numbers when their order in the other arrays is wrong
-					double& en,		// output parameter: energy of configuration 
+					double& en,		// output parameter: energy of configuration
 					double** f,		// output parameter: forces on atoms (cartesian, n x 3 double numbers)
 					double* stresses)	// output parameter: stresses in eV (9 double numbers)
 {
@@ -112,7 +122,7 @@ void MLIP_calc_cfg(	int n,			// input parameter: number of atoms
 	else
 		comm_conf.set_new_id();
 
-	// set lattice 
+	// set lattice
 	int foo = 0;
 	for (int a=0; a<3; a++)
 		for (int b=0; b<3; b++)
@@ -165,83 +175,8 @@ void MLIP_calc_cfg(	int n,			// input parameter: number of atoms
 			stresses[foo++] += comm_conf.stresses[a][b];
 }
 
-void MLIP_calc_nbh_(int ii,           // input parameter: number of neighborhoods
-                   int* ilist,         // input parameter: 
-                   int* numneigh,      // input parameter: number of neighbors in each neighborhood (inum integer numbers)
-                   int** firstneigh,   // input parameter: pointer to the first neighbor
-                   int n_local_atoms,  // input parameter: number of local atoms
-                   int n_ghost_atoms,  // input parameter: number of ghost atoms
-                   double** x,         // input parameter: array of coordinates of atoms
-                   int* types,         // input parameter: array of atom types (inum of integer numbers)
-                   double** f,                    // output parameter: forces on atoms (cartesian, n x 3 double numbers)
-                   double& en,                    // output parameter: summ of site energies 
-                  // double* site_en=nullptr,       // output parameter: array of site energies (inum double numbers). if =nullptr while call no site energy calculation is done
-                   double* p_site_energy_ders,
-                   double* dij,
-                   int num_j,
-                   int* j_list,
-                   double* site_en=nullptr
-                   )
-{
-Neighborhood nbh;
-                int i = ilist[ii];
-                double xtmp = x[i][0];
-                double ytmp = x[i][1];
-                double ztmp = x[i][2];
-                int* jlist = firstneigh[i];
-                int jnum = numneigh[i];
-
-                // 1. Construct neighborgood
-                nbh.count = 0;
-                nbh.my_type = types[i]-1;
-                nbh.types.clear();
-                nbh.inds.clear();
-                nbh.vecs.clear();
-                nbh.dists.clear();
-
-                for (int jj=0; jj<jnum; jj++)
-                {
-                        int j = jlist[jj];
-                        j &= NEIGHMASK;
-
-                        double delx = x[j][0] - xtmp;
-                        double dely = x[j][1] - ytmp;
-                        double delz = x[j][2] - ztmp;
-                        double r = sqrt(delx*delx + dely*dely + delz*delz);
-
-                        if (r < cutoff)
-                        {
-                                nbh.count++;
-                                nbh.inds.emplace_back(j);
-                                nbh.vecs.emplace_back(delx,dely,delz);
-                                nbh.dists.emplace_back(r);
-                                nbh.types.emplace_back(types[j]-1);
-                        }
-                }
-                j_list=&nbh.inds[0];
-                num_j=nbh.count;
-                // 2. Calculate site energy and their derivatives
-                try
-                {
-                        p_mlip->CalcSiteEnergyDers(nbh);
-                }
-                catch (MlipException& excp)
-                {
-                        Message(excp.What());
-                        exit(9993);
-                }
-                 p_site_energy_ders = &p_mlip->buff_site_energy_ders_[0][0];
-                 dij=&nbh.vecs[0][0];
-                en += p_mlip->buff_site_energy_;
-                if (site_en != nullptr)
-                        site_en[i] = p_mlip->buff_site_energy_;
-
-
-}
-
-
 void MLIP_calc_nbh(int inum,           // input parameter: number of neighborhoods
-                   int* ilist,         // input parameter: 
+                   int* ilist,         // input parameter:
                    int* numneigh,      // input parameter: number of neighbors in each neighborhood (inum integer numbers)
                    int** firstneigh,   // input parameter: pointer to the first neighbor
                    int n_local_atoms,  // input parameter: number of local atoms
@@ -249,13 +184,14 @@ void MLIP_calc_nbh(int inum,           // input parameter: number of neighborhoo
                    double** x,         // input parameter: array of coordinates of atoms
                    int* types,         // input parameter: array of atom types (inum of integer numbers)
                    double** f,                    // output parameter: forces on atoms (cartesian, n x 3 double numbers)
-                   double& en,                    // output parameter: summ of site energies 
+                   double& en,                    // output parameter: summ of site energies
                    double* site_en=nullptr,       // output parameter: array of site energies (inum double numbers). if =nullptr while call no site energy calculation is done
-                   double** site_virial=nullptr)  // output parameter: array of site energies (inum double numbers). if =nullptr while call no virial-stress-per-atom calculation is done
+                   double** site_virial=nullptr,  // output parameter: array of site energies (inum double numbers). if =nullptr while call no virial-stress-per-atom calculation is done
+                   double* total_virial=nullptr)         //Modified: LAMMPS total virial compute is completely obsoleted
 {
 	Neighborhood nbh;
 
-	for (int ii = 0; ii < inum; ii++) 
+	for (int ii = 0; ii < inum; ii++)
 	{
 		int i = ilist[ii];
 		double xtmp = x[i][0];
@@ -272,7 +208,7 @@ void MLIP_calc_nbh(int inum,           // input parameter: number of neighborhoo
 		nbh.vecs.clear();
 		nbh.dists.clear();
 
-		for (int jj=0; jj<jnum; jj++) 
+		for (int jj=0; jj<jnum; jj++)
 		{
 			int j = jlist[jj];
 			j &= NEIGHMASK;
@@ -282,7 +218,7 @@ void MLIP_calc_nbh(int inum,           // input parameter: number of neighborhoo
 			double delz = x[j][2] - ztmp;
 			double r = sqrt(delx*delx + dely*dely + delz*delz);
 
-			if (r < cutoff) 
+			if (r < cutoff)
 			{
 				nbh.count++;
 				nbh.inds.emplace_back(j);
@@ -315,26 +251,44 @@ void MLIP_calc_nbh(int inum,           // input parameter: number of neighborhoo
 			f[i][0] += p_site_energy_ders[3*jj+0];
 			f[i][1] += p_site_energy_ders[3*jj+1];
 			f[i][2] += p_site_energy_ders[3*jj+2];
-			
+
 			f[j][0] -= p_site_energy_ders[3*jj+0];
 			f[j][1] -= p_site_energy_ders[3*jj+1];
 			f[j][2] -= p_site_energy_ders[3*jj+2];
 		}
 
 		// 4. Calculate virial stresses per atom (if required)
-		if (site_virial != nullptr) 
+		if (site_virial != nullptr){
 			for (int jj = 0; jj < nbh.count; jj++)
 			{
-				site_virial[i][0] -= p_site_energy_ders[3*jj+0] * nbh.vecs[jj][0];
-				site_virial[i][1] -= p_site_energy_ders[3*jj+1] * nbh.vecs[jj][1];
-				site_virial[i][2] -= p_site_energy_ders[3*jj+2] * nbh.vecs[jj][2];
-				site_virial[i][3] -= 0.5 * (p_site_energy_ders[3*jj+1] * nbh.vecs[jj][0] +
-											p_site_energy_ders[3*jj+0] * nbh.vecs[jj][1]);
-				site_virial[i][4] -= 0.5 * (p_site_energy_ders[3*jj+2] * nbh.vecs[jj][0] +
-											p_site_energy_ders[3*jj+0] * nbh.vecs[jj][2]);
-				site_virial[i][5] -= 0.5 * (p_site_energy_ders[3*jj+2] * nbh.vecs[jj][1] +
-											p_site_energy_ders[3*jj+1] * nbh.vecs[jj][2]);
+				// Modified: Virial is defined differerntly as U_ij != Uji in many-body context
+			    int j = nbh.inds[jj];
+                site_virial[j][0] -= nbh.vecs[jj][0]*p_site_energy_ders[3*jj+0];//xx
+				site_virial[j][1] -= nbh.vecs[jj][1]*p_site_energy_ders[3*jj+1];//yy
+				site_virial[j][2] -= nbh.vecs[jj][2]*p_site_energy_ders[3*jj+2];//zz
+				site_virial[j][3] -= nbh.vecs[jj][0]*p_site_energy_ders[3*jj+1];//xy
+				site_virial[j][4] -= nbh.vecs[jj][0]*p_site_energy_ders[3*jj+2];//xz
+				site_virial[j][5] -= nbh.vecs[jj][1]*p_site_energy_ders[3*jj+2];//yz
+				site_virial[j][6] -= nbh.vecs[jj][1]*p_site_energy_ders[3*jj+0];//yx
+				site_virial[j][7] -= nbh.vecs[jj][2]*p_site_energy_ders[3*jj+0];//zx
+				site_virial[j][8] -= nbh.vecs[jj][2]*p_site_energy_ders[3*jj+1];//zy
 			}
+		}
+		////Modified: LAMMPS total virial compute is completely obsoleted
+		// always calculate the total virial in this wrapper
+		if (total_virial != nullptr){
+            for (int jj = 0; jj < nbh.count; jj++ ){
+                total_virial[0] -= p_site_energy_ders[3*jj+0] * nbh.vecs[jj][0];//xx
+                total_virial[1] -= p_site_energy_ders[3*jj+1] * nbh.vecs[jj][1];//yy
+                total_virial[2] -= p_site_energy_ders[3*jj+2] * nbh.vecs[jj][2];//zz
+                total_virial[3] -= p_site_energy_ders[3*jj+0] * nbh.vecs[jj][1];//xy
+                total_virial[4] -= p_site_energy_ders[3*jj+0] * nbh.vecs[jj][2];//xz
+                total_virial[5] -= p_site_energy_ders[3*jj+1] * nbh.vecs[jj][2];//yz
+
+            }
+		}else{
+            ERROR("Total virial not calculate from mlip");
+		}
 	}
 }
 
@@ -354,8 +308,7 @@ void MLIP_finalize()
 	comm_conf.destroy();
 
 	//Message("MLIP link terminated\n");
-	
+
 	if (logfilestream.is_open())
 		logfilestream.close();
 }
-
