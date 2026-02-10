@@ -1520,7 +1520,7 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 
 	// convolving with coefficients
-	buff_site_energy_ +=  regression_coeffs[nbh.my_type]+ linear_coeffs[nbh.my_type];
+	buff_site_energy_ +=  regression_coeffs[nbh.my_type];
 
 
 	for (int i = 0; i < alpha_scalar_moments; i++)
@@ -1855,7 +1855,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 
 		// convolving with coefficients
-		buff_site_energy_ +=   regression_coeffs[nbh.my_type]+ linear_coeffs[nbh.my_type];
+		buff_site_energy_ +=   regression_coeffs[nbh.my_type];
 		for (int i = 0; i < alpha_scalar_moments; i++)
 			buff_site_energy_ += linear_coeffs[species_count + i]*linear_mults[i] * mom_val[alpha_moment_mapping[i]] * linear_coeffs[nbh.my_type];
 
