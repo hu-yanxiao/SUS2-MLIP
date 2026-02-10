@@ -206,6 +206,18 @@ void MLMTPR::Load(const string& filename)
 	inited = true;
         
         ifs >> tmpstr;
+		E0_.resize(species_count);
+        if (tmpstr != "E0_")
+        {
+             for (int i = 0; i <species_count; i++)
+               {E0_[i]=0;}
+        }
+        else
+        {ifs.ignore(4);
+				is_fixed=true;
+                for (int i = 0; i < species_count; i++){
+                        ifs >> mu_[i] >> foo;}
+                        ifs >> tmpstr; }
         if (tmpstr != "shift_coeffs")
         {
 
@@ -2017,8 +2029,16 @@ void MLMTPR::AddPenaltyGrad(const double coeff,													// Must calculate ad
 					for (int l = 0; l < R; l++)
 						(*out_penalty_grad_accumulator)[C+2*C*C * K_ +(i*C + j)*K*R + k*(R+C) + l] += coeff * 4 * (norm - 1) * regression_coeffs[C+2*C*C * K_ +(i*C + j)*K*R + k*(R+C) + l];
 	}
+	if(is_fixed)
+	{
+for (int k = 0; c < C; c++)
+{
+  out_penalty_accumulator += 10*(regression_coeffs[c]-E0_[c])*(regression_coeffs[c]-E0_[c]);
+ (*out_penalty_grad_accumulator)+=20*(regression_coeffs[c]-E0_[c]);
+ 
 
-
+}
+	}
 
 	for (int k1 = 0; k1 < K; k1++)
 		for (int k2 = k1 + 1; k2 < K; k2++)
