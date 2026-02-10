@@ -124,7 +124,7 @@ void MTPR_trainer::SolveSLAE()
 //	std::default_random_engine generator(rand_device());
 //	std::uniform_real_distribution<> uniform(-0.05, 0.05);
 	for (int i = 0; i < p_mlmtpr->species_count; i++) {
-		p_mlmtpr->regression_coeffs[i] = p_mlmtpr->linear_coeffs[i] - 1.0;
+		p_mlmtpr->regression_coeffs[i] = p_mlmtpr->linear_coeffs[i];
 		p_mlmtpr->linear_coeffs[i] = 1.0;
 	}
 	for (int i = 0; i < n; i++) {
