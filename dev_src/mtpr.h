@@ -71,7 +71,8 @@ public:
 							//!< array of radial coefficients
 	int L=0;
 	int K_ = 1;
-
+    std::vector<double> mu_;
+    bool is_fixed=false;
 
     BasicIndices alpha_index_basic_;
     BasicIndices alpha_index_times_;
