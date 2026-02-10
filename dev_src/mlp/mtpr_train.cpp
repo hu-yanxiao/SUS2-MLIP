@@ -294,7 +294,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
                 MPI_Barrier(MPI_COMM_WORLD);
 #endif
 	}
-         trainer.shift(do_shift);
+         //trainer.shift(do_shift);
 	if (!mtpr.inited && maxits > 0 && !skip_preinit) {
 		trainer.max_step_count = 75;
 //		trainer.random_sample(prank, training_set);
