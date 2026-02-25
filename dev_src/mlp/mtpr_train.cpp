@@ -210,7 +210,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	trainer.curr_pot_name = curr_fnm;
 
 	if (prank == 0)
-		std::cout << "MTPR from " << args[0] << ", Database: " << args[1] << std::endl;
+		std::cout << "Version 1.0.0_26_2_25"<< "MTPR from " << args[0] << ", Database: " << args[1] << std::endl;
 
 	Configuration cfg;
 	if (validfnm != "")
