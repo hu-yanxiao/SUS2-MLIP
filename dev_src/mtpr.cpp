@@ -283,7 +283,7 @@ void MLMTPR::Load(const string& filename)
 				{	regression_coeffs[species_count+2*species_count*species_count* K_ +pairs_count*radial_func_count*(p_RadialBasis->rb_size + species_count) +
 					i*(p_RadialBasis->rb_size + species_count) + j] = 1e-2;
                                         if (j >= p_RadialBasis->rb_size) {regression_coeffs[species_count+2*species_count*species_count* K_ +pairs_count*radial_func_count*(p_RadialBasis->rb_size + species_count) +
-                                        i*(p_RadialBasis->rb_size + species_count) + j] = 1.1; }
+                                        i*(p_RadialBasis->rb_size + species_count) + j] = 10.0+(j-(p_RadialBasis->rb_size)*0.1; }
                                 }             
 			//	regression_coeffs[pairs_count*radial_func_count*(p_RadialBasis->rb_size) +
 			//		i*(p_RadialBasis->rb_size) + min(i, p_RadialBasis->rb_size)] = 1e-3;
@@ -469,7 +469,7 @@ void MLMTPR::Load(const string& filename)
 	                p_RadialBasis->RB_Calc(dr*n, regression_coeffs[C +2* k_ *C*C+ C * i + j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * i + j],sigma);
 	                for (int xi = 0; xi < R; xi++)
 	                {
-	                factor=regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ + R + i] * regression_coeffs[C+2*C*C* K_ + R + j];
+	                factor=regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ + R + i] * (regression_coeffs[C+2*C*C* K_ + R + j]-regression_coeffs[C+2*C*C* K_ + R + i]);
 				    radial_list(i*C+j,n,mu)+=p_RadialBasis->rb_vals[xi] * scaling*factor;
 				    radial_der_list(i*C+j,n,mu)+=p_RadialBasis->rb_ders[xi] * scaling*factor;
 			        }
@@ -952,7 +952,7 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 
 
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
+				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central])* val_[k_*R+xi];
 		
 			int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 			double powk = 1.0 / dist_powers_[k];
@@ -1068,8 +1068,8 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 			{
 
 				// here \phi_xi(r) is RadialBasis::vals[xi]
-				val += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi];
-				der += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * der_[k_*R+xi];
+				val += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]) * val_[k_*R+xi];
+				der += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]) * der_[k_*R+xi];
 
 
 			}
@@ -1447,8 +1447,8 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 			for (int xi = 0; xi < R; xi++)
 			{
-				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
-				der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * der_[k_*R*5+xi];
+				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central])* val_[k_*R+xi];
+				der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]) * der_[k_*R*5+xi];
 
 			}
 
@@ -1712,10 +1712,10 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				for (int xi = 0; xi < R; xi++)
 				{
 					double c_ = regression_coeffs[C + 2 * C * C*K_ + mu * (R + C) + xi] * regression_coeffs[C + 2 * C * C * K_ + 0 * (R + C) + R + type_central] * regression_coeffs[C + 2 * C * C * K_ + 0 * (R + C) + R + type_outer];
-					val += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0* (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk;
-					der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * der_[5*k_*R+xi];
+					val += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0* (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]) * val_[k_*R+xi] * powk;
+					der += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] *(regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]) * der_[5*k_*R+xi];
 
-					mom_val[i] += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi] * powk*mult0;
+					mom_val[i] += regression_coeffs[C+2*C*C * K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] *(regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]) * val_[k_*R+xi] * powk*mult0;
 
 					mom_rad_jacobian_(i, type_outer, mu * R + xi) += val_[k_*R+xi] * powk*mult0;
                                         mom_rad_jacobian_s(i, type_outer, mu * R + xi) += der_[5*k_*R+xi + 1 * R] * powk*mult0*c_;
@@ -1941,10 +1941,10 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				for (int l = 0; l < K; l++)
 				{  for (int m = 0; m < R; m++) {
 					out_grad_accumulator[C+2*C*C * K_ +l*(R+C)+m] += linear_coeffs[nbh.my_type]*dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*
-                                        regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]  ; //from basic moments
+                                        regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]-(regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]))  ; //from basic moments
 					//out_grad_accumulator[(C * j + type_central) * R * K + k] += 0.5*dloss_dmom[i] * mom_rad_jacobian_(i, j, k);
-                                        out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+type_central] += linear_coeffs[nbh.my_type] * dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]
-                                        *regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m]  ;
+                                        out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+type_central] += linear_coeffs[nbh.my_type] * dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*(regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]--2* regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central])
+                                        *regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m] ;
                                         out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+j] += linear_coeffs[nbh.my_type] * dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central]
                                         *regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m]  ;
                                         out_grad_accumulator[C+2*C*C*mu_to_K[l] + type_central * C + j] += linear_coeffs[nbh.my_type] * mom_rad_jacobian_s(i, j, l * R + m) * dloss_dmom[i] * 1.0;
@@ -1953,9 +1953,9 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
                                      //   out_grad_accumulator[l*(R+C)+R] =0;
 					if (se_ders_weights != nullptr){																							  //if (wgt_eqtn_forces != 0)		/// CHECK IT CAREFULLY!!!!
 					out_grad_accumulator[C+2*C*C * K_ +l*(R+C)+m] += linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, l*R+m)
-                                        *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]    ; //from basic moment ders
+                                        *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]-regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central])    ; //from basic moment ders
                                         out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+type_central] += linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, l*R+m)
-                                        *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]*regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m] ;
+                                        *(regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]-2*regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central])*regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m] ;
                                         out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+j] += linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_(i, j, l*R+m)
                                         *regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central ]*regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m] ;
                                         out_grad_accumulator[C+ 2 * C * C * mu_to_K[l] + type_central*C+j]+= linear_coeffs[nbh.my_type] * site_energy_ders_wrt_moments_[i] * mom_rad_coord_jacobian_s(i, j, l*R+m)*1.0;
