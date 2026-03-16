@@ -281,7 +281,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 							i * (rb_size+ mtpr.species_count) + j ]
 							= 5e-3 * uniform(generator);
                                                 if (j >= rb_size) {mtpr.regression_coeffs[mtpr.species_count+2*mtpr.species_count*mtpr.species_count* mtpr.K_ +(k * mtpr.species_count + l) * mtpr.radial_func_count * rb_size +
-                                                        i * (rb_size+ mtpr.species_count)+j ] = 1.0 ; }
+                                                        i * (rb_size+ mtpr.species_count)+j ] = 2.0+0.1*(j-rb_size) ; }
 
                                                  }
 						//	mtpr.regression_coeffs[k*mtpr.radial_func_count*rb_size +
