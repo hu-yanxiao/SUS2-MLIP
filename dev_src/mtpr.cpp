@@ -283,7 +283,7 @@ void MLMTPR::Load(const string& filename)
 				{	regression_coeffs[species_count+2*species_count*species_count* K_ +pairs_count*radial_func_count*(p_RadialBasis->rb_size + species_count) +
 					i*(p_RadialBasis->rb_size + species_count) + j] = 1e-2;
                                         if (j >= p_RadialBasis->rb_size) {regression_coeffs[species_count+2*species_count*species_count* K_ +pairs_count*radial_func_count*(p_RadialBasis->rb_size + species_count) +
-                                        i*(p_RadialBasis->rb_size + species_count) + j] = 10.0+(j-(p_RadialBasis->rb_size)*0.1; }
+                                        i*(p_RadialBasis->rb_size + species_count) + j] = 10.0+(j-p_RadialBasis->rb_size)*0.1; }
                                 }             
 			//	regression_coeffs[pairs_count*radial_func_count*(p_RadialBasis->rb_size) +
 			//		i*(p_RadialBasis->rb_size) + min(i, p_RadialBasis->rb_size)] = 1e-3;
@@ -1941,9 +1941,9 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				for (int l = 0; l < K; l++)
 				{  for (int m = 0; m < R; m++) {
 					out_grad_accumulator[C+2*C*C * K_ +l*(R+C)+m] += linear_coeffs[nbh.my_type]*dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*
-                                        regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]-(regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer]-regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central]))  ; //from basic moments
+                                        regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central] * (regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]- regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central])  ; //from basic moments
 					//out_grad_accumulator[(C * j + type_central) * R * K + k] += 0.5*dloss_dmom[i] * mom_rad_jacobian_(i, j, k);
-                                        out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+type_central] += linear_coeffs[nbh.my_type] * dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*(regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]--2* regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central])
+                                        out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+type_central] += linear_coeffs[nbh.my_type] * dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*(regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + j]-2* regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central])
                                         *regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m] ;
                                         out_grad_accumulator[C+2*C*C * K_ +0*(R+C)+R+j] += linear_coeffs[nbh.my_type] * dloss_dmom[i] * mom_rad_jacobian_(i, j, l*R+m)*regression_coeffs[C+2*C*C * K_ +0 * (R+C)+ R + type_central]
                                         *regression_coeffs[C+2*C*C * K_ +l * (R+C)+ m]  ;
