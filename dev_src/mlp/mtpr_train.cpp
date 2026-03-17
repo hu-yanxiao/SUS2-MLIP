@@ -213,7 +213,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-" << std::endl;
 		std::cout << "Global universal scaling and ultrasmall parameterization in machine-learning interatomic potentials with superlinearity \n https://doi.org/10.1073/pnas.2503439122" << std::endl;
 		std::cout << "-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-" << std::endl;
-		std::cout << "Version 1.0.0_26_2_25 "<< "MTPR from " << args[0] << ", Database: " << args[1] << std::endl;
+		std::cout << " Release Version 1.0.0 26-3-17 "<< "MTPR from " << args[0] << ", Database: " << args[1] << std::endl;
 	}
 	Configuration cfg;
 	if (validfnm != "")
@@ -299,7 +299,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	}
          trainer.shift(do_shift);
 	if (!mtpr.inited && maxits > 0 && !skip_preinit) {
-		trainer.max_step_count = 75;
+		trainer.max_step_count = 50;
 //		trainer.random_sample(prank, training_set);
 //		if (prank == 0){
 //		                        mtpr.Save(trained_fnm);
@@ -316,9 +316,22 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
                trainer.random_sample(prank, training_set, 10);
                }
 		if (prank == 0)
-			std::cout << "Pre-training started" << std::endl;
+			std::cout << "Pre-training loop-1 started" << std::endl;
 
 		trainer.Train(training_set);
+		trainer.TrainLinear(prank, training_set);
+		if (prank == 0)
+			std::cout << "Pre-training loop-2 started" << std::endl;
+		trainer.Train(training_set);
+		trainer.TrainLinear(prank, training_set);
+		if (prank == 0)
+			std::cout << "Pre-training loop-3 started" << std::endl;
+		trainer.Train(training_set);
+		trainer.TrainLinear(prank, training_set);
+		if (prank == 0)
+			std::cout << "Pre-training loop-4 started" << std::endl;
+		trainer.Train(training_set);
+		trainer.TrainLinear(prank, training_set);
 
 		
                 //trainer.random_sample(prank, training_set, 20);
@@ -493,6 +506,12 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		errmon.GetReport(report);
 		std::cout << report.c_str();
 #endif
+		if (prank == 0){
+		std::cout << "-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-" << std::endl;
+		std::cout << "Global universal scaling and ultrasmall parameterization in machine-learning interatomic potentials with superlinearity \n https://doi.org/10.1073/pnas.2503439122" << std::endl;
+		std::cout << "-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-" << std::endl;
+		std::cout << " Release Version 1.0.0 26-3-17 " << std::endl;
+	}
 	}
 #ifdef MLIP_MPI
 	MPI_Barrier(MPI_COMM_WORLD);
