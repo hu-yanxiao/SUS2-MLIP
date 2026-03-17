@@ -209,9 +209,12 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	trainer.linstop = bfgs_conv_tol;	//if in 100 iterations loss decreases less than this, BFGS is finished
 	trainer.curr_pot_name = curr_fnm;
 
-	if (prank == 0)
-		std::cout << "Version 1.0.0_26_2_25"<< "MTPR from " << args[0] << ", Database: " << args[1] << std::endl;
-
+	if (prank == 0){
+		std::cout << "-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-" << std::endl;
+		std::cout << "Global universal scaling and ultrasmall parameterization in machine-learning interatomic potentials with superlinearity \n https://doi.org/10.1073/pnas.2503439122" << std::endl;
+		std::cout << "-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-CITE-" << std::endl;
+		std::cout << "Version 1.0.0_26_2_25 "<< "MTPR from " << args[0] << ", Database: " << args[1] << std::endl;
+	}
 	Configuration cfg;
 	if (validfnm != "")
 	{
