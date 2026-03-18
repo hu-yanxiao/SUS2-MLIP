@@ -17,6 +17,13 @@
 #include <sstream>
 
 using namespace std;
+std::string get_current_time() {
+    auto now = std::chrono::system_clock::now();
+    auto time_t = std::chrono::system_clock::to_time_t(now);
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&time_t), "%m-%d %H:%M:%S");
+    return ss.str();
+};
 
 
 void MTPR_trainer::shift(bool shift_)
@@ -505,19 +512,29 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #ifdef MLIP_MPI												   
 	MPI_Allreduce(&m, &K, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 #endif
+if (prank == 0) {
+        bfgs.Set_x(x, n);
+    std::cout << "BFGS::Set_x: Inin_Resize completed" << std::endl;
+        for (int i = 0; i < n; i++){
+                for (int j = 0; j < n; j++){
+                        if (i == j)
+                                bfgs.inv_hess_2d[i][j] = 1;
+                        else
+                                bfgs.inv_hess_2d[i][j] = 0;}
+                                }
+    std::cout << "Inin1 completed" << std::endl;
+    std::cout << "DEBUG: Starting linear multipliers..." << std::endl;
+    std::cout << "DEBUG: n = " << n << ", nlin = " << nlin << std::endl;
+    std::cout << "DEBUG: species_count = " << p_mlmtpr->species_count << std::endl;
+    std::cout << "DEBUG: linear_mults size = " << p_mlmtpr->linear_mults.size() << std::endl;
 
-	bfgs.Set_x(x, n);
-
-	for (int i = 0; i < n; i++)
-		for (int j = 0; j < n; j++)
-			if (i == j)
-				bfgs.inv_hess(i, j) = 1;
-			else
-				bfgs.inv_hess(i, j) = 0;
-
-	for (int i = n - nlin + p_mlmtpr->species_count; i < n; i++)
-		bfgs.inv_hess(i, i) /= p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)] * p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)];
-
+    int start_index = n - nlin + p_mlmtpr->species_count;
+    std::cout << "DEBUG: start_index = " << start_index << std::endl;
+    std::cout << "DEBUG: end_index = " << n << std::endl;
+        //for (int i = start_index; i < n; i++)
+//              bfgs.inv_hess_1d[i*n+i] /= p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)] * p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)];
+    std::cout << "Inin2 completed" << std::endl;
+}
 	int num_step = 0;
 
 	double linf = 9e99;
@@ -598,6 +615,11 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 		for (int i = 0; i < n; i++)
 			x[i] = bfgs.x(i);
+if (prank == 0){
+                for (int i = 0; i < n; i++){
+                        x[i] = bfgs.x(i);
+}
+}
 
 #ifdef MLIP_MPI
 		MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -633,24 +655,40 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		memcpy(&bfgs_g[0], &loss_grad_[0], p_mlmtpr->CoeffCount() * sizeof(double));
 #endif	
 
-		if (prank == 0)
-			if (!converge) {
-				bfgs.Iterate(bfgs_f, bfgs_g);
+		if (prank == 0){
+                        if (!converge) {
 
-				while (abs(bfgs.x(p_mlmtpr->species_count*p_mlmtpr->species_count) - x[p_mlmtpr->species_count*p_mlmtpr->species_count]) > 0.5) {
-					bfgs.ReduceStep(0.25);
-				}
-				if (bfgs.iter_step > 30) {
-					converge = true;
-					logstrm1 << "BFGS ended due to linesearch  more than  30 iterations" << endl;
+   // std::cout << "[" << get_current_time() << "]"
+         //     << "SUB_Iterate: " << bfgs.iter_step <<std::endl;
+                                //bfgs.Iterate(bfgs_f, bfgs_g);
+                        //      if (!bfgs.is_in_linesearch())
+                        //      {std::cout << "[" << get_current_time() << "]"
+            //  << "_____ linesearch done _____"  <<std::endl;}
+                                bfgs.Iterate(bfgs_f, bfgs_g);
+
+                                while (abs(bfgs.x(p_mlmtpr->species_count*p_mlmtpr->species_count) - x[p_mlmtpr->species_count*p_mlmtpr->species_count]) > 0.5) {
+                                        bfgs.ReduceStep(0.25);
+                                }
+                                if (bfgs.iter_step > 30) {
+                                        converge = true;
+                                        logstrm1 << "BFGS ended due to linesearch  more than  30 iterations" << endl;
                                         logstrm1 << "d_x= "<< bfgs.x(0) - x[0] << endl;
-					MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
-				}
-					
+                                        MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
+                                }
 
-			}
 
-		linesearch = bfgs.is_in_linesearch();
+                        }
+
+                linesearch = bfgs.is_in_linesearch();
+                }
+
+
+		#ifdef MLIP_MPI
+                MPI_Barrier(MPI_COMM_WORLD);
+//                MPI_Bcast(&converge, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
+                MPI_Bcast(&linesearch, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
+//                MPI_Bcast(&num_step, 1, MPI_INT, 0, MPI_COMM_WORLD);
+#endif
 
 		//if (prank == 0 && !linesearch) cout << num_step << " " << bfgs_f << endl;
 
@@ -674,7 +712,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 				loss_prev = bfgs_f;
 				//logstrm1 << "BFGS iter " << num_step << ": f=" << bfgs_f << "\t joint_std^2:" << std_l/std_scaling <<  "\t center_std^2:"  << stdd_l/stdd_scaling << "\t" << mean_1_l << "\t" << mean_2_l << "\t" << mean_3_l << "\t efs:" << bfgs_f - std_l - stdd_l <<endl;
-				logstrm1 << "BFGS iter " << std::setw(6) << num_step << ": f=" << std::fixed << std::setprecision(6) << std::right << bfgs_f << "  joint_std^2:" << std_l/std_scaling <<      "  center_std^2:"  << stdd_l/stdd_scaling << "\t" << std::fixed << std::setprecision(3) << std::right << mean_1_l << "  " << std::fixed << std::setprecision(3) << std::right << mean_2_l << "  " << std::    fixed << std::setprecision(3) << std::right << mean_3_l << "\t efs:" << std::fixed << std::setprecision(6) << std::right << bfgs_f - std_l - stdd_l <<endl;
+				logstrm1 << "[" << get_current_time() << "] "<< "BFGS iter " << std::setw(6) << num_step << ": f=" << std::fixed << std::setprecision(6) << std::right << bfgs_f << "  joint_std^2:" << std_l/std_scaling <<      "  center_std^2:"  << stdd_l/stdd_scaling << "\t" << std::fixed << std::setprecision(3) << std::right << mean_1_l << "  " << std::fixed << std::setprecision(3) << std::right << mean_2_l << "  " << std::    fixed << std::setprecision(3) << std::right << mean_3_l << "\t efs:" << std::fixed << std::setprecision(6) << std::right << bfgs_f - std_l - stdd_l <<endl;
 				MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
 
 				//cout << num_step << " " << bfgs_f << endl;
