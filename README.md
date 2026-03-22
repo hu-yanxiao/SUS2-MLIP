@@ -1,7 +1,6 @@
 # SUS2-MLIP
 SUS2-MLIP:**S**uper-Linear Machine Learning Interatomic Potentials with Physics-Informed **U**niversal **S**caling and **U**ltra-**S**mall Parameterization. 
-This model is implemented by the modified [MLIP-2](https://gitlab.com/ashapeev/mlip-2/-/tree/master?ref_type=heads) package.
-![image](https://github.com/user-attachments/assets/0aaaa76f-b4f8-459e-b8ec-1ddc08849693)
+
 
 # Installation
 You can install SUS2-MLIP by running:
