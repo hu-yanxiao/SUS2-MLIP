@@ -1,6 +1,6 @@
 # SUS2-MLIP
 SUS2-MLIP:**S**uper-Linear Machine Learning Interatomic Potentials with Physics-Informed **U**niversal **S**caling and **U**ltra-**S**mall Parameterization. 
-This model is implemented by the modified [MLIP-2](https://gitlab.com/ashapeev/mlip-2/-/tree/master?ref_type=heads) package.
+This project adopts MLIP-2-compatible file conventions, such as `.cfg` datasets and `.mtp`-parsable model files.
 ![image](https://github.com/user-attachments/assets/0aaaa76f-b4f8-459e-b8ec-1ddc08849693)
 
 # Installation
@@ -94,8 +94,7 @@ Commonly used training tags:
 --weighting=<string>
 --init-params=<random|same>
 --do-lin
---do-samp
---shift
+--do-samp=<true|false>
 --skip-preinit
 --update-mindist
 ```
@@ -103,8 +102,7 @@ Commonly used training tags:
 Notes:
 
 - `--do-lin` enables the linear pre-fitting path inside nonlinear training.
-- `--do-samp` disables random sampling during the pre-training stage.
-- `--shift` disables the trainer's internal shift correction.
+- `--do-samp=false` disables random sampling during the pre-training stage.
 - `--std-weight` and `--stdd-weight` control the two std-based regularization terms.
 * **Evaluating trained models**  
 To evaluate a tarined model `trained_sus2mlip` on a specified dataset `target.cfg`, you run:  
@@ -113,23 +111,14 @@ mlp-sus2 calc-errors trained_sus2mlip target.cfg
 ```
 # External Tools
 ## LAMMPS
-SUS2-MLIP models can be used in LAMMPS simulation via the interface [interface-lammps-mlip-v2](https://gitlab.com/ashapeev/interface-lammps-mlip-2/-/tree/master?ref_type=heads).  
-**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp` can enhance efficiency by approximately 10%.
+The current LAMMPS interface is provided in the `sus2-interface-20260410.tar.gz` archive included in this release snapshot.  
+**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp` enables the list-based treatment of radial functions in the LAMMPS interface.
 ## PySUS2
 PySUS2 is a comprehensive suite of tools and Python modules developed based on the SUS2-MLIP model, designed for atomistic simulations. It supports a range of functionalities including structure relaxation, phonon dispersion analysis, and lattice thermal conductivity calculations.  
 (in progress)
 ## CSO-AES
 [CSO-AES](https://github.com/hu-yanxiao/CSO-AES/tree/main) (Covering Set Optimization driven Atomic Environment Sampling) is a Python tool designed to facilitate active learning in SUS2-MLIP modeling. It also helps with the integration and optimization of the database, making it easier for researchers and developers to work with.  
 (in progress)
-
-———————————————————about MLIP——————————————— 
-# MLIP
-
-MLIP is a software for Machine Learning Interatomic Potentials.
-It has been developed at Skoltech (Moscow) by
-Alexander Shapeev, Evgeny Podryabinkin, Konstantin Gubaev, and Ivan Novikov
-
-———————————————————about MLIP——————————————— 
 
 -----------------------------------------------
 ## Copyright
