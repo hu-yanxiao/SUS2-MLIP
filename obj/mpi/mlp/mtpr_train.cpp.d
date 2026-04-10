@@ -1,0 +1,23 @@
+/work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/obj/mpi/mlp/mtpr_train.cpp.o: \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/mtpr_train.cpp \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/mtpr_train.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpi.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpio.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpicxx.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../mtpr_trainer.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/common/stdafx.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../non_linear_regression.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/basic_mlip.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/basic_potentials.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/neighborhoods.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/configuration.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/mlip.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/common/utils.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/common/matrix3.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/common/vector3.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/radial_basis.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/common/multidimensional_arrays.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/basic_trainer.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../mtpr.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/common/bfgs.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract-linear-1k-5k/dev_src/mlp/../../src/error_monitor.h

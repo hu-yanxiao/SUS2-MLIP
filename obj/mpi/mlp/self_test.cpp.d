@@ -1,0 +1,30 @@
+/work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/obj/mpi/mlp/self_test.cpp.o: \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/self_test.cpp \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpi.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpio.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpicxx.h \
+ /share/intel/oneapi/mkl/2022.2.0/include/mkl_cblas.h \
+ /share/intel/oneapi/mkl/2022.2.0/include/mkl_types.h \
+ /share/intel/oneapi/mkl/2022.2.0/include/mkl_cblas_64.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/relaxation.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/basic_drivers.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../mlip.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../common/utils.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../basic_potentials.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../neighborhoods.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../configuration.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../common/matrix3.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../common/vector3.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../common/bfgs.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../drivers/../common/multidimensional_arrays.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../mlip_wrapper.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../lotf.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../basic_trainer.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../basic_mlip.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../radial_basis.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../active_learning.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../maxvol.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../common/stdafx.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../linear_regression.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../mtp.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlp/../error_monitor.h

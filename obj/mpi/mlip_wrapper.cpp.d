@@ -1,0 +1,32 @@
+/work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/obj/mpi/mlip_wrapper.cpp.o: \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlip_wrapper.cpp \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlip_wrapper.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/lotf.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/basic_trainer.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/basic_mlip.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/basic_potentials.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/neighborhoods.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/configuration.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mlip.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/common/utils.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/common/matrix3.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/common/vector3.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/radial_basis.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/common/multidimensional_arrays.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/active_learning.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/maxvol.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/common/stdafx.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/linear_regression.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/mtp.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/error_monitor.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/pair_potentials.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/vasp_potential.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/lammps_potential.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/../dev_src/mtpr_trainer.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/../dev_src/non_linear_regression.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/../dev_src/mtpr.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/../dev_src/../src/common/bfgs.h \
+ /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/src/../dev_src/sw_basis.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpi.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpio.h \
+ /share/intel/oneapi/mpi/2021.6.0/include/mpicxx.h
