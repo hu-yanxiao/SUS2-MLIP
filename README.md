@@ -7,8 +7,8 @@ This project adopts MLIP-2-compatible file conventions, such as `.cfg` datasets 
 You can install SUS2-MLIP by running:
 ```bash
  ./configuration  
- make mlp  ## get bin/sus2mlip
- make libinterface ## get lib/libinterface.a for external tool e.g. LAMMPS and pysus2mlip
+ make mlp  ## get bin/mlp-sus2
+ make libinterface ## get lib/libinterface.a for external tool e.g. PySUS2 (in progress)
 ```
 # Format of Datasets
 Like the original MLIP package, SUS2-MLIP reads material structures and their properties from `cfg` files.  
@@ -51,7 +51,7 @@ L = 2
 scaling_map = LK
 species_count = 2
 potential_tag =
-        min_dist = 0.0
+        min_dist = 1.5
         max_dist = 6.0
         ...
 ```
@@ -121,6 +121,4 @@ PySUS2 is a comprehensive suite of tools and Python modules developed based on t
 (in progress)
 
 -----------------------------------------------
-## Copyright
-- MLIP：Copyright (c) 2023, Alexander Shapeev (Skoltech)([BSD 2-Clause License](LICENSE)).
-- SUS2-MLIP：Copyright (c) 2024, Yanxiao Hu.
+
