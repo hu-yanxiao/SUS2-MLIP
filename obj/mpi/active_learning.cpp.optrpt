@@ -1,7 +1,0 @@
-Intel(R) Advisor can now assist with vectorization and show optimization
-  report messages with your source code.
-See "https://software.intel.com/en-us/intel-advisor-xe" for details.
-
-Intel(R) C++ Intel(R) 64 Compiler Classic for applications running on Intel(R) 64, Version 2021.6.0 Build 20220226_000000
-
-Compiler options: -I/home/jinghuang/intel/oneapi/mkl/2022.0.2/include -I/share/intel/oneapi/mpi/2021.6.0/include -O3 -MMD -DMLIP_MPI -DMLIP_INTEL_MKL -O3 -xHost -ipo -no-prec-div -fp-model fast=2 -qoverride-limits -qopt-zmm-usage=high -qopt-mem-layout-trans=3 -qopt-streaming-stores=auto -fimf-use-svml=true -std=c++11 -qopt-report=5 -std=c++11 -DMLIP_DEV -c -o /work/phy-weigw/20260321_Test/SUS2-MLIP-opt-v29-train-v25-forward-mu-contract/obj/mpi/active_learning.cpp.o
