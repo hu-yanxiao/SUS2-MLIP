@@ -89,8 +89,11 @@ public:
 	void AddToSLAE(Configuration& cfg, double weight = 1, const Neighborhoods* neighborhoods = nullptr);	// Adds configuration to regression SLAE. If weight = -1 removes from regression
 
 	double* ConstructLinHessian();
-	void TrainLinear(int prank, std::vector<Configuration>& training_set, const std::vector<Neighborhoods>* neighborhoods = nullptr);
-        void random_sample(int prank, std::vector<Configuration>& training_set, int max_step);
+	void TrainLinear(int prank,
+					std::vector<Configuration>& training_set,
+					const std::vector<Neighborhoods>* neighborhoods = nullptr,
+					const std::string& context = "");
+        void random_sample(int prank, std::vector<Configuration>& training_set, int max_step, const std::vector<Neighborhoods>* neighborhoods = nullptr);
 	#ifndef ALGLIB
 		void Train(std::vector<Configuration>& training_set) override; //with Shapeev bfgs
 	#else

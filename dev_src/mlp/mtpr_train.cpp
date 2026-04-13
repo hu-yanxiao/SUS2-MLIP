@@ -5,8 +5,13 @@
  */
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstring>
 #include <cstdio>
 #include <ctime>
+#include <limits>
+#include <numeric>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -28,7 +33,17 @@ struct DatasetStats {
 	long long atom_count = 0;
 };
 
+constexpr std::size_t kNeighborhoodCacheBudgetBytesPerRank = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+
 namespace {
+
+std::string CurrentTimestamp()
+{
+	std::time_t now = std::time(nullptr);
+	char buf[32];
+	std::strftime(buf, sizeof(buf), "%F %T", std::localtime(&now));
+	return std::string(buf);
+}
 
 std::string SanitizeShardTag(const std::string& value)
 {
@@ -70,6 +85,230 @@ DatasetStats LoadConfigsFromFile(const std::string& cfgfnm, std::vector<Configur
 	return stats;
 }
 
+long long SumAtoms(const std::vector<Configuration>& configs)
+{
+	long long atoms = 0;
+	for (const Configuration& cfg : configs)
+		atoms += cfg.size();
+	return atoms;
+}
+
+long long EstimateConfigWork(const Configuration& cfg)
+{
+	return cfg.size();
+}
+
+void LogShardBalance(const std::string& label,
+					 const std::vector<long long>& cfg_counts,
+					 const std::vector<long long>& atom_counts,
+					 const std::vector<long long>& cost_counts)
+{
+	if (cfg_counts.empty())
+		return;
+
+	const auto cfg_minmax = std::minmax_element(cfg_counts.begin(), cfg_counts.end());
+	const auto atom_minmax = std::minmax_element(atom_counts.begin(), atom_counts.end());
+	const auto cost_minmax = std::minmax_element(cost_counts.begin(), cost_counts.end());
+	const double atom_avg = std::accumulate(atom_counts.begin(), atom_counts.end(), 0.0) / atom_counts.size();
+	const double cost_avg = std::accumulate(cost_counts.begin(), cost_counts.end(), 0.0) / cost_counts.size();
+
+	std::cout << "[" << CurrentTimestamp() << "] "
+			  << label
+			  << " shard balance: cfg[min,max]=" << *cfg_minmax.first << "," << *cfg_minmax.second
+			  << " atoms[min,max,avg]=" << *atom_minmax.first << "," << *atom_minmax.second << "," << atom_avg
+			  << " load[min,max,avg]=" << *cost_minmax.first << "," << *cost_minmax.second << "," << cost_avg
+			  << std::endl;
+}
+
+long long GlobalAtomCount(const std::vector<Configuration>& configs)
+{
+	long long atoms = SumAtoms(configs);
+#ifdef MLIP_MPI
+	long long total_atoms = 0;
+	MPI_Allreduce(&atoms, &total_atoms, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	return total_atoms;
+#else
+	return atoms;
+#endif
+}
+
+std::vector<Neighborhoods> BuildNeighborhoods(const std::vector<Configuration>& configs, double cutoff)
+{
+	std::vector<Neighborhoods> neighborhoods;
+	neighborhoods.reserve(configs.size());
+	for (size_t idx = 0; idx < configs.size(); ++idx) {
+		const Configuration& cfg = configs[idx];
+		double min_lattice_len = 0.0;
+		double max_lattice_len = 0.0;
+		if (cfg.lattice.det() != 0.0) {
+			min_lattice_len = max_lattice_len = std::sqrt(
+				cfg.lattice[0][0] * cfg.lattice[0][0] +
+				cfg.lattice[0][1] * cfg.lattice[0][1] +
+				cfg.lattice[0][2] * cfg.lattice[0][2]);
+			for (int a = 0; a < 3; ++a) {
+				const double len = std::sqrt(
+					cfg.lattice[a][0] * cfg.lattice[a][0] +
+					cfg.lattice[a][1] * cfg.lattice[a][1] +
+					cfg.lattice[a][2] * cfg.lattice[a][2]);
+				min_lattice_len = std::min(min_lattice_len, len);
+				max_lattice_len = std::max(max_lattice_len, len);
+			}
+		}
+		const auto start_time = std::chrono::steady_clock::now();
+		neighborhoods.emplace_back(cfg, cutoff);
+		const double elapsed_seconds = std::chrono::duration<double>(
+			std::chrono::steady_clock::now() - start_time).count();
+		if (elapsed_seconds > 10.0) {
+			std::cout << "[" << CurrentTimestamp() << "] "
+			          << "Neighborhood build done"
+			          << " rank=" << prank
+			          << " local_cfg=" << idx
+			          << " atoms=" << cfg.size()
+			          << " elapsed_s=" << elapsed_seconds
+			          << std::endl;
+		}
+	}
+	return neighborhoods;
+}
+
+bool TryBuildNeighborhoods(const std::vector<Configuration>& configs,
+						   double cutoff,
+						   std::vector<Neighborhoods>& neighborhoods_out)
+{
+	try {
+		neighborhoods_out = BuildNeighborhoods(configs, cutoff);
+		return true;
+	}
+	catch (const std::bad_alloc&) {
+		neighborhoods_out.clear();
+		neighborhoods_out.shrink_to_fit();
+		return false;
+	}
+}
+
+double EstimateConfigurationVolume(const Configuration& cfg)
+{
+	double volume = std::abs(cfg.lattice.det());
+	if (volume > 1.0e-12)
+		return volume;
+
+	if (cfg.size() == 0)
+		return 0.0;
+
+	Vector3 min_pos = cfg.pos(0);
+	Vector3 max_pos = cfg.pos(0);
+	for (int i = 1; i < cfg.size(); ++i) {
+		for (int a = 0; a < 3; ++a) {
+			min_pos[a] = std::min(min_pos[a], cfg.pos(i, a));
+			max_pos[a] = std::max(max_pos[a], cfg.pos(i, a));
+		}
+	}
+
+	const double dx = std::max(1.0e-6, max_pos[0] - min_pos[0]);
+	const double dy = std::max(1.0e-6, max_pos[1] - min_pos[1]);
+	const double dz = std::max(1.0e-6, max_pos[2] - min_pos[2]);
+	return dx * dy * dz;
+}
+
+std::size_t EstimateNeighborhoodCacheBytes(const std::vector<Configuration>& configs, double cutoff)
+{
+	const double sphere_volume = (4.0 / 3.0) * M_PI * cutoff * cutoff * cutoff;
+	long double total_bytes = 0.0L;
+	for (const Configuration& cfg : configs) {
+		if (cfg.size() == 0)
+			continue;
+
+		const double volume = EstimateConfigurationVolume(cfg);
+		const double number_density = volume > 1.0e-12 ? static_cast<double>(cfg.size()) / volume : 0.0;
+		const double expected_neighbors = std::max(1.0, sphere_volume * number_density);
+		const long double entries = static_cast<long double>(cfg.size()) * expected_neighbors;
+		total_bytes += static_cast<long double>(cfg.size()) * 160.0L;
+		total_bytes += entries * 96.0L;
+	}
+	if (total_bytes < 0.0L)
+		return 0;
+	if (total_bytes > static_cast<long double>(std::numeric_limits<std::size_t>::max()))
+		return std::numeric_limits<std::size_t>::max();
+	return static_cast<std::size_t>(total_bytes);
+}
+
+bool ShouldCacheNeighborhoods(const std::vector<Configuration>& configs, double cutoff, std::size_t* estimated_bytes = nullptr)
+{
+	const std::size_t bytes = EstimateNeighborhoodCacheBytes(configs, cutoff);
+	if (estimated_bytes != nullptr)
+		*estimated_bytes = bytes;
+
+	const char* env = std::getenv("MLIP_CACHE_NEIGHBORHOODS");
+	if (env != nullptr) {
+		if (std::strcmp(env, "0") == 0 || std::strcmp(env, "false") == 0 || std::strcmp(env, "FALSE") == 0)
+			return false;
+		if (std::strcmp(env, "1") == 0 || std::strcmp(env, "true") == 0 || std::strcmp(env, "TRUE") == 0)
+			return true;
+	}
+	return bytes <= kNeighborhoodCacheBudgetBytesPerRank;
+}
+
+std::vector<size_t> BuildRescaleSubsetIndices(const std::vector<Configuration>& source)
+{
+	constexpr size_t kRescaleCfgLimitPerRank = 5;
+
+	if (source.empty())
+		return {};
+
+	long long global_cfg_count = static_cast<long long>(source.size());
+#ifdef MLIP_MPI
+	long long local_cfg_count = static_cast<long long>(source.size());
+	MPI_Allreduce(&local_cfg_count, &global_cfg_count, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+#endif
+	if (global_cfg_count <= static_cast<long long>(kRescaleCfgLimitPerRank) * std::max(psize, 1))
+		return {};
+
+	std::vector<size_t> order(source.size());
+	std::iota(order.begin(), order.end(), 0);
+	std::stable_sort(order.begin(), order.end(),
+					 [&](size_t lhs, size_t rhs) {
+						 if (source[lhs].size() != source[rhs].size())
+							 return source[lhs].size() < source[rhs].size();
+						 return lhs < rhs;
+					 });
+
+	std::vector<size_t> picks;
+	picks.reserve(std::min(source.size(), kRescaleCfgLimitPerRank));
+	auto push_unique = [&picks](size_t idx) {
+		if (std::find(picks.begin(), picks.end(), idx) == picks.end())
+			picks.push_back(idx);
+	};
+
+	const size_t n = order.size();
+	push_unique(order[n - 1]);          // max
+	if (n >= 2) push_unique(order[n - 2]); // second max
+	push_unique(order[n / 2]);          // median
+	if (n >= 2) push_unique(order[1]);  // second min
+	push_unique(order[0]);              // min
+
+	return picks;
+}
+
+std::vector<Configuration> GatherConfigurationsByIndex(const std::vector<Configuration>& source,
+														 const std::vector<size_t>& indices)
+{
+	std::vector<Configuration> subset;
+	subset.reserve(indices.size());
+	for (size_t idx : indices)
+		subset.push_back(source[idx]);
+	return subset;
+}
+
+std::vector<Neighborhoods> GatherNeighborhoodsByIndex(const std::vector<Neighborhoods>& source,
+														const std::vector<size_t>& indices)
+{
+	std::vector<Neighborhoods> subset;
+	subset.reserve(indices.size());
+	for (size_t idx : indices)
+		subset.push_back(source[idx]);
+	return subset;
+}
+
 void BroadcastString(std::string& value)
 {
 #ifdef MLIP_MPI
@@ -103,7 +342,24 @@ DatasetStats LoadConfigsViaRank0Shards(const std::string& cfgfnm,
 		if (mkdir(shard_dir.c_str(), 0777) != 0)
 			ERROR("Unable to create shard directory " + shard_dir);
 
+		std::vector<Configuration> all_cfgs;
+		{
+			Configuration cfg;
+			std::ifstream ifs(cfgfnm, std::ios::binary);
+			for (; cfg.Load(ifs); )
+				all_cfgs.push_back(cfg);
+		}
+		std::vector<size_t> order(all_cfgs.size());
+		std::iota(order.begin(), order.end(), 0);
+		std::stable_sort(order.begin(), order.end(),
+						 [&](size_t lhs, size_t rhs) {
+							 return EstimateConfigWork(all_cfgs[lhs]) > EstimateConfigWork(all_cfgs[rhs]);
+						 });
+
 		std::vector<std::ofstream> shard_streams(proc_size);
+		std::vector<long long> shard_cfg_counts(proc_size, 0);
+		std::vector<long long> shard_atom_counts(proc_size, 0);
+		std::vector<long long> shard_costs(proc_size, 0);
 		for (int rank = 0; rank < proc_size; rank++) {
 			const std::string shard_path = shard_dir + "/rank_" + std::to_string(rank) + ".bin";
 			shard_streams[rank].open(shard_path, std::ios::binary | std::ios::trunc);
@@ -111,14 +367,19 @@ DatasetStats LoadConfigsViaRank0Shards(const std::string& cfgfnm,
 				ERROR("Unable to open shard file " + shard_path);
 		}
 
-		Configuration cfg;
-		std::ifstream ifs(cfgfnm, std::ios::binary);
-		for (int cntr = 0; cfg.Load(ifs); cntr++) {
-			const int owner = cntr % proc_size;
+		for (size_t idx : order) {
+			const Configuration& cfg = all_cfgs[idx];
+			const int owner = static_cast<int>(
+				std::min_element(shard_costs.begin(), shard_costs.end()) - shard_costs.begin());
 			cfg.SaveBin(shard_streams[owner]);
+			shard_cfg_counts[owner] += 1;
+			shard_atom_counts[owner] += cfg.size();
+			shard_costs[owner] += EstimateConfigWork(cfg);
 		}
 		for (std::ofstream& ofs : shard_streams)
 			ofs.close();
+		std::vector<Configuration>().swap(all_cfgs);
+		LogShardBalance(label, shard_cfg_counts, shard_atom_counts, shard_costs);
 	}
 
 	BroadcastString(shard_dir);
@@ -158,8 +419,41 @@ DatasetStats AddConfigs(const string cfgfnm, NonLinearRegression& dtr, int proc_
 	return LoadConfigsViaRank0Shards(cfgfnm, proc_rank, proc_size, training_set, "train");
 }
 
-void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr)
+void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhoods>* training_neighborhoods)
 {
+	const std::vector<size_t> rescale_subset_indices = BuildRescaleSubsetIndices(training_set);
+	std::vector<Configuration> rescale_subset =
+		GatherConfigurationsByIndex(training_set, rescale_subset_indices);
+	std::vector<Neighborhoods> rescale_subset_neighborhoods;
+	const std::vector<Neighborhoods>* full_neighborhoods_ptr = training_neighborhoods;
+	if (!rescale_subset.empty()) {
+		if (full_neighborhoods_ptr != nullptr && !full_neighborhoods_ptr->empty())
+			rescale_subset_neighborhoods = GatherNeighborhoodsByIndex(*full_neighborhoods_ptr, rescale_subset_indices);
+		else
+			rescale_subset_neighborhoods = BuildNeighborhoods(rescale_subset, mtpr.CutOff());
+	}
+	std::vector<Configuration>* rescale_training_set = &training_set;
+	const std::vector<Neighborhoods>* rescale_training_neighborhoods = full_neighborhoods_ptr;
+	if (!rescale_subset.empty())
+	{
+		rescale_training_set = &rescale_subset;
+		rescale_training_neighborhoods = &rescale_subset_neighborhoods;
+	}
+	const long long rescale_atoms_local = SumAtoms(*rescale_training_set);
+	const long long full_atoms_local = SumAtoms(training_set);
+	long long rescale_atoms_total = rescale_atoms_local;
+	long long full_atoms_total = full_atoms_local;
+	long long rescale_cfg_total = static_cast<long long>(rescale_training_set->size());
+	long long full_cfg_total = static_cast<long long>(training_set.size());
+#ifdef MLIP_MPI
+	MPI_Allreduce(&rescale_atoms_local, &rescale_atoms_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&full_atoms_local, &full_atoms_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	long long rescale_cfg_local = static_cast<long long>(rescale_training_set->size());
+	long long full_cfg_local = static_cast<long long>(training_set.size());
+	MPI_Allreduce(&rescale_cfg_local, &rescale_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&full_cfg_local, &full_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+#endif
+
 	double min_scaling = mtpr.scaling;
 	double max_scaling = mtpr.scaling;
 	int ind;
@@ -167,17 +461,30 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr)
 		double condition_number[5];
 		double scaling = mtpr.scaling;
 		double scalings[5] = { scaling / 1.21,scaling / 1.11, scaling, scaling * 1.1, scaling * 1.2 };
+		std::vector<std::vector<double> > candidate_coeffs(5, std::vector<double>(mtpr.CoeffCount()));
 		vector<double> coeffs;
 		coeffs.resize(mtpr.linear_coeffs.size() - mtpr.species_count + 2);
-		if (prank == 0) std::cout << "Rescaling...\n";
+		if (prank == 0) {
+			std::cout << "[" << CurrentTimestamp() << "] Rescaling..." << std::endl;
+			if (rescale_atoms_total < full_atoms_total || rescale_cfg_total < full_cfg_total) {
+				std::cout << "[" << CurrentTimestamp() << "] "
+				          << "Rescale subset: "
+				          << rescale_cfg_total << "/" << full_cfg_total << " structures, "
+				          << rescale_atoms_total << "/" << full_atoms_total << " atoms"
+				          << std::endl;
+			}
+		}
 		for (int j = 0; j < 5; j++) {
-			if (prank == 0) std::cout << "   scaling = " << scalings[j] << ", condition number = ";
+			if (prank == 0)
+				std::cout << "[" << CurrentTimestamp() << "] "
+				          << "Rescale trial scaling=" << scalings[j] << std::endl;
 			mtpr.scaling = scalings[j];
-			//                    if (prank == 0) std::cout << " _check  ";
-			trainer.TrainLinear(prank, training_set);
-			//                      if (prank == 0) std::cout << " _check  ";
+			trainer.TrainLinear(prank,
+							   *rescale_training_set,
+							   rescale_training_neighborhoods,
+							   "rescale trial " + std::to_string(j + 1) + "/5");
+			std::memcpy(candidate_coeffs[j].data(), mtpr.Coeff(), mtpr.CoeffCount() * sizeof(double));
 			mtpr.LinCoeff();
-			//                        if (prank == 0) std::cout << " _check  ";
 			double rms = 13.0;
 			coeffs[0] = -3.0;
 			coeffs[1] = -2.0;
@@ -192,7 +499,8 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr)
 			double median = coeffs[coeffs.size() / 2];
 
 			condition_number[j] = rms / median;
-			if (prank == 0) std::cout << rms / median << "\n";
+			if (prank == 0)
+				std::cout << "**condition number =" << rms / median << std::endl;
 		}
 
 		// finds minimal condition number
@@ -201,9 +509,13 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr)
 			if (condition_number[j] < condition_number[ind]) ind = j;
 
 		mtpr.scaling = scalings[ind];
-		if (prank == 0) std::cout << "Rescaling to " << mtpr.scaling << "... ";
-		trainer.TrainLinear(prank, training_set);
-		if (prank == 0) std::cout << "done" << std::endl;
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] "
+			          << "Rescaling selected scaling=" << mtpr.scaling << std::endl;
+		std::memcpy(mtpr.Coeff(), candidate_coeffs[ind].data(), mtpr.CoeffCount() * sizeof(double));
+#ifdef MLIP_MPI
+		MPI_Bcast(mtpr.Coeff(), mtpr.CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+#endif
 		if ((min_scaling < mtpr.scaling) && (mtpr.scaling < max_scaling))
 			ind = 2;
 		else {
@@ -382,6 +694,55 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	MPI_Allreduce(&valid_cfg_local, &valid_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
 	MPI_Allreduce(&valid_atom_local, &valid_atom_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
 #endif
+	std::size_t estimated_cache_bytes = 0;
+	const bool cache_linear_neighborhoods = ShouldCacheNeighborhoods(training_set, mtpr.CutOff(), &estimated_cache_bytes);
+	std::vector<Neighborhoods> linear_training_neighborhoods;
+	const std::vector<Neighborhoods>* linear_training_neighborhoods_ptr = nullptr;
+	if (cache_linear_neighborhoods) {
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Building linear neighborhoods..."
+			          << " estimated_bytes=" << estimated_cache_bytes
+			          << " budget_bytes=" << kNeighborhoodCacheBudgetBytesPerRank
+			          << std::endl;
+#ifdef MLIP_MPI
+		double nbh_build_start = MPI_Wtime();
+#else
+		double nbh_build_start = static_cast<double>(clock()) / CLOCKS_PER_SEC;
+#endif
+		const bool built_ok = TryBuildNeighborhoods(training_set, mtpr.CutOff(), linear_training_neighborhoods);
+#ifdef MLIP_MPI
+		double nbh_build_seconds = MPI_Wtime() - nbh_build_start;
+		int built_local = built_ok ? 1 : 0;
+		int built_global = 0;
+		MPI_Allreduce(&built_local, &built_global, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+		double nbh_build_min = 0.0;
+		double nbh_build_max = 0.0;
+		MPI_Reduce(&nbh_build_seconds, &nbh_build_min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+		MPI_Reduce(&nbh_build_seconds, &nbh_build_max, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+		MPI_Barrier(MPI_COMM_WORLD);
+#else
+		double nbh_build_seconds = static_cast<double>(clock()) / CLOCKS_PER_SEC - nbh_build_start;
+		int built_global = built_ok ? 1 : 0;
+		double nbh_build_min = nbh_build_seconds;
+		double nbh_build_max = nbh_build_seconds;
+#endif
+		if (built_global) {
+			linear_training_neighborhoods_ptr = &linear_training_neighborhoods;
+			if (prank == 0)
+				std::cout << "[" << CurrentTimestamp() << "] Linear neighborhoods ready"
+				          << " build_s[min,max]=" << nbh_build_min << "," << nbh_build_max
+				          << std::endl;
+		} else if (prank == 0) {
+			std::cout << "[" << CurrentTimestamp() << "] Linear neighborhood cache fallback"
+			          << " build_s[min,max]=" << nbh_build_min << "," << nbh_build_max
+			          << " reason=bad_alloc" << std::endl;
+		}
+	} else if (prank == 0) {
+		std::cout << "[" << CurrentTimestamp() << "] Skipping full neighborhood cache"
+		          << " estimated_bytes=" << estimated_cache_bytes
+		          << " budget_bytes=" << kNeighborhoodCacheBudgetBytesPerRank
+		          << std::endl;
+	}
 
         if (prank == 0) {std::cout <<"num_of_species: " <<mtpr.species_count  <<std::endl;
                          std::cout <<"training structures: " << train_cfg_total << std::endl;
@@ -428,8 +789,16 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		}
     //     if (prank == 0) {std::cout << mtpr.regression_coeffs[mtpr.radial_func_count*( mtpr.Get_RB_size() + mtpr.species_count)-4] << std::endl;}
 #ifdef MLIP_MPI
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Random init coeff broadcast start" << std::endl;
 		MPI_Bcast(&mtpr.Coeff()[0], mtpr.CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Random init coeff broadcast done" << std::endl;
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Random init barrier start" << std::endl;
                 MPI_Barrier(MPI_COMM_WORLD);
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Random init barrier done" << std::endl;
 #endif
 	}
          trainer.shift(do_shift);
@@ -442,13 +811,17 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 //		                                                                  
 //
                if (prank == 0){
+			std::cout << "[" << CurrentTimestamp() << "] Saving ini.mtp start" << std::endl;
                         mtpr.Save("ini.mtp");
+			std::cout << "[" << CurrentTimestamp() << "] Saving ini.mtp done" << std::endl;
                       
                       }
 
-               Rescale(trainer, mtpr);
+	       if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Entering Rescale" << std::endl;
+               Rescale(trainer, mtpr, linear_training_neighborhoods_ptr);
                if (do_sample){
-               trainer.random_sample(prank, training_set, 10);
+               trainer.random_sample(prank, training_set, 10, linear_training_neighborhoods_ptr);
                }
 		if (prank == 0)
 			std::cout << "Pre-training started" << std::endl;

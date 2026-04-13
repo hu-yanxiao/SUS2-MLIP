@@ -7,6 +7,9 @@
  */
 
 #include <algorithm>
+#include <chrono>
+#include <ctime>
+#include <iostream>
 #include <memory.h>
 
 #include "neighborhoods.h"
@@ -15,6 +18,14 @@
 using namespace std;
 
 namespace {
+
+std::string CurrentTimestamp()
+{
+	std::time_t now = std::time(nullptr);
+	char buf[32];
+	std::strftime(buf, sizeof(buf), "%F %T", std::localtime(&now));
+	return std::string(buf);
+}
 
 struct AxisAlignedCellGrid
 {
@@ -93,6 +104,97 @@ inline void AppendNeighbor(Neighborhood& neighborhood,
 	neighborhood.types.push_back(type);
 }
 
+bool HasOriginalAtomWithinCutoff(const AxisAlignedCellGrid& cell_grid,
+								 const std::vector<Vector3>& positions,
+								 const Vector3& candidate,
+								 double cut_off_sq)
+{
+	const Vector3int origin_cell = cell_grid.Locate(candidate);
+	for (int dx = -1; dx <= 1; ++dx) {
+		const int cx = origin_cell[0] + dx;
+		if (cx < 0 || cx >= cell_grid.dims[0])
+			continue;
+
+		for (int dy = -1; dy <= 1; ++dy) {
+			const int cy = origin_cell[1] + dy;
+			if (cy < 0 || cy >= cell_grid.dims[1])
+				continue;
+
+			for (int dz = -1; dz <= 1; ++dz) {
+				const int cz = origin_cell[2] + dz;
+				if (cz < 0 || cz >= cell_grid.dims[2])
+					continue;
+
+				const std::vector<int>& bucket =
+					cell_grid.cell_atoms[cell_grid.Flatten(cx, cy, cz)];
+				for (size_t idx = 0; idx < bucket.size(); ++idx) {
+					const Vector3& origin = positions[bucket[idx]];
+					const double dx_ij = candidate[0] - origin[0];
+					const double dy_ij = candidate[1] - origin[1];
+					const double dz_ij = candidate[2] - origin[2];
+					const double dist_sq = dx_ij * dx_ij + dy_ij * dy_ij + dz_ij * dz_ij;
+					if (dist_sq <= cut_off_sq)
+						return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+bool CanUseOrthorhombicMinimumImage(const Configuration& cfg, double cut_off)
+{
+	const double eps = 1.0e-12;
+	if (cfg.size() == 0)
+		return false;
+	if (std::abs(cfg.lattice[0][1]) > eps || std::abs(cfg.lattice[0][2]) > eps ||
+		std::abs(cfg.lattice[1][0]) > eps || std::abs(cfg.lattice[1][2]) > eps ||
+		std::abs(cfg.lattice[2][0]) > eps || std::abs(cfg.lattice[2][1]) > eps)
+		return false;
+	const double lx = std::abs(cfg.lattice[0][0]);
+	const double ly = std::abs(cfg.lattice[1][1]);
+	const double lz = std::abs(cfg.lattice[2][2]);
+	if (lx <= eps || ly <= eps || lz <= eps)
+		return false;
+	return std::min(lx, std::min(ly, lz)) > 2.0 * cut_off;
+}
+
+void InitNbhs_ConstructNbhs_OrthorhombicMinImage(std::vector<Neighborhood>& nbhs,
+												 const Configuration& cfg,
+												 double cut_off)
+{
+	const int size = cfg.size();
+	const double cut_off_sq = cut_off * cut_off;
+	const double lx = cfg.lattice[0][0];
+	const double ly = cfg.lattice[1][1];
+	const double lz = cfg.lattice[2][2];
+
+	nbhs.assign(size, Neighborhood());
+	for (int i = 0; i < size; ++i)
+		nbhs[i].my_type = cfg.type(i);
+
+	for (int i = 0; i < size; ++i) {
+		for (int j = i + 1; j < size; ++j) {
+			double dx = cfg.pos(j, 0) - cfg.pos(i, 0);
+			double dy = cfg.pos(j, 1) - cfg.pos(i, 1);
+			double dz = cfg.pos(j, 2) - cfg.pos(i, 2);
+
+			dx -= std::round(dx / lx) * lx;
+			dy -= std::round(dy / ly) * ly;
+			dz -= std::round(dz / lz) * lz;
+
+			const double dist_sq = dx * dx + dy * dy + dz * dz;
+			if (dist_sq >= cut_off_sq)
+				continue;
+
+			const double dist_ij = std::sqrt(dist_sq);
+			const Vector3 vec_ij(dx, dy, dz);
+			AppendNeighbor(nbhs[i], j, vec_ij, dist_ij, cfg.type(j));
+			AppendNeighbor(nbhs[j], i, -vec_ij, dist_ij, cfg.type(i));
+		}
+	}
+}
+
 } // namespace
 
 //!	Procedure adds ghost atoms to the configuration according to the periodic extention.
@@ -100,8 +202,10 @@ inline void AppendNeighbor(Neighborhood& neighborhood,
 void Neighborhoods::InitNbhs_AddGhostAtoms(const Configuration& cfg, const double cut_off)
 {
 	const int size = cfg.size();
+	const double cut_off_sq = cut_off * cut_off;
 	pos.resize(size);
 	memcpy(&pos[0][0], &cfg.pos(0,0), size*sizeof(Vector3));
+	const std::vector<Vector3> orig_positions(pos.begin(), pos.begin() + size);
 
 	// computing the bounding box enclosing all the atoms
 	Vector3 min_pos = pos[0];
@@ -121,6 +225,8 @@ void Neighborhoods::InitNbhs_AddGhostAtoms(const Configuration& cfg, const doubl
 		is_periodic[a] = cfg.lattice[a][0] != 0.0
 		              || cfg.lattice[a][1] != 0.0
 		              || cfg.lattice[a][2] != 0.0;
+
+	AxisAlignedCellGrid original_grid(orig_positions, cut_off);
 
 	// periodically extends the box until no new ghost atoms are added
 	bool added_new_points = true;
@@ -151,12 +257,7 @@ void Neighborhoods::InitNbhs_AddGhostAtoms(const Configuration& cfg, const doubl
 								|| (candidate[2] > max_pos[2] + cut_off))
 								continue;
 
-							int jnd;
-							for (jnd = 0;
-								(jnd < size) && distance(candidate, pos[jnd]) > cut_off; jnd++)
-								;
-
-							if (jnd < size) { // found a point to add
+							if (HasOriginalAtomWithinCutoff(original_grid, orig_positions, candidate, cut_off_sq)) {
 								pos.push_back(candidate);
 								orig_atom_inds.push_back(ind);
 								added_new_points = true;
@@ -256,20 +357,60 @@ void Neighborhoods::InitNbhs_RemoveGhostAtoms()
 
 void Neighborhoods::InitNbhs(const Configuration& cfg, const double _cutoff)
 {
+	const auto start_time = std::chrono::steady_clock::now();
 	if (nbhs.size() != 0)
 		nbhs.clear();
 
+	int ghost_atoms = 0;
 	if (cfg.size() != 0) {
 		orig_atom_inds.resize(cfg.size());
 		for (int i = 0; i < cfg.size(); i++)
 			orig_atom_inds[i] = i;
 
-		InitNbhs_AddGhostAtoms(cfg, _cutoff);
-		InitNbhs_ConstructNbhs(cfg, _cutoff);
-		InitNbhs_RemoveGhostAtoms();
+		if (CanUseOrthorhombicMinimumImage(cfg, _cutoff)) {
+			InitNbhs_ConstructNbhs_OrthorhombicMinImage(nbhs, cfg, _cutoff);
+			ghost_atoms = 0;
+			pos.clear();
+			orig_atom_inds.clear();
+		} else {
+			InitNbhs_AddGhostAtoms(cfg, _cutoff);
+			InitNbhs_ConstructNbhs(cfg, _cutoff);
+			ghost_atoms = static_cast<int>(pos.size()) - cfg.size();
+			InitNbhs_RemoveGhostAtoms();
+		}
 	}
 
 	cutoff = _cutoff;
+
+	const double elapsed_seconds = std::chrono::duration<double>(
+		std::chrono::steady_clock::now() - start_time).count();
+	if (elapsed_seconds > 2.0) {
+		double min_lattice_len = 0.0;
+		double max_lattice_len = 0.0;
+		if (cfg.lattice.det() != 0.0) {
+			min_lattice_len = max_lattice_len = std::sqrt(
+				cfg.lattice[0][0] * cfg.lattice[0][0] +
+				cfg.lattice[0][1] * cfg.lattice[0][1] +
+				cfg.lattice[0][2] * cfg.lattice[0][2]);
+			for (int a = 0; a < 3; ++a) {
+				const double len = std::sqrt(
+					cfg.lattice[a][0] * cfg.lattice[a][0] +
+					cfg.lattice[a][1] * cfg.lattice[a][1] +
+					cfg.lattice[a][2] * cfg.lattice[a][2]);
+				min_lattice_len = std::min(min_lattice_len, len);
+				max_lattice_len = std::max(max_lattice_len, len);
+			}
+		}
+		std::cout << "[" << CurrentTimestamp() << "] "
+		          << "Neighborhoods slow cfg"
+		          << " atoms=" << cfg.size()
+		          << " ghosts=" << ghost_atoms
+		          << " cutoff=" << _cutoff
+		          << " lattice_min=" << min_lattice_len
+		          << " lattice_max=" << max_lattice_len
+		          << " elapsed_s=" << elapsed_seconds
+		          << std::endl;
+	}
 }
 
 //!	Cut off radius neighborhoods initiated by. if neighborhoods not inited nbs_init_cutoff = 0 

@@ -14,7 +14,7 @@
 #include "../mtpr_trainer.h"
 #include "../../src/error_monitor.h"
 
-void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr);
+void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhoods>* training_neighborhoods = nullptr);
 void Train_MTPR(std::vector<std::string>& args,std::map<std::string, std::string>& opts);
 
 

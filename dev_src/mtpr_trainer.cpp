@@ -24,6 +24,8 @@
 
 #include <ctime>
 #include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <sstream>
 
 using namespace std;
@@ -36,6 +38,108 @@ std::string CurrentTimestamp()
 	char buf[32];
 	std::strftime(buf, sizeof(buf), "%F %T", std::localtime(&now));
 	return std::string(buf);
+}
+
+constexpr std::size_t kNeighborhoodCacheBudgetBytesPerRank = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+
+void ReduceMinMaxDouble(double local_value, double& min_value, double& max_value)
+{
+#ifdef MLIP_MPI
+	MPI_Reduce(&local_value, &min_value, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+	MPI_Reduce(&local_value, &max_value, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+#else
+	min_value = local_value;
+	max_value = local_value;
+#endif
+}
+
+void ReduceMinMaxLongLong(long long local_value, long long& min_value, long long& max_value)
+{
+#ifdef MLIP_MPI
+	MPI_Reduce(&local_value, &min_value, 1, MPI_LONG_LONG_INT, MPI_MIN, 0, MPI_COMM_WORLD);
+	MPI_Reduce(&local_value, &max_value, 1, MPI_LONG_LONG_INT, MPI_MAX, 0, MPI_COMM_WORLD);
+#else
+	min_value = local_value;
+	max_value = local_value;
+#endif
+}
+
+double EstimateConfigurationVolume(const Configuration& cfg)
+{
+	double volume = std::abs(cfg.lattice.det());
+	if (volume > 1.0e-12)
+		return volume;
+
+	if (cfg.size() == 0)
+		return 0.0;
+
+	Vector3 min_pos = cfg.pos(0);
+	Vector3 max_pos = cfg.pos(0);
+	for (int i = 1; i < cfg.size(); ++i) {
+		for (int a = 0; a < 3; ++a) {
+			min_pos[a] = std::min(min_pos[a], cfg.pos(i, a));
+			max_pos[a] = std::max(max_pos[a], cfg.pos(i, a));
+		}
+	}
+
+	const double dx = std::max(1.0e-6, max_pos[0] - min_pos[0]);
+	const double dy = std::max(1.0e-6, max_pos[1] - min_pos[1]);
+	const double dz = std::max(1.0e-6, max_pos[2] - min_pos[2]);
+	return dx * dy * dz;
+}
+
+std::size_t EstimateNeighborhoodCacheBytes(const std::vector<Configuration>& configs, double cutoff)
+{
+	const double sphere_volume = (4.0 / 3.0) * M_PI * cutoff * cutoff * cutoff;
+	long double total_bytes = 0.0L;
+	for (const Configuration& cfg : configs) {
+		if (cfg.size() == 0)
+			continue;
+		const double volume = EstimateConfigurationVolume(cfg);
+		const double number_density = volume > 1.0e-12 ? static_cast<double>(cfg.size()) / volume : 0.0;
+		const double expected_neighbors = std::max(1.0, sphere_volume * number_density);
+		const long double entries = static_cast<long double>(cfg.size()) * expected_neighbors;
+		total_bytes += static_cast<long double>(cfg.size()) * 160.0L;
+		total_bytes += entries * 96.0L;
+	}
+	if (total_bytes < 0.0L)
+		return 0;
+	if (total_bytes > static_cast<long double>(std::numeric_limits<std::size_t>::max()))
+		return std::numeric_limits<std::size_t>::max();
+	return static_cast<std::size_t>(total_bytes);
+}
+
+bool ShouldCacheNeighborhoods(const std::vector<Configuration>& configs, double cutoff, std::size_t* estimated_bytes = nullptr)
+{
+	const std::size_t bytes = EstimateNeighborhoodCacheBytes(configs, cutoff);
+	if (estimated_bytes != nullptr)
+		*estimated_bytes = bytes;
+	const char* env = std::getenv("MLIP_CACHE_NEIGHBORHOODS");
+	if (env != nullptr) {
+		if (std::strcmp(env, "0") == 0 || std::strcmp(env, "false") == 0 || std::strcmp(env, "FALSE") == 0)
+			return false;
+		if (std::strcmp(env, "1") == 0 || std::strcmp(env, "true") == 0 || std::strcmp(env, "TRUE") == 0)
+			return true;
+	}
+	return bytes <= kNeighborhoodCacheBudgetBytesPerRank;
+}
+
+bool TryBuildNeighborhoods(const std::vector<Configuration>& configs,
+						   double cutoff,
+						   std::vector<Neighborhoods>& neighborhoods_out)
+{
+	try {
+		neighborhoods_out.clear();
+		neighborhoods_out.reserve(configs.size());
+		for (const Configuration& cfg : configs)
+			neighborhoods_out.emplace_back(cfg, cutoff);
+		return true;
+	}
+	catch (const std::bad_alloc&) {
+		neighborhoods_out.clear();
+		neighborhoods_out.shrink_to_fit();
+		return false;
+	}
 }
 
 int SuggestedLinearSolveThreads(int n)
@@ -420,24 +524,70 @@ double* MTPR_trainer::ConstructLinHessian()
 	return Hess;
 }
 
-void MTPR_trainer::TrainLinear(int prank, vector<Configuration>& training_set, const std::vector<Neighborhoods>* neighborhoods)
+void MTPR_trainer::TrainLinear(int prank,
+							   vector<Configuration>& training_set,
+							   const std::vector<Neighborhoods>* neighborhoods,
+							   const std::string& context)
 {
-  
+	const long long local_cfg_count = static_cast<long long>(training_set.size());
+	long long local_atom_count = 0;
+	for (const Configuration& cfg : training_set)
+		local_atom_count += cfg.size();
+
 	p_mlmtpr->Orthogonalize();
 
 	ClearSLAE();
- 
+
+	double build_start = 0.0;
+#ifdef MLIP_MPI
+	build_start = MPI_Wtime();
+#else
+	build_start = static_cast<double>(clock()) / CLOCKS_PER_SEC;
+#endif
 	for (size_t i = 0; i < training_set.size(); ++i)
 		AddToSLAE(training_set[i], 1.0, neighborhoods == nullptr ? nullptr : &(*neighborhoods)[i]);
-   
+	double build_seconds = 0.0;
+#ifdef MLIP_MPI
+	build_seconds = MPI_Wtime() - build_start;
+#else
+	build_seconds = static_cast<double>(clock()) / CLOCKS_PER_SEC - build_start;
+#endif
+
 #ifdef MLIP_MPI
 
 	int n = p_mlmtpr->alpha_count - 1 + p_mlmtpr->species_count;		// Matrix size
+	long long min_cfg_count = 0, max_cfg_count = 0;
+	long long min_atom_count = 0, max_atom_count = 0;
+	long long min_eqn_count = 0, max_eqn_count = 0;
+	double min_build_seconds = 0.0, max_build_seconds = 0.0;
+	const std::string prefix = context.empty() ? "TrainLinear" : "TrainLinear[" + context + "]";
+	ReduceMinMaxLongLong(local_cfg_count, min_cfg_count, max_cfg_count);
+	ReduceMinMaxLongLong(local_atom_count, min_atom_count, max_atom_count);
+	ReduceMinMaxLongLong(static_cast<long long>(quad_opt_eqn_count), min_eqn_count, max_eqn_count);
+	ReduceMinMaxDouble(build_seconds, min_build_seconds, max_build_seconds);
+	double reduce_start = MPI_Wtime();
 	if (prank == 0) {
+		std::cout << "[" << CurrentTimestamp() << "] TrainLinear build done"
+		          << " ctx=" << prefix
+		          << " n=" << n
+		          << " cfg[min,max]=" << min_cfg_count << "," << max_cfg_count
+		          << " atoms[min,max]=" << min_atom_count << "," << max_atom_count
+		          << " eq[min,max]=" << min_eqn_count << "," << max_eqn_count
+		          << " build_s[min,max]=" << min_build_seconds << "," << max_build_seconds
+		          << std::endl;
 		MPI_Reduce(MPI_IN_PLACE, quad_opt_matr, n*n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 		MPI_Reduce(MPI_IN_PLACE, quad_opt_vec, n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 		MPI_Reduce(MPI_IN_PLACE, &quad_opt_scalar, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		const double reduce_seconds = MPI_Wtime() - reduce_start;
+		std::cout << "[" << CurrentTimestamp() << "] TrainLinear reduce done"
+		          << " ctx=" << prefix
+		          << " reduce_s=" << reduce_seconds << std::endl;
+		const double solve_start = MPI_Wtime();
 		SolveSLAE();
+		const double solve_seconds = MPI_Wtime() - solve_start;
+		std::cout << "[" << CurrentTimestamp() << "] TrainLinear solve done"
+		          << " ctx=" << prefix
+		          << " solve_s=" << solve_seconds << std::endl;
 	} else {
 		MPI_Reduce(quad_opt_matr, nullptr, n*n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
 		MPI_Reduce(quad_opt_vec, nullptr, n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
@@ -448,14 +598,24 @@ void MTPR_trainer::TrainLinear(int prank, vector<Configuration>& training_set, c
 	SolveSLAE();
 #endif
 #ifdef MLIP_MPI
+	double bcast_start = MPI_Wtime();
         MPI_Barrier(MPI_COMM_WORLD);
 	MPI_Bcast(&p_mlmtpr->Coeff()[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	double bcast_seconds = MPI_Wtime() - bcast_start;
+	double min_bcast_seconds = 0.0, max_bcast_seconds = 0.0;
+	ReduceMinMaxDouble(bcast_seconds, min_bcast_seconds, max_bcast_seconds);
+	if (prank == 0) {
+		std::cout << "[" << CurrentTimestamp() << "] TrainLinear bcast done"
+		          << " ctx=" << prefix
+		          << " bcast_s[min,max]=" << min_bcast_seconds << "," << max_bcast_seconds
+		          << std::endl;
+	}
 #endif
 
 
 }
 
-void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training_set, int max_step) {
+void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training_set, int max_step, const std::vector<Neighborhoods>* neighborhoods) {
 	int nlin= p_mlmtpr->alpha_count + p_mlmtpr->species_count - 1;
 //	int n_coeffe= p_mlip->CoeffCount();
 //	double* x = p_mlip->Coeff();
@@ -488,10 +648,10 @@ void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training
 #ifdef MLIP_MPI												   
 	MPI_Allreduce(&m, &K, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 #endif
-             TrainLinear(prank, training_set);
+             TrainLinear(prank, training_set, neighborhoods, "random_sample init");
              if (prank == 0 ) {std::cout << _x.size() <<" " <<n_coeffe<<std::endl; }
 		//	 CalcObjectiveFunctionGrad(training_set);
-	      _loss= ObjectiveFunction(training_set);
+	      _loss= ObjectiveFunction(training_set, neighborhoods);
              loss_ /= K;
              std_ /= K;
 if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
@@ -541,10 +701,10 @@ if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
         //                                                  std::cout << p_mlmtpr->regression_coeffs[i*(n_rb+n_s)+j] << std::endl;
          //                                                  }
            //                                                       }      }
-		TrainLinear(prank, training_set);
+		TrainLinear(prank, training_set, neighborhoods, "random_sample step " + std::to_string(num_step));
 //              if (prank == 0 && num_step< 3) {std::cout << p_mlmtpr->regression_coeffs[0] << " " <<p_mlmtpr->regression_coeffs[(n_rb+n_s)*n_r-3]  <<" " <<n_coeffe<<std::endl; }
 	//	CalcObjectiveFunctionGrad(training_set);
-		_loss= ObjectiveFunction(training_set);
+		_loss= ObjectiveFunction(training_set, neighborhoods);
 		loss_ /= K;
 		std_ /= K;
 #ifdef MLIP_MPI
@@ -645,9 +805,34 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #endif
 
 	std::vector<Neighborhoods> training_neighborhoods;
-	training_neighborhoods.reserve(training_set.size());
-	for (const Configuration& cfg : training_set)
-		training_neighborhoods.emplace_back(cfg, p_mlmtpr->CutOff());
+	const long long local_atom_count = [&training_set]() {
+		long long total_atoms = 0;
+		for (const Configuration& cfg : training_set)
+			total_atoms += cfg.size();
+		return total_atoms;
+	}();
+	std::size_t estimated_cache_bytes = 0;
+	bool cache_training_neighborhoods =
+		ShouldCacheNeighborhoods(training_set, p_mlmtpr->CutOff(), &estimated_cache_bytes);
+	if (cache_training_neighborhoods) {
+		const bool built_ok = TryBuildNeighborhoods(training_set, p_mlmtpr->CutOff(), training_neighborhoods);
+		if (built_ok) {
+			if (prank == 0)
+				std::cout << "[" << CurrentTimestamp() << "] BFGS neighborhood cache enabled"
+				          << " estimated_bytes=" << estimated_cache_bytes << std::endl;
+		} else {
+			cache_training_neighborhoods = false;
+			if (prank == 0)
+				std::cout << "[" << CurrentTimestamp() << "] BFGS neighborhood cache fallback"
+				          << " estimated_bytes=" << estimated_cache_bytes
+				          << " reason=bad_alloc" << std::endl;
+		}
+	} else if (prank == 0) {
+		std::cout << "[" << CurrentTimestamp() << "] BFGS neighborhood cache disabled"
+		          << " estimated_bytes=" << estimated_cache_bytes
+		          << " budget_bytes=" << kNeighborhoodCacheBudgetBytesPerRank
+		          << std::endl;
+	}
 
 	bfgs.Set_x(x, n);
 	const bool distributed_bfgs = bfgs.UsingDistributedDense();
@@ -741,7 +926,10 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				*/
 				if (num_step < 3000 && do_lin) 
                                 {
-                                 TrainLinear(prank, training_set, &training_neighborhoods);
+                                 TrainLinear(prank,
+										  training_set,
+										  cache_training_neighborhoods ? &training_neighborhoods : nullptr,
+										  "bfgs refresh step " + std::to_string(num_step));
                                 }
 			//	TrainLinear(prank, training_set);
 
@@ -760,7 +948,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #ifdef MLIP_MPI
 		MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 #endif
-		CalcObjectiveFunctionGrad(training_set, &training_neighborhoods);
+		CalcObjectiveFunctionGrad(training_set, cache_training_neighborhoods ? &training_neighborhoods : nullptr);
 
 		loss_ /= K;
 		std_ /= K;
