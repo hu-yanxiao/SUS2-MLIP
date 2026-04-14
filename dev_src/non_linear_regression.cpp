@@ -44,6 +44,54 @@ inline void AccumulateStressErrorMetrics(const Matrix3& lhs,
 }
 }
 
+void NonLinearRegression::PrepareTypeScratch(const Configuration& cfg)
+{
+	for (int type : active_type_scratch_) {
+		type_count_scratch_[type] = 0;
+		type_mean_scratch_[type] = 0.0;
+		type_joint_scratch_[type] = 0.0;
+	}
+	active_type_scratch_.clear();
+
+	int max_type = -1;
+	for (int type : cfg.types_)
+		max_type = std::max(max_type, type);
+	if (max_type < 0)
+		return;
+
+	const std::size_t required_size = static_cast<std::size_t>(max_type + 1);
+	if (type_count_scratch_.size() < required_size) {
+		type_count_scratch_.resize(required_size, 0);
+		type_mean_scratch_.resize(required_size, 0.0);
+		type_joint_scratch_.resize(required_size, 0.0);
+	}
+
+	for (int type : cfg.types_) {
+		if (type_count_scratch_[type] == 0)
+			active_type_scratch_.push_back(type);
+		++type_count_scratch_[type];
+	}
+}
+
+void NonLinearRegression::ResetObjectiveAccumulators()
+{
+	loss_ = 0.0;
+	std_ = 0.0;
+	stdd_ = 0.0;
+	mean_1 = 0.0;
+	mean_2 = 0.0;
+	mean_3 = 0.0;
+	metric_energy_abs_sum_ = 0.0;
+	metric_energy_sq_weighted_sum_ = 0.0;
+	metric_force_abs_component_sum_ = 0.0;
+	metric_force_sq_component_sum_ = 0.0;
+	metric_stress_abs_component_sum_ = 0.0;
+	metric_stress_sq_component_sum_ = 0.0;
+	metric_energy_atom_count_ = 0;
+	metric_force_component_count_ = 0;
+	metric_stress_component_count_ = 0;
+}
+
 void NonLinearRegression::AddLoss(const Configuration & orig)
 {
 	AddLoss(orig, nullptr);
@@ -61,13 +109,13 @@ void NonLinearRegression::AddLoss(const Configuration & orig, const Neighborhood
 	else
 		p_mlip->CalcEFS(cfg);
 
-	if (orig.has_energy() && cfg.has_energy()) {
+	if (collect_error_metrics_ && orig.has_energy() && cfg.has_energy()) {
 		const double energy_delta = orig.energy - cfg.energy;
 		metric_energy_abs_sum_ += std::abs(energy_delta);
 		metric_energy_sq_weighted_sum_ += energy_delta * energy_delta / orig.size();
 		metric_energy_atom_count_ += orig.size();
 	}
-	if (orig.has_forces() && cfg.has_forces()) {
+	if (collect_error_metrics_ && orig.has_forces() && cfg.has_forces()) {
 		for (int i = 0; i < cfg.size(); i++) {
 			for (int a = 0; a < 3; a++)
 			{
@@ -78,7 +126,7 @@ void NonLinearRegression::AddLoss(const Configuration & orig, const Neighborhood
 		}
 		metric_force_component_count_ += static_cast<long long>(3) * cfg.size();
 	}
-	if (orig.has_stresses() && cfg.has_stresses()) {
+	if (collect_error_metrics_ && orig.has_stresses() && cfg.has_stresses()) {
 		AccumulateStressErrorMetrics(cfg.stresses,
 									 orig.stresses,
 									 metric_stress_abs_component_sum_,
@@ -93,18 +141,14 @@ void NonLinearRegression::AddLoss(const Configuration & orig, const Neighborhood
 	if (need_std_terms)
 	{
 		const double mean_ = orig.energy / orig.size();
-		std::map<int, int> type_num;
-		std::vector<double> type_mean(100, 0.0);
+		PrepareTypeScratch(cfg);
 
-		std::for_each(cfg.types_.begin(), cfg.types_.end(), [&](int elem) {
-			type_num[elem]++;
-		});
+		std::vector<double>& type_mean = type_mean_scratch_;
 		for (int i = 0; i < cfg.size(); i++)
-			type_mean[cfg.type(i)] += cfg.cal_se[i] / type_num[cfg.type(i)];
+			type_mean[cfg.type(i)] += cfg.cal_se[i] / type_count_scratch_[cfg.type(i)];
 
-		for (int i = 0; i < (int)type_mean.size(); i++)
-			if (type_num.count(i) > 0)
-				_stdd_ += (type_mean[i] - mean_) * (type_mean[i] - mean_);
+		for (int type : active_type_scratch_)
+			_stdd_ += (type_mean[type] - mean_) * (type_mean[type] - mean_);
 
 		for (int i = 0; i < cfg.size(); i++)
 			_std_ += 20.0 * (cfg.cal_se[i] - type_mean[cfg.type(i)]) * (cfg.cal_se[i] - type_mean[cfg.type(i)])
@@ -178,13 +222,13 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 	else
 		p_mlip->CalcEFS(cfg);
 
-	if (orig.has_energy() && cfg.has_energy()) {
+	if (collect_error_metrics_ && orig.has_energy() && cfg.has_energy()) {
 		const double energy_delta = orig.energy - cfg.energy;
 		metric_energy_abs_sum_ += std::abs(energy_delta);
 		metric_energy_sq_weighted_sum_ += energy_delta * energy_delta / orig.size();
 		metric_energy_atom_count_ += orig.size();
 	}
-	if (orig.has_forces() && cfg.has_forces()) {
+	if (collect_error_metrics_ && orig.has_forces() && cfg.has_forces()) {
 		for (int i = 0; i < cfg.size(); i++) {
 			for (int a = 0; a < 3; a++)
 			{
@@ -195,7 +239,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 		}
 		metric_force_component_count_ += static_cast<long long>(3) * cfg.size();
 	}
-	if (orig.has_stresses() && cfg.has_stresses()) {
+	if (collect_error_metrics_ && orig.has_stresses() && cfg.has_stresses()) {
 		AccumulateStressErrorMetrics(cfg.stresses,
 									 orig.stresses,
 									 metric_stress_abs_component_sum_,
@@ -219,32 +263,25 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 	double _std_ = 0;
 	double _stdd_ = 0;
 	double mean_ = 0.0;
-	std::map<int, int> type_num;
-	std::vector<double> type_mean;
-	std::vector<double> type_joint;
+	std::vector<double>& type_mean = type_mean_scratch_;
+	std::vector<double>& type_joint = type_joint_scratch_;
 	if (need_std_terms)
 	{
 		mean_ = orig.energy / orig.size();
-		type_mean.assign(100, 0.0);
-		type_joint.assign(100, 0.0);
-
-		std::for_each(cfg.types_.begin(), cfg.types_.end(), [&](int elem) {
-			type_num[elem]++;
-		});
+		PrepareTypeScratch(cfg);
 		for (int i = 0; i < cfg.size(); i++)
-			type_mean[cfg.type(i)] += cfg.cal_se[i] / type_num[cfg.type(i)];
+			type_mean[cfg.type(i)] += cfg.cal_se[i] / type_count_scratch_[cfg.type(i)];
 
-		mean_1 += type_mean[0];
-		mean_2 += type_mean[1];
-		mean_3 += type_mean[2];
+		if ((int)type_mean.size() > 0) mean_1 += type_mean[0];
+		if ((int)type_mean.size() > 1) mean_2 += type_mean[1];
+		if ((int)type_mean.size() > 2) mean_3 += type_mean[2];
 
 		for (int i = 0; i < cfg.size(); i++)
 			type_joint[cfg.type(i)] += (cfg.cal_se[i] - type_mean[cfg.type(i)]) * 200.0 / (200.0 + orig.force(i).NormSq())
-				/ type_num[cfg.type(i)] / orig.size();
+				/ type_count_scratch_[cfg.type(i)] / orig.size();
 
-		for (int i = 0; i < (int)type_mean.size(); i++)
-			if (type_num.count(i) > 0)
-				_stdd_ += (type_mean[i] - mean_) * (type_mean[i] - mean_);
+		for (int type : active_type_scratch_)
+			_stdd_ += (type_mean[type] - mean_) * (type_mean[type] - mean_);
 
 		for (int i = 0; i < cfg.size(); i++)
 			_std_ += (cfg.cal_se[i] - type_mean[cfg.type(i)]) * (cfg.cal_se[i] - type_mean[cfg.type(i)])
@@ -309,12 +346,12 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 	for (int i = 0; i < cfg.size(); i++)
 	{
 		dLdE_i_[i] += dLdE;
-		if (need_std_terms)
-		{
-			dLdE_i_[i] += std_scaling * 2.0 * ((cfg.cal_se[i] - type_mean[cfg.type(i)]) * 200.0 / (200.0 + orig.force(i).NormSq()) / orig.size()
-				- type_joint[cfg.type(i)])
-				+ stdd_scaling * 2.0 * (type_mean[cfg.type(i)] - mean_) / type_num[cfg.type(i)];
-		}
+			if (need_std_terms)
+			{
+				dLdE_i_[i] += std_scaling * 2.0 * ((cfg.cal_se[i] - type_mean[cfg.type(i)]) * 200.0 / (200.0 + orig.force(i).NormSq()) / orig.size()
+					- type_joint[cfg.type(i)])
+					+ stdd_scaling * 2.0 * (type_mean[cfg.type(i)] - mean_) / type_count_scratch_[cfg.type(i)];
+			}
 		//dLdE_i[i] += dLdE + std_scaling * 2 * ((cfg.cal_se[i] - type_mean[cfg.type(i)])  / orig.size()- 0.0 * type_joint[cfg.type(i)]);
 	}
 	if (need_std_terms)
@@ -337,21 +374,7 @@ double NonLinearRegression::ObjectiveFunction(vector<Configuration>& training_se
 
 double NonLinearRegression::ObjectiveFunction(vector<Configuration>& training_set, const std::vector<Neighborhoods>* neighborhoods)
 {
-	loss_ = 0.0;
-	std_ = 0.0;
-        stdd_=0.0;
-	metric_energy_abs_sum_ = 0.0;
-	metric_energy_sq_weighted_sum_ = 0.0;
-	metric_force_abs_component_sum_ = 0.0;
-	metric_force_sq_component_sum_ = 0.0;
-	metric_stress_abs_component_sum_ = 0.0;
-	metric_stress_sq_component_sum_ = 0.0;
-	metric_energy_atom_count_ = 0;
-	metric_force_component_count_ = 0;
-	metric_stress_component_count_ = 0;
-		mean_1 = 0;
-		mean_2 = 0;
-		mean_3 = 0;
+	ResetObjectiveAccumulators();
 	for (size_t i = 0; i < training_set.size(); ++i)
 		AddLoss(training_set[i], neighborhoods == nullptr ? nullptr : &(*neighborhoods)[i]);
 	return loss_;
@@ -365,21 +388,7 @@ void NonLinearRegression::CalcObjectiveFunctionGrad(vector<Configuration>& train
 
 void NonLinearRegression::CalcObjectiveFunctionGrad(vector<Configuration>& training_set, const std::vector<Neighborhoods>* neighborhoods)
 {
-	loss_ = 0.0;
-	std_ = 0.0;
-        stdd_ = 0.0;
-	metric_energy_abs_sum_ = 0.0;
-	metric_energy_sq_weighted_sum_ = 0.0;
-	metric_force_abs_component_sum_ = 0.0;
-	metric_force_sq_component_sum_ = 0.0;
-	metric_stress_abs_component_sum_ = 0.0;
-	metric_stress_sq_component_sum_ = 0.0;
-	metric_energy_atom_count_ = 0;
-	metric_force_component_count_ = 0;
-	metric_stress_component_count_ = 0;
-		mean_1 = 0;
-		mean_2 = 0;
-		mean_3 = 0;
+	ResetObjectiveAccumulators();
 	loss_grad_.resize(p_mlip->CoeffCount());
 	FillWithZero(loss_grad_);
 

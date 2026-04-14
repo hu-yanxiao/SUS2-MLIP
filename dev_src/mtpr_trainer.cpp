@@ -25,6 +25,7 @@
 #include <ctime>
 #include <cstdlib>
 #include <cstring>
+#include <array>
 #include <limits>
 #include <sstream>
 
@@ -41,6 +42,10 @@ std::string CurrentTimestamp()
 }
 
 constexpr std::size_t kNeighborhoodCacheBudgetBytesPerRank = 4ULL * 1024ULL * 1024ULL * 1024ULL;
+constexpr int kOptimizerReducePrefix = 1;
+constexpr int kAcceptedDiagDoubleCount = 11;
+constexpr int kAcceptedDiagCountCount = 3;
+constexpr int kTraceFlushInterval = 16;
 
 void ReduceMinMaxDouble(double local_value, double& min_value, double& max_value)
 {
@@ -842,18 +847,35 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 	for (int i = n - nlin + p_mlmtpr->species_count; i < n; i++)
 		inv_hess_diag[i] /= p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)] * p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)];
 	bfgs.SetInvHessDiagonal(inv_hess_diag);
+	const int species_coeff_begin = n - nlin;
+	std::vector<int> species_coeff_indices(p_mlmtpr->species_count);
+	for (int i = 0; i < p_mlmtpr->species_count; ++i)
+		species_coeff_indices[i] = species_coeff_begin + i;
+	auto reset_bfgs_state = [&]() {
+		bfgs.Restart();
+		bfgs.Set_x(x, n);
+		bfgs.SetInvHessDiagonal(inv_hess_diag);
+	};
+	bool freeze_species_coeffs = do_lin && do_lin_step_limit > 0;
+	if (freeze_species_coeffs)
+		bfgs.MaskCoordinates(species_coeff_indices);
+	std::vector<double> optimizer_reduce_local(n + kOptimizerReducePrefix, 0.0);
+	std::vector<double> optimizer_reduce_global(n + kOptimizerReducePrefix, 0.0);
+	std::array<double, kAcceptedDiagDoubleCount> accepted_diag_local{};
+	std::array<double, kAcceptedDiagDoubleCount> accepted_diag_global{};
+	std::array<long long, kAcceptedDiagCountCount> accepted_count_local{};
+	std::array<long long, kAcceptedDiagCountCount> accepted_count_global{};
 
 	int num_step = 0;
 
 	double linf = 9e99;
 	double loss_reduced_by = 0.0;
 	double loss_prev = 9e99;
-	double std_l;
-    double stdd_l ;
-	double mean_1_l;
-	double mean_2_l;
-	double mean_3_l;
-        int lin_freq= 100 ;
+	double std_l = 0.0;
+	double stdd_l = 0.0;
+	double mean_1_l = 0.0;
+	double mean_2_l = 0.0;
+	double mean_3_l = 0.0;
 	double energy_mae_mev_atom_l = 0.0;
 	double energy_rmse_mev_atom_l = 0.0;
 	double force_mae_mev_a_l = 0.0;
@@ -880,6 +902,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		bfgs_trace_stream << "step,total_loss,efs_loss,energy_mae_mev_atom,force_mae_mev_a,stress_mae_ev\n";
 		bfgs_trace_stream << std::scientific << std::setprecision(17);
 	}
+	int trace_lines_since_flush = 0;
 
 	while (!converge)
 	{
@@ -888,29 +911,36 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 		if (!linesearch)
 		{
+			bool external_x_modified = false;
+			bool external_x_needs_broadcast = false;
+			const bool random_perturb_applied = (max_shift != 0.0);
 			if (prank == 0) {
 				for (int i = 0; i < n - nlin; i++)
 					x[i] += distr(eng)*max_shift;
 			}
+			external_x_modified = random_perturb_applied;
+			external_x_needs_broadcast = distributed_bfgs && random_perturb_applied;
 
-			if (!distributed_bfgs && prank == 0)
-				bfgs.Set_x(x, n);
+			const bool should_freeze_species_coeffs = do_lin && num_step < do_lin_step_limit;
+			if (should_freeze_species_coeffs != freeze_species_coeffs) {
+				freeze_species_coeffs = should_freeze_species_coeffs;
+				reset_bfgs_state();
+				if (freeze_species_coeffs)
+					bfgs.MaskCoordinates(species_coeff_indices);
+				if (prank == 0) {
+					std::cout << "[" << CurrentTimestamp() << "] "
+					          << "species_coeffs BFGS freeze "
+					          << (freeze_species_coeffs ? "enabled" : "disabled")
+					          << " at step=" << num_step << std::endl;
+				}
+			} else if (freeze_species_coeffs) {
+				bfgs.MaskCoordinates(species_coeff_indices);
+			}
 
-#ifdef MLIP_MPI
-			MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-#endif
-			if (distributed_bfgs)
-				bfgs.Set_x(x, n);
-			
-
-
-                        if (num_step >= 0 & num_step < 400) {lin_freq =50;}
-                        if (num_step >= 400 & num_step < 800) {lin_freq =60;}
-                        if (num_step >= 800 ) {lin_freq =70;}
-
-                        
-                        
-			if (num_step % lin_freq  == 0 )
+			const bool run_train_linear = do_lin
+				&& num_step < do_lin_step_limit
+				&& (num_step % do_lin_frequency == 0);
+			if (run_train_linear)
 			{
 				/*
 				for (int i=n-nlin+p_mlmtpr->species_count;i<n;i++)
@@ -924,30 +954,28 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 									bfgs.inv_hess(i,j)/=p_mlmtpr->linear_mults[i-(n-nlin+p_mlmtpr->species_count)]*p_mlmtpr->linear_mults[j-(n-nlin+p_mlmtpr->species_count)];
 
 				*/
-				if (num_step < 3000 && do_lin) 
-                                {
-                                 TrainLinear(prank,
-										  training_set,
-										  cache_training_neighborhoods ? &training_neighborhoods : nullptr,
-										  "bfgs refresh step " + std::to_string(num_step));
-                                }
-			//	TrainLinear(prank, training_set);
-
-				if (distributed_bfgs || prank == 0)
-					bfgs.Set_x(x, n);
+				TrainLinear(prank,
+						  training_set,
+						  cache_training_neighborhoods ? &training_neighborhoods : nullptr,
+						  "bfgs refresh step " + std::to_string(num_step));
+				external_x_modified = true;
+				external_x_needs_broadcast = false; // TrainLinear already broadcasts coeffs.
 			}
-			
-			if (prank == 0)
-				if (curr_pot_name != "")
-					p_mlmtpr->Save(curr_pot_name);
-		}
-
-		for (int i = 0; i < n; i++)
-			x[i] = bfgs.x(i);
 
 #ifdef MLIP_MPI
-		MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+			if (distributed_bfgs && external_x_needs_broadcast)
+				MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 #endif
+			if (external_x_modified) {
+				if (distributed_bfgs || prank == 0)
+					bfgs.Set_x(x, n);
+				if (freeze_species_coeffs)
+					bfgs.MaskCoordinates(species_coeff_indices);
+			}
+		}
+
+		std::memcpy(x, bfgs.Data(), n * sizeof(double));
+
 		CalcObjectiveFunctionGrad(training_set, cache_training_neighborhoods ? &training_neighborhoods : nullptr);
 
 		loss_ /= K;
@@ -960,97 +988,54 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			loss_grad_[i] /= K;
 
 #ifdef MLIP_MPI
-		MPI_Reduce(&loss_, &bfgs_f, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&loss_grad_[0], &bfgs_g[0], n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		double energy_mae_sum_local = metric_energy_abs_sum_;
-		double energy_rmse_sum_local = metric_energy_sq_weighted_sum_;
-		double force_mae_sum_local = metric_force_abs_component_sum_;
-		double force_rmse_sum_local = metric_force_sq_component_sum_;
-		double stress_mae_sum_local = metric_stress_abs_component_sum_;
-		double stress_rmse_sum_local = metric_stress_sq_component_sum_;
-		long long energy_mae_count_local = metric_energy_atom_count_;
-		long long force_mae_count_local = metric_force_component_count_;
-		long long stress_mae_count_local = metric_stress_component_count_;
-		double energy_mae_sum_global = 0.0;
-		double energy_rmse_sum_global = 0.0;
-		double force_mae_sum_global = 0.0;
-		double force_rmse_sum_global = 0.0;
-		double stress_mae_sum_global = 0.0;
-		double stress_rmse_sum_global = 0.0;
-		long long energy_mae_count_global = 0;
-		long long force_mae_count_global = 0;
-		long long stress_mae_count_global = 0;
-		MPI_Reduce(&energy_mae_sum_local, &energy_mae_sum_global, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&energy_rmse_sum_local, &energy_rmse_sum_global, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&force_mae_sum_local, &force_mae_sum_global, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&force_rmse_sum_local, &force_rmse_sum_global, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&stress_mae_sum_local, &stress_mae_sum_global, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&stress_rmse_sum_local, &stress_rmse_sum_global, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&energy_mae_count_local, &energy_mae_count_global, 1, MPI_LONG_LONG_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&force_mae_count_local, &force_mae_count_global, 1, MPI_LONG_LONG_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&stress_mae_count_local, &stress_mae_count_global, 1, MPI_LONG_LONG_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+		optimizer_reduce_local[0] = loss_;
+		std::memcpy(optimizer_reduce_local.data() + kOptimizerReducePrefix,
+		            &loss_grad_[0],
+		            n * sizeof(double));
+		MPI_Reduce(optimizer_reduce_local.data(),
+		           prank == 0 ? optimizer_reduce_global.data() : nullptr,
+		           n + kOptimizerReducePrefix,
+		           MPI_DOUBLE,
+		           MPI_SUM,
+		           0,
+		           MPI_COMM_WORLD);
 		if (prank == 0) {
-			energy_mae_mev_atom_l = energy_mae_count_global > 0 ?
-				1000.0 * energy_mae_sum_global / static_cast<double>(energy_mae_count_global) : 0.0;
-			energy_rmse_mev_atom_l = energy_mae_count_global > 0 ?
-				1000.0 * std::sqrt(energy_rmse_sum_global / static_cast<double>(energy_mae_count_global)) : 0.0;
-			force_mae_mev_a_l = force_mae_count_global > 0 ?
-				1000.0 * force_mae_sum_global / static_cast<double>(force_mae_count_global) : 0.0;
-			force_rmse_mev_a_l = force_mae_count_global > 0 ?
-				1000.0 * std::sqrt(force_rmse_sum_global / static_cast<double>(force_mae_count_global)) : 0.0;
-			stress_mae_ev_l = stress_mae_count_global > 0 ?
-				stress_mae_sum_global / static_cast<double>(stress_mae_count_global) : 0.0;
-			stress_rmse_ev_l = stress_mae_count_global > 0 ?
-				std::sqrt(stress_rmse_sum_global / static_cast<double>(stress_mae_count_global)) : 0.0;
-
-			last_train_error_summary_.energy_mae_mev_atom = energy_mae_mev_atom_l;
-			last_train_error_summary_.energy_rmse_mev_atom = energy_rmse_mev_atom_l;
-			last_train_error_summary_.force_mae_mev_a = force_mae_mev_a_l;
-			last_train_error_summary_.force_rmse_mev_a = force_rmse_mev_a_l;
-			last_train_error_summary_.stress_mae_ev = stress_mae_ev_l;
-			last_train_error_summary_.stress_rmse_ev = stress_rmse_ev_l;
-		}
-		have_last_train_error_summary_ = true;
-		if (need_std_terms) {
-			MPI_Reduce(&std_, &std_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-	        MPI_Reduce(&stdd_, &stdd_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-			MPI_Reduce(&mean_1, &mean_1_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-			MPI_Reduce(&mean_2, &mean_2_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-			MPI_Reduce(&mean_3, &mean_3_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		} else if (prank == 0) {
-			std_l = 0.0;
-	        stdd_l = 0.0;
-			mean_1_l = 0.0;
-			mean_2_l = 0.0;
-			mean_3_l = 0.0;
-		}
-		if (distributed_bfgs) {
-			MPI_Bcast(&bfgs_f, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-			MPI_Bcast(&bfgs_g[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+			bfgs_f = optimizer_reduce_global[0];
+			std::memcpy(&bfgs_g[0],
+			            optimizer_reduce_global.data() + kOptimizerReducePrefix,
+			            n * sizeof(double));
 		}
 
 #else
 		bfgs_f = loss_;
-		energy_mae_mev_atom_l = EnergyMAE_meVPerAtom();
-		energy_rmse_mev_atom_l = EnergyRMSE_meVPerAtom();
-		force_mae_mev_a_l = ForceMAE_meVPerA();
-		force_rmse_mev_a_l = ForceRMSE_meVPerA();
-		stress_mae_ev_l = StressMAE_eV();
-		stress_rmse_ev_l = StressRMSE_eV();
-		std_l = std_;
-		stdd_l = stdd_;
-		mean_1_l = mean_1;
-		mean_2_l = mean_2;
-		mean_3_l = mean_3;
-		last_train_error_summary_.energy_mae_mev_atom = energy_mae_mev_atom_l;
-		last_train_error_summary_.energy_rmse_mev_atom = energy_rmse_mev_atom_l;
-		last_train_error_summary_.force_mae_mev_a = force_mae_mev_a_l;
-		last_train_error_summary_.force_rmse_mev_a = force_rmse_mev_a_l;
-		last_train_error_summary_.stress_mae_ev = stress_mae_ev_l;
-		last_train_error_summary_.stress_rmse_ev = stress_rmse_ev_l;
-		have_last_train_error_summary_ = true;
 		memcpy(&bfgs_g[0], &loss_grad_[0], p_mlmtpr->CoeffCount() * sizeof(double));
 #endif	
+		if (freeze_species_coeffs) {
+			for (int idx : species_coeff_indices)
+				bfgs_g[idx] = 0.0;
+		}
+
+#ifdef MLIP_MPI
+		if (distributed_bfgs) {
+			if (prank == 0) {
+				optimizer_reduce_global[0] = bfgs_f;
+				std::memcpy(optimizer_reduce_global.data() + kOptimizerReducePrefix,
+				            &bfgs_g[0],
+				            n * sizeof(double));
+			}
+			MPI_Bcast(optimizer_reduce_global.data(),
+			          n + kOptimizerReducePrefix,
+			          MPI_DOUBLE,
+			          0,
+			          MPI_COMM_WORLD);
+			if (prank != 0) {
+				bfgs_f = optimizer_reduce_global[0];
+				std::memcpy(&bfgs_g[0],
+				            optimizer_reduce_global.data() + kOptimizerReducePrefix,
+				            n * sizeof(double));
+			}
+		}
+#endif
 
 		if ((distributed_bfgs || prank == 0) && !converge) {
 				bfgs.Iterate(bfgs_f, bfgs_g);
@@ -1075,9 +1060,54 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		if (distributed_bfgs || prank == 0)
 			linesearch = bfgs.is_in_linesearch();
 
-		//if (prank == 0 && !linesearch) cout << num_step << " " << bfgs_f << endl;
+	#ifdef MLIP_MPI
+		if (!distributed_bfgs) {
+			int linesearch_state = linesearch ? 1 : 0;
+			MPI_Bcast(&linesearch_state, 1, MPI_INT, 0, MPI_COMM_WORLD);
+			linesearch = (linesearch_state != 0);
+		}
+	#endif
 
 		if (!linesearch)
+		{
+			accepted_diag_local[0] = metric_energy_abs_sum_;
+			accepted_diag_local[1] = metric_energy_sq_weighted_sum_;
+			accepted_diag_local[2] = metric_force_abs_component_sum_;
+			accepted_diag_local[3] = metric_force_sq_component_sum_;
+			accepted_diag_local[4] = metric_stress_abs_component_sum_;
+			accepted_diag_local[5] = metric_stress_sq_component_sum_;
+			accepted_diag_local[6] = std_;
+			accepted_diag_local[7] = stdd_;
+			accepted_diag_local[8] = mean_1;
+			accepted_diag_local[9] = mean_2;
+			accepted_diag_local[10] = mean_3;
+			accepted_count_local[0] = metric_energy_atom_count_;
+			accepted_count_local[1] = metric_force_component_count_;
+			accepted_count_local[2] = metric_stress_component_count_;
+
+#ifdef MLIP_MPI
+			MPI_Request accepted_reduce_requests[2];
+			MPI_Ireduce(accepted_diag_local.data(),
+			            prank == 0 ? accepted_diag_global.data() : nullptr,
+			            kAcceptedDiagDoubleCount,
+			            MPI_DOUBLE,
+			            MPI_SUM,
+			            0,
+			            MPI_COMM_WORLD,
+			            &accepted_reduce_requests[0]);
+			MPI_Ireduce(accepted_count_local.data(),
+			            prank == 0 ? accepted_count_global.data() : nullptr,
+			            kAcceptedDiagCountCount,
+			            MPI_LONG_LONG_INT,
+			            MPI_SUM,
+			            0,
+			            MPI_COMM_WORLD,
+			            &accepted_reduce_requests[1]);
+#else
+			accepted_diag_global = accepted_diag_local;
+			accepted_count_global = accepted_count_local;
+#endif
+
 			if (prank == 0)
 			{
 				if (loss_prev < bfgs_f)
@@ -1096,7 +1126,46 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				}
 
 				loss_prev = bfgs_f;
+			}
+
+#ifdef MLIP_MPI
+			MPI_Waitall(2, accepted_reduce_requests, MPI_STATUSES_IGNORE);
+#endif
+
+			if (prank == 0)
+			{
+				std_l = accepted_diag_global[6];
+				stdd_l = accepted_diag_global[7];
+				mean_1_l = accepted_diag_global[8];
+				mean_2_l = accepted_diag_global[9];
+				mean_3_l = accepted_diag_global[10];
+				const long long energy_mae_count_global = accepted_count_global[0];
+				const long long force_mae_count_global = accepted_count_global[1];
+				const long long stress_mae_count_global = accepted_count_global[2];
+				energy_mae_mev_atom_l = energy_mae_count_global > 0 ?
+					1000.0 * accepted_diag_global[0] / static_cast<double>(energy_mae_count_global) : 0.0;
+				energy_rmse_mev_atom_l = energy_mae_count_global > 0 ?
+					1000.0 * std::sqrt(accepted_diag_global[1] / static_cast<double>(energy_mae_count_global)) : 0.0;
+				force_mae_mev_a_l = force_mae_count_global > 0 ?
+					1000.0 * accepted_diag_global[2] / static_cast<double>(force_mae_count_global) : 0.0;
+				force_rmse_mev_a_l = force_mae_count_global > 0 ?
+					1000.0 * std::sqrt(accepted_diag_global[3] / static_cast<double>(force_mae_count_global)) : 0.0;
+				stress_mae_ev_l = stress_mae_count_global > 0 ?
+					accepted_diag_global[4] / static_cast<double>(stress_mae_count_global) : 0.0;
+				stress_rmse_ev_l = stress_mae_count_global > 0 ?
+					std::sqrt(accepted_diag_global[5] / static_cast<double>(stress_mae_count_global)) : 0.0;
+
+				last_train_error_summary_.energy_mae_mev_atom = energy_mae_mev_atom_l;
+				last_train_error_summary_.energy_rmse_mev_atom = energy_rmse_mev_atom_l;
+				last_train_error_summary_.force_mae_mev_a = force_mae_mev_a_l;
+				last_train_error_summary_.force_rmse_mev_a = force_rmse_mev_a_l;
+				last_train_error_summary_.stress_mae_ev = stress_mae_ev_l;
+				last_train_error_summary_.stress_rmse_ev = stress_rmse_ev_l;
+				have_last_train_error_summary_ = true;
+
 				const double efs_loss = bfgs_f - std_l - stdd_l;
+				if (curr_pot_name != "")
+					p_mlmtpr->Save(curr_pot_name);
 				if (bfgs_trace_stream.is_open()) {
 					bfgs_trace_stream << num_step << ','
 					                  << bfgs_f << ','
@@ -1104,7 +1173,10 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					                  << energy_mae_mev_atom_l << ','
 					                  << force_mae_mev_a_l << ','
 					                  << stress_mae_ev_l << '\n';
-					bfgs_trace_stream.flush();
+					if (++trace_lines_since_flush >= kTraceFlushInterval) {
+						bfgs_trace_stream.flush();
+						trace_lines_since_flush = 0;
+					}
 				}
 				logstrm1 << "[" << CurrentTimestamp() << "] "
 						 << "step=" << num_step
@@ -1116,7 +1188,6 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 						 << endl;
 				MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
 
-				//cout << num_step << " " << bfgs_f << endl;
 				num_step++;
 
 				if (num_step % 60 == 1) linf = bfgs_f;
@@ -1139,16 +1210,25 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
 				}
 			}
+		}
 
-#ifdef MLIP_MPI
-		MPI_Bcast(&converge, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
-		MPI_Bcast(&linesearch, 1, MPI_C_BOOL, 0, MPI_COMM_WORLD);
-		MPI_Bcast(&num_step, 1, MPI_INT, 0, MPI_COMM_WORLD);
-#endif
+	#ifdef MLIP_MPI
+			int iteration_state[3] = {
+				converge ? 1 : 0,
+				linesearch ? 1 : 0,
+				num_step
+			};
+			MPI_Bcast(iteration_state, 3, MPI_INT, 0, MPI_COMM_WORLD);
+			converge = (iteration_state[0] != 0);
+			linesearch = (iteration_state[1] != 0);
+			num_step = iteration_state[2];
+	#endif
 	}
 
 	p_mlmtpr->inited = true;
 	have_hess = true;
+	if (bfgs_trace_stream.is_open())
+		bfgs_trace_stream.flush();
 
 	if (prank == 0)
 	{

@@ -249,6 +249,7 @@ private:
 	inline double ScalarProd(const double* v1, const double* v2);
 	Array1D delta_grad;									//!< needed for inv_hess update
 	Array1D yC;											//!< needed for inv_hess update
+	std::vector<char> mask_workspace_;
 	std::vector<double> distributed_inv_hess_rows_;
 	std::vector<double> distributed_local_buffer_;
 	std::vector<int> distributed_row_counts_;
@@ -264,6 +265,7 @@ private:
 	void UpdateDistributedLayout();
 	void DenseMatVec(const Array1D& v, Array1D& out);
 	void FormDenseDirection(const Array1D& g);
+	void MirrorUpperToLower();
 
 protected:
 	int size = 0;										//!< size of x, g, etc.
@@ -298,12 +300,14 @@ public:
 	void UseDistributedDense(int rank, int size);
 	bool UsingDistributedDense() const { return use_distributed_dense_; }
 	void SetInvHessDiagonal(const Array1D& diag);
+	void MaskCoordinates(const std::vector<int>& indices);
 
 	//! resets hess and restarts the iteration (i.e., quits linesearch)
 	//! inv_hess can be set manually immediately after calling Restart()
 	void Restart();
 
 	double x(int i) { return x_[i]; }					//! read-only access to x
+	const double* Data() const { return x_.data(); }
 	const Array1D& Iterate(double f, const Array1D& g);	//! Make a BFGS iteration
 	const Array1D& Iterate2(double _lr, const Array1D& g);	//! Make a BFGS iteration
 	const Array1D& ReduceStep(double _coeff = 0.25);	//! Reduce the step (e.g., if x was unphysical)
@@ -333,6 +337,7 @@ inline void BFGS::Resize(int _size) {
 	delta_grad.resize(size);
 	yC.resize(size);
 	p.resize(size);
+	mask_workspace_.assign(size, 0);
 	if (use_distributed_dense_) {
 		UpdateDistributedLayout();
 		inv_hess.resize(0, 0);

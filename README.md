@@ -94,6 +94,8 @@ Commonly used training tags:
 --weighting=<string>
 --init-params=<random|same>
 --do-lin
+--do-lin-steps=<int>
+--do-lin-freq=<int>
 --do-samp=<true|false>
 --skip-preinit
 --update-mindist
@@ -102,6 +104,8 @@ Commonly used training tags:
 Notes:
 
 - `--do-lin` enables the linear pre-fitting path inside nonlinear training.
+- `--do-lin-steps` sets how many accepted BFGS steps keep the do-lin path active. Default is `1000`.
+- `--do-lin-freq` sets how often `TrainLinear` is inserted while do-lin is active. Default is `50`.
 - `--do-samp=false` disables random sampling during the pre-training stage.
 - `--std-weight` and `--stdd-weight` control the two std-based regularization terms.
 * **Evaluating trained models**  
@@ -121,4 +125,3 @@ PySUS2 is a comprehensive suite of tools and Python modules developed based on t
 (in progress)
 
 -----------------------------------------------
-

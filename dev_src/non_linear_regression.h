@@ -16,6 +16,10 @@ class NonLinearRegression : public AnyTrainer//, protected LogWriting
 protected:
 	std::vector<Vector3> dLdF;
 	std::vector<double> dLdE_i_;
+	std::vector<int> type_count_scratch_;
+	std::vector<int> active_type_scratch_;
+	std::vector<double> type_mean_scratch_;
+	std::vector<double> type_joint_scratch_;
 	Matrix3 dLdS;
 	double metric_energy_abs_sum_ = 0.0;
 	double metric_energy_sq_weighted_sum_ = 0.0;
@@ -26,11 +30,14 @@ protected:
 	long long metric_energy_atom_count_ = 0;
 	long long metric_force_component_count_ = 0;
 	long long metric_stress_component_count_ = 0;
+	bool collect_error_metrics_ = true;
 	void AddLoss(const Configuration &orig);
 	void AddLoss(const Configuration &orig, const Neighborhoods* neighborhoods);
 	void AddLossGrad(const Configuration &orig);
 	void AddLossGrad(const Configuration &orig, const Neighborhoods* neighborhoods);
 	bool NeedStdTerms() const { return std_scaling != 0.0 || stdd_scaling != 0.0; }
+	void PrepareTypeScratch(const Configuration& cfg);
+	void ResetObjectiveAccumulators();
 	double loss_;											// result of AddLoss and AddLossGrad
 	double std_;
         double stdd_;
@@ -68,6 +75,8 @@ public:
 	double StressMAE_eV() const;
 	double StressRMSE_eV() const;
 	double EFSLoss(double total_loss, double std_term, double stdd_term) const;
+	void SetCollectErrorMetrics(bool enabled) { collect_error_metrics_ = enabled; }
+	bool CollectErrorMetrics() const { return collect_error_metrics_; }
 
 	virtual void Train(std::vector<Configuration>& train_set) override;
 

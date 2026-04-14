@@ -572,6 +572,16 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
         bool do_lin = false;
         if (opts["do-lin"] != "")
                 do_lin = true;
+	int do_lin_step_limit = 1000;
+	if (opts["do-lin-steps"] != "")
+		do_lin_step_limit = stoi(opts["do-lin-steps"]);
+	if (do_lin_step_limit < 0)
+		ERROR("--do-lin-steps should be >= 0");
+	int do_lin_frequency = 50;
+	if (opts["do-lin-freq"] != "")
+		do_lin_frequency = stoi(opts["do-lin-freq"]);
+	if (do_lin_frequency <= 0)
+		ERROR("--do-lin-freq should be > 0");
 
 
 	string curr_fnm = "";
@@ -634,6 +644,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	//LOSS FUNCTIONAL MODIFICATION!!!
 	trainer.weighting = weighting;
         trainer.do_lin=do_lin;
+	trainer.do_lin_step_limit = do_lin_step_limit;
+	trainer.do_lin_frequency = do_lin_frequency;
 	trainer.std_scaling = weight_std;
         trainer.stdd_scaling = weight_stdd;
 	trainer.linstop = bfgs_conv_tol;	//if in 100 iterations loss decreases less than this, BFGS is finished
@@ -864,6 +876,12 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			std::cout << "Modified by Hu Yanxiao. " << std::endl;
                         std::cout << "BFGS iterations count set to " << trainer.max_step_count << std::endl;
 			std::cout << "BFGS convergence tolerance set to " << bfgs_conv_tol << std::endl;
+			if (trainer.do_lin) {
+				std::cout << "do-lin enabled for first " << trainer.do_lin_step_limit
+				          << " BFGS steps, frequency " << trainer.do_lin_frequency << std::endl;
+			} else {
+				std::cout << "do-lin disabled" << std::endl;
+			}
                        
 			if ((weight_energy != 0) || (weight_force != 0) || (weight_stress != 0)) {
 				std::cout << "Energy weight: " << weight_energy << std::endl;

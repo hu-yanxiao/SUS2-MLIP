@@ -54,6 +54,8 @@ public:
 	double linstop = 1e-8;
 	int random_perturb = 0;
         bool do_lin=true;
+	int do_lin_step_limit = 1000;
+	int do_lin_frequency = 50;
 	MTPR_trainer(MLMTPR* _p_mlip,						// Constructor requires MTP basis
 						double opt_en_coeff = 1.0,				//	Optional parameters are the weights coeficients of energy, forces and stresses equations in minimization problem
 						double opt_fr_coeff = 1.0,

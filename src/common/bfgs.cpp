@@ -85,6 +85,16 @@ void BFGS::DenseMatVec(const Array1D& v, Array1D& out)
 		out.resize(size);
 
 	if (!use_distributed_dense_) {
+#ifdef MLIP_INTEL_MKL
+		cblas_dsymv(CBLAS_ORDER::CblasRowMajor,
+					CBLAS_UPLO::CblasUpper,
+					size,
+					1.0,
+					&inv_hess(0, 0), size,
+					&v[0], 1,
+					0.0,
+					&out[0], 1);
+#else
 		cblas_dgemv(CBLAS_ORDER::CblasRowMajor,
 					CBLAS_TRANSPOSE::CblasNoTrans,
 					size, size,
@@ -93,6 +103,7 @@ void BFGS::DenseMatVec(const Array1D& v, Array1D& out)
 					&v[0], 1,
 					0.0,
 					&out[0], 1);
+#endif
 		return;
 	}
 
@@ -121,6 +132,13 @@ void BFGS::DenseMatVec(const Array1D& v, Array1D& out)
 #endif
 }
 
+void BFGS::MirrorUpperToLower()
+{
+	for (int i = 0; i < size; ++i)
+		for (int j = i + 1; j < size; ++j)
+			inv_hess(j, i) = inv_hess(i, j);
+}
+
 void BFGS::FormDenseDirection(const Array1D& g)
 {
 	DenseMatVec(g, p);
@@ -137,6 +155,7 @@ void BFGS::SetInvHessDiagonal(const Array1D& diag)
 		inv_hess.set(0.0);
 		for (int i = 0; i < size; ++i)
 			inv_hess(i, i) = diag[i];
+		MirrorUpperToLower();
 		return;
 	}
 
@@ -145,6 +164,50 @@ void BFGS::SetInvHessDiagonal(const Array1D& diag)
 		const int global_row = distributed_row_start_ + local_row;
 		distributed_inv_hess_rows_[local_row * size + global_row] = diag[global_row];
 	}
+}
+
+void BFGS::MaskCoordinates(const std::vector<int>& indices)
+{
+	if (indices.empty())
+		return;
+
+	if ((int)mask_workspace_.size() != size)
+		mask_workspace_.assign(size, 0);
+	else
+		std::fill(mask_workspace_.begin(), mask_workspace_.end(), 0);
+	for (int idx : indices) {
+		if (idx < 0 || idx >= size)
+			ERROR("BFGS::MaskCoordinates(): index out of range.");
+		mask_workspace_[idx] = 1;
+	}
+
+	if (!use_distributed_dense_) {
+		for (int idx : indices) {
+			for (int j = 0; j < size; ++j) {
+				inv_hess(idx, j) = 0.0;
+				inv_hess(j, idx) = 0.0;
+			}
+			inv_hess(idx, idx) = 1.0;
+		}
+	} else {
+		for (int local_row = 0; local_row < distributed_row_count_; ++local_row) {
+			const int global_row = distributed_row_start_ + local_row;
+			double* row = distributed_inv_hess_rows_.data() + local_row * size;
+			if (mask_workspace_[global_row]) {
+				std::fill(row, row + size, 0.0);
+				row[global_row] = 1.0;
+				continue;
+			}
+			for (int idx : indices)
+				row[idx] = 0.0;
+		}
+	}
+
+	for (int idx : indices)
+		p[idx] = 0.0;
+
+	if (!use_distributed_dense_)
+		MirrorUpperToLower();
 }
 
 
@@ -243,6 +306,22 @@ void BFGS::UpdateInvHess(const Array1D& g)
 	double foo = (py + yCy) / (py*py);
 
 	if (!use_distributed_dense_) {
+#ifdef MLIP_INTEL_MKL
+		cblas_dsyr(CBLAS_ORDER::CblasRowMajor,
+				   CBLAS_UPLO::CblasUpper,
+				   size,
+				   alpha * alpha * foo,
+				   &p[0], 1,
+				   &inv_hess(0, 0), size);
+		cblas_dsyr2(CBLAS_ORDER::CblasRowMajor,
+				    CBLAS_UPLO::CblasUpper,
+				    size,
+				    -alpha / py,
+				    &p[0], 1,
+				    &yC[0], 1,
+				    &inv_hess(0, 0), size);
+		MirrorUpperToLower();
+#else
 		cblas_dger(CBLAS_ORDER::CblasRowMajor,
 					size, size,
 					alpha * alpha * foo,
@@ -261,6 +340,7 @@ void BFGS::UpdateInvHess(const Array1D& g)
 					&yC[0], 1,
 					&p[0], 1,
 					&inv_hess(0, 0), size);
+#endif
 		return;
 	}
 
