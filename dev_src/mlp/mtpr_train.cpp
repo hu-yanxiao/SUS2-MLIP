@@ -930,9 +930,35 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	}
 	ErrorMonitor errmon, bufferrmon;
 	std::cout.precision(15);
-	if (trainer.HasLastTrainErrorSummary()) {
+	bool have_train_summary = trainer.HasLastTrainErrorSummary();
+	MTPR_trainer::TrainErrorSummary train_summary;
+	if (have_train_summary)
+		train_summary = trainer.LastTrainErrorSummary();
+#ifdef MLIP_MPI
+	int have_train_summary_int = have_train_summary ? 1 : 0;
+	MPI_Bcast(&have_train_summary_int, 1, MPI_INT, 0, MPI_COMM_WORLD);
+	have_train_summary = (have_train_summary_int != 0);
+	if (have_train_summary) {
+		double train_summary_values[6];
 		if (prank == 0) {
-			const MTPR_trainer::TrainErrorSummary& train_summary = trainer.LastTrainErrorSummary();
+			train_summary_values[0] = train_summary.energy_mae_mev_atom;
+			train_summary_values[1] = train_summary.energy_rmse_mev_atom;
+			train_summary_values[2] = train_summary.force_mae_mev_a;
+			train_summary_values[3] = train_summary.force_rmse_mev_a;
+			train_summary_values[4] = train_summary.stress_mae_ev;
+			train_summary_values[5] = train_summary.stress_rmse_ev;
+		}
+		MPI_Bcast(train_summary_values, 6, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+		train_summary.energy_mae_mev_atom = train_summary_values[0];
+		train_summary.energy_rmse_mev_atom = train_summary_values[1];
+		train_summary.force_mae_mev_a = train_summary_values[2];
+		train_summary.force_rmse_mev_a = train_summary_values[3];
+		train_summary.stress_mae_ev = train_summary_values[4];
+		train_summary.stress_rmse_ev = train_summary_values[5];
+	}
+#endif
+	if (have_train_summary) {
+		if (prank == 0) {
 			std::cout << "\n=== Train Summary ===\n"
 			          << std::fixed << std::setprecision(3)
 			          << "Structures           : " << train_cfg_total << "\n"
