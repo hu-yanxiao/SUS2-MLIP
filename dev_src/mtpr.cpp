@@ -33,7 +33,8 @@ void MLMTPR::Load(const string& filename)
 	if (len > 0 && tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
 		tmpline[len - 1] = '\0';
 
-	if ((string)tmpline == "MTP")
+	if ((string)tmpline == "MTP" ||
+		((string)tmpline).compare(0, 10, "version = ") != 0)
 	{
 		// version reading block
 		ifs.getline(tmpline, 1000);
