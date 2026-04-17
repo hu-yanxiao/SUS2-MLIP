@@ -94,7 +94,6 @@ Commonly used training tags:
 --weighting=<string>
 --init-params=<random|same>
 --do-lin
---do-samp=<true|false>
 --skip-preinit
 --update-mindist
 ```
@@ -102,7 +101,6 @@ Commonly used training tags:
 Notes:
 
 - `--do-lin` enables the linear pre-fitting path inside nonlinear training.
-- `--do-samp=false` disables random sampling during the pre-training stage.
 - `--std-weight` and `--stdd-weight` control the two std-based regularization terms.
 * **Evaluating trained models**  
 To evaluate a tarined model `trained_sus2mlip` on a specified dataset `target.cfg`, you run:  
