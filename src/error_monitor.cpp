@@ -186,8 +186,7 @@ void ErrorMonitor::MPI_Synchronize()
 	MPI_Allreduce(&vir_all.count, &buffer_errmon.vir_all.count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 	MPI_Allreduce(&cfg_cntr, &buffer_errmon.cfg_cntr, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 	MPI_Allreduce(&atom_count_total, &buffer_errmon.atom_count_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
-	MPI_Allreduce(&relfrc_regparam, &buffer_errmon.relfrc_regparam, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-	MPI_Allreduce(&vir_all.count, &buffer_errmon.vir_all.count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&relfrc_regparam, &buffer_errmon.relfrc_regparam, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
 	ene_all.max = buffer_errmon.ene_all.max;
 	ene_all.sum = buffer_errmon.ene_all.sum;
