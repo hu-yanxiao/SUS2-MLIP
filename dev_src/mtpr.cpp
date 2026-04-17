@@ -1165,8 +1165,20 @@ void MLMTPR::MemAlloc()
 	radial_vals_buffer_.resize(K_ * p_RadialBasis->rb_size);
 	radial_ders_buffer_.resize(K_ * p_RadialBasis->rb_size * 5);
 	basis_radial_ders_buffer_.resize(K_ * p_RadialBasis->rb_size);
+	basic_total_degree_cache_.resize(alpha_index_basic_count);
+	basic_sigma_block_cache_.resize(alpha_index_basic_count);
+	basic_radial_offset_cache_.resize(alpha_index_basic_count);
+	const int radial_coeff_base = species_count + 2 * species_count * species_count * K_;
+	const int radial_stride = p_RadialBasis->rb_size + species_count;
+	for (int i = 0; i < alpha_index_basic_count; i++) {
+		const int mu = alpha_index_basic_.comp0[i];
+		basic_total_degree_cache_[i] =
+			alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
+		basic_sigma_block_cache_[i] = mu_to_K[mu];
+		basic_radial_offset_cache_[i] = radial_coeff_base + mu * radial_stride;
+	}
 
-}
+	}
 
 MLMTPR::~MLMTPR()
 {
@@ -1307,9 +1319,6 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 		std::vector<double>& der_ = lmp_radial_ders_buffer_;
 	std::vector<double>& mu_contract_vals = grad_mu_contract_vals_;
 	std::vector<double>& mu_contract_ders = grad_mu_contract_ders_;
-
-	LinCoeff();
-
 
 	if (nbh.count != moment_jacobian_.size2)
 		moment_jacobian_.resize(alpha_index_basic_count, nbh.count, 3);
@@ -1565,6 +1574,11 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 	}
 }
 
+void MLMTPR::PrepareEvalCaches()
+{
+	LinCoeff();
+}
+
 void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 										std::vector<double>& out_grad_accumulator,
 										const double se_weight,
@@ -1578,71 +1592,121 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 	buff_site_energy_ders_.resize(nbh.count);
 	out_grad_accumulator.resize(CoeffCount());
+	double* grad_out = out_grad_accumulator.data();
 
 	buff_site_energy_ = 0.0;
 	FillWithZero(buff_site_energy_ders_);
 
 	{
-		LinCoeff();
-
 		site_energy_ders_wrt_moments_.resize(alpha_moments_count);
 		std::vector<double>& mom_val = grad_mom_vals_;
 		std::vector<double>& dloss_dsenders = grad_dloss_dsenders_;
 		std::vector<double>& dloss_dmom = grad_dloss_dmom_;
 		std::vector<double>& mu_contract_vals = grad_mu_contract_vals_;
 		std::vector<double>& mu_contract_ders = grad_mu_contract_ders_;
-		std::vector<double>& mu_contract_ders_s = grad_mu_contract_ders_s_;
-		std::vector<double>& mu_contract_ders_ss = grad_mu_contract_ders_ss_;
-		std::vector<double>& mu_contract_coord_ders_s = grad_mu_contract_coord_ders_s_;
-		std::vector<double>& mu_contract_coord_ders_ss = grad_mu_contract_coord_ders_ss_;
-		FillWithZero(mom_val);
-		FillWithZero(site_energy_ders_wrt_moments_);
-		FillWithZero(dloss_dsenders);
+			std::vector<double>& mu_contract_ders_s = grad_mu_contract_ders_s_;
+			std::vector<double>& mu_contract_ders_ss = grad_mu_contract_ders_ss_;
+			std::vector<double>& mu_contract_coord_ders_s = grad_mu_contract_coord_ders_s_;
+			std::vector<double>& mu_contract_coord_ders_ss = grad_mu_contract_coord_ders_ss_;
+			const double* linear_scalar_coeffs = linear_coeffs.data() + species_count;
+			const double* linear_mults_data = linear_mults.data();
+			FillWithZero(mom_val);
+			FillWithZero(site_energy_ders_wrt_moments_);
+			FillWithZero(dloss_dsenders);
 		FillWithZero(dloss_dmom);
 		int type_central = nbh.my_type;
 
 		if (type_central>=species_count)
 			throw MlipException("Too few species count in the MTP potential!");
 
-		std::vector<double>& val_ = radial_vals_buffer_;
-		std::vector<double>& der_ = radial_ders_buffer_;
-		const int radial_coeff_base = C + 2 * C * C * K_;
-		const int shared_type_offset = radial_coeff_base + R;
-		const double site_linear_coeff = linear_coeffs[nbh.my_type];
+			const int radial_coeff_base = C + 2 * C * C * K_;
+			const int shared_type_offset = radial_coeff_base + R;
+			const double site_linear_coeff = linear_coeffs[nbh.my_type];
+			const size_t neighbor_count = static_cast<size_t>(nbh.count);
+			const size_t power_stride = static_cast<size_t>(max_alpha_index_basic_);
+			const size_t radial_val_stride = static_cast<size_t>(K_) * R;
+			const size_t radial_der_stride = radial_val_stride * 5;
+			const size_t mu_stride = static_cast<size_t>(K);
 
-		auto fill_neighbor_buffers = [&](int type_outer, double r) {
-			for (int k_ = 0; k_ < K_; k_++) {
-				const int sigma = mu_to_sigma[k_];
-				p_RadialBasis->RB_Calc(
-					r,
-					regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer],
-					regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],
-					sigma);
-				for (int xi = 0; xi < R; xi++)
-					val_[k_ * R + xi] = p_RadialBasis->rb_vals[xi] * scaling;
-				for (int xi = 0; xi < R * 5; xi++)
-					der_[k_ * R * 5 + xi] = p_RadialBasis->rb_ders[xi] * scaling;
-			}
-		};
+			grad_neighbor_dist_powers_cache_.resize(neighbor_count * power_stride);
+			grad_neighbor_coords_powers_x_cache_.resize(neighbor_count * power_stride);
+			grad_neighbor_coords_powers_y_cache_.resize(neighbor_count * power_stride);
+			grad_neighbor_coords_powers_z_cache_.resize(neighbor_count * power_stride);
+			grad_neighbor_radial_vals_cache_.resize(neighbor_count * radial_val_stride);
+			grad_neighbor_radial_ders_cache_.resize(neighbor_count * radial_der_stride);
+			grad_neighbor_mu_contract_vals_cache_.resize(neighbor_count * mu_stride);
+			grad_neighbor_mu_contract_ders_cache_.resize(neighbor_count * mu_stride);
+			grad_neighbor_mu_contract_ders_s_cache_.resize(neighbor_count * mu_stride);
+			grad_neighbor_mu_contract_ders_ss_cache_.resize(neighbor_count * mu_stride);
+			grad_neighbor_mu_contract_coord_ders_s_cache_.resize(neighbor_count * mu_stride);
+			grad_neighbor_mu_contract_coord_ders_ss_cache_.resize(neighbor_count * mu_stride);
 
-		auto prepare_neighbor_state = [&](const Vector3& neighb_vec, int type_outer, double r) {
-			grad_dist_powers_[0] = 1.0;
-			grad_coords_powers_x_[0] = 1.0;
-			grad_coords_powers_y_[0] = 1.0;
-			grad_coords_powers_z_[0] = 1.0;
-			for (int k = 1; k < max_alpha_index_basic_; k++) {
-				grad_dist_powers_[k] = grad_dist_powers_[k - 1] * r;
-				grad_coords_powers_x_[k] = grad_coords_powers_x_[k - 1] * neighb_vec[0];
-				grad_coords_powers_y_[k] = grad_coords_powers_y_[k - 1] * neighb_vec[1];
-				grad_coords_powers_z_[k] = grad_coords_powers_z_[k - 1] * neighb_vec[2];
-			}
+			struct NeighborGradCache {
+				double* dist_powers;
+				double* coords_powers_x;
+				double* coords_powers_y;
+				double* coords_powers_z;
+				double* radial_vals;
+				double* radial_ders;
+				double* mu_contract_vals;
+				double* mu_contract_ders;
+				double* mu_contract_ders_s;
+				double* mu_contract_ders_ss;
+				double* mu_contract_coord_ders_s;
+				double* mu_contract_coord_ders_ss;
+			};
 
-			fill_neighbor_buffers(type_outer, r);
+			auto neighbor_cache = [&](int neighbor_index) {
+				const size_t offset = static_cast<size_t>(neighbor_index);
+				return NeighborGradCache{
+					grad_neighbor_dist_powers_cache_.data() + offset * power_stride,
+					grad_neighbor_coords_powers_x_cache_.data() + offset * power_stride,
+					grad_neighbor_coords_powers_y_cache_.data() + offset * power_stride,
+					grad_neighbor_coords_powers_z_cache_.data() + offset * power_stride,
+					grad_neighbor_radial_vals_cache_.data() + offset * radial_val_stride,
+					grad_neighbor_radial_ders_cache_.data() + offset * radial_der_stride,
+					grad_neighbor_mu_contract_vals_cache_.data() + offset * mu_stride,
+					grad_neighbor_mu_contract_ders_cache_.data() + offset * mu_stride,
+					grad_neighbor_mu_contract_ders_s_cache_.data() + offset * mu_stride,
+					grad_neighbor_mu_contract_ders_ss_cache_.data() + offset * mu_stride,
+					grad_neighbor_mu_contract_coord_ders_s_cache_.data() + offset * mu_stride,
+					grad_neighbor_mu_contract_coord_ders_ss_cache_.data() + offset * mu_stride
+				};
+			};
 
-			for (int mu = 0; mu < K; mu++) {
-				const int k_ = mu_to_K[mu];
-				const int radial_offset = radial_coeff_base + mu * (R + C);
-				const int radial_base = k_ * R;
+			auto fill_neighbor_buffers = [&](int type_outer, double r, const NeighborGradCache& cache) {
+				for (int k_ = 0; k_ < K_; k_++) {
+					const int sigma = mu_to_sigma[k_];
+					p_RadialBasis->RB_Calc(
+						r,
+						regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer],
+						regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],
+						sigma);
+					for (int xi = 0; xi < R; xi++)
+						cache.radial_vals[k_ * R + xi] = p_RadialBasis->rb_vals[xi] * scaling;
+					for (int xi = 0; xi < R * 5; xi++)
+						cache.radial_ders[k_ * R * 5 + xi] = p_RadialBasis->rb_ders[xi] * scaling;
+				}
+			};
+
+			auto prepare_neighbor_state = [&](const Vector3& neighb_vec, int type_outer, double r, const NeighborGradCache& cache) {
+				cache.dist_powers[0] = 1.0;
+				cache.coords_powers_x[0] = 1.0;
+				cache.coords_powers_y[0] = 1.0;
+				cache.coords_powers_z[0] = 1.0;
+				for (int k = 1; k < max_alpha_index_basic_; k++) {
+					cache.dist_powers[k] = cache.dist_powers[k - 1] * r;
+					cache.coords_powers_x[k] = cache.coords_powers_x[k - 1] * neighb_vec[0];
+					cache.coords_powers_y[k] = cache.coords_powers_y[k - 1] * neighb_vec[1];
+					cache.coords_powers_z[k] = cache.coords_powers_z[k - 1] * neighb_vec[2];
+				}
+
+				fill_neighbor_buffers(type_outer, r, cache);
+
+				for (int mu = 0; mu < K; mu++) {
+					const int k_ = mu_to_K[mu];
+					const int radial_offset = radial_coeff_base + mu * (R + C);
+					const int radial_base = k_ * R;
 				const int deriv_base = 5 * radial_base;
 				double dot_val = 0.0;
 				double dot_der = 0.0;
@@ -1651,67 +1715,68 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				double dot_coord_der_s = 0.0;
 				double dot_coord_der_ss = 0.0;
 
-				for (int xi = 0; xi < R; xi++) {
-					const double radial_coeff = regression_coeffs[radial_offset + xi];
-					dot_val += radial_coeff * val_[radial_base + xi];
-					dot_der += radial_coeff * der_[deriv_base + xi];
-					dot_der_s += radial_coeff * der_[deriv_base + xi + R];
-					dot_coord_der_s += radial_coeff * der_[deriv_base + xi + 2 * R];
-					dot_der_ss += radial_coeff * der_[deriv_base + xi + 3 * R];
-					dot_coord_der_ss += radial_coeff * der_[deriv_base + xi + 4 * R];
+					for (int xi = 0; xi < R; xi++) {
+						const double radial_coeff = regression_coeffs[radial_offset + xi];
+						dot_val += radial_coeff * cache.radial_vals[radial_base + xi];
+						dot_der += radial_coeff * cache.radial_ders[deriv_base + xi];
+						dot_der_s += radial_coeff * cache.radial_ders[deriv_base + xi + R];
+						dot_coord_der_s += radial_coeff * cache.radial_ders[deriv_base + xi + 2 * R];
+						dot_der_ss += radial_coeff * cache.radial_ders[deriv_base + xi + 3 * R];
+						dot_coord_der_ss += radial_coeff * cache.radial_ders[deriv_base + xi + 4 * R];
+					}
+
+					cache.mu_contract_vals[mu] = dot_val;
+					cache.mu_contract_ders[mu] = dot_der;
+					cache.mu_contract_ders_s[mu] = dot_der_s;
+					cache.mu_contract_ders_ss[mu] = dot_der_ss;
+					cache.mu_contract_coord_ders_s[mu] = dot_coord_der_s;
+					cache.mu_contract_coord_ders_ss[mu] = dot_coord_der_ss;
 				}
+			};
 
-				mu_contract_vals[mu] = dot_val;
-				mu_contract_ders[mu] = dot_der;
-				mu_contract_ders_s[mu] = dot_der_s;
-				mu_contract_ders_ss[mu] = dot_der_ss;
-				mu_contract_coord_ders_s[mu] = dot_coord_der_s;
-				mu_contract_coord_ders_ss[mu] = dot_coord_der_ss;
-			}
-		};
+			for (int j = 0; j < nbh.count; j++) {
+				const Vector3& neighb_vec = nbh.vecs[j];
+				const int type_outer = nbh.types[j];
+				const double r = nbh.dists[j];
+				const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
+				const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
+				const double type_scale = center_type_coeff * outer_type_coeff;
+				const NeighborGradCache cache = neighbor_cache(j);
 
-		for (int j = 0; j < nbh.count; j++) {
-			const Vector3& neighb_vec = nbh.vecs[j];
-			const int type_outer = nbh.types[j];
-			const double r = nbh.dists[j];
-			const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
-			const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
-			const double type_scale = center_type_coeff * outer_type_coeff;
+				prepare_neighbor_state(neighb_vec, type_outer, r, cache);
 
-			prepare_neighbor_state(neighb_vec, type_outer, r);
+				for (int i = 0; i < alpha_index_basic_count; i++) {
+					const int mu = alpha_index_basic_.comp0[i];
+					const int k = basic_total_degree_cache_[i];
+					const double powk = 1.0 / cache.dist_powers[k];
+					const double pow0 = cache.coords_powers_x[alpha_index_basic_.comp1[i]];
+					const double pow1 = cache.coords_powers_y[alpha_index_basic_.comp2[i]];
+					const double pow2 = cache.coords_powers_z[alpha_index_basic_.comp3[i]];
+					const double mult0 = pow0 * pow1 * pow2;
+					const double val = type_scale * cache.mu_contract_vals[mu] * powk;
+					const double der = type_scale * cache.mu_contract_ders[mu];
 
-			for (int i = 0; i < alpha_index_basic_count; i++) {
-				const int mu = alpha_index_basic_.comp0[i];
-				const int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
-				const double powk = 1.0 / grad_dist_powers_[k];
-				const double pow0 = grad_coords_powers_x_[alpha_index_basic_.comp1[i]];
-				const double pow1 = grad_coords_powers_y_[alpha_index_basic_.comp2[i]];
-				const double pow2 = grad_coords_powers_z_[alpha_index_basic_.comp3[i]];
-				const double mult0 = pow0 * pow1 * pow2;
-				const double val = type_scale * mu_contract_vals[mu] * powk;
-				const double der = type_scale * mu_contract_ders[mu];
+					mom_val[i] += val * mult0;
 
-				mom_val[i] += val * mult0;
-
-				if (se_ders_weights != nullptr) {
+					if (se_ders_weights != nullptr) {
 					double local_der = der * powk - k * val / r;
 					double jac_x = mult0 * local_der * neighb_vec[0] / r;
 					double jac_y = mult0 * local_der * neighb_vec[1] / r;
-					double jac_z = mult0 * local_der * neighb_vec[2] / r;
+						double jac_z = mult0 * local_der * neighb_vec[2] / r;
 
-					if (alpha_index_basic_.comp1[i] != 0)
-						jac_x += val * alpha_index_basic_.comp1[i]
-							* grad_coords_powers_x_[alpha_index_basic_.comp1[i] - 1]
-							* pow1 * pow2;
-					if (alpha_index_basic_.comp2[i] != 0)
-						jac_y += val * alpha_index_basic_.comp2[i]
-							* pow0
-							* grad_coords_powers_y_[alpha_index_basic_.comp2[i] - 1]
-							* pow2;
-					if (alpha_index_basic_.comp3[i] != 0)
-						jac_z += val * alpha_index_basic_.comp3[i]
-							* pow0 * pow1
-							* grad_coords_powers_z_[alpha_index_basic_.comp3[i] - 1];
+						if (alpha_index_basic_.comp1[i] != 0)
+							jac_x += val * alpha_index_basic_.comp1[i]
+								* cache.coords_powers_x[alpha_index_basic_.comp1[i] - 1]
+								* pow1 * pow2;
+						if (alpha_index_basic_.comp2[i] != 0)
+							jac_y += val * alpha_index_basic_.comp2[i]
+								* pow0
+								* cache.coords_powers_y[alpha_index_basic_.comp2[i] - 1]
+								* pow2;
+						if (alpha_index_basic_.comp3[i] != 0)
+							jac_z += val * alpha_index_basic_.comp3[i]
+								* pow0 * pow1
+								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 
 					dloss_dsenders[i] += se_ders_weights[j][0] * jac_x;
 					dloss_dsenders[i] += se_ders_weights[j][1] * jac_y;
@@ -1733,21 +1798,21 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 			mom_val[alpha_index_times_.comp3[i]] += val2 * val0 * val1;
 		}
 
-		// renewing maximum absolute values
-		for (int i = 0; i < alpha_scalar_moments; i++)
-			max_linear[i] = max(max_linear[i],abs(linear_coeffs[species_count + i]*mom_val[alpha_moment_mapping[i]]));
+			// renewing maximum absolute values
+			for (int i = 0; i < alpha_scalar_moments; i++)
+				max_linear[i] = max(max_linear[i],abs(linear_scalar_coeffs[i] * mom_val[alpha_moment_mapping[i]]));
 
 
-		// convolving with coefficients
-		buff_site_energy_ +=   regression_coeffs[nbh.my_type]+ linear_coeffs[nbh.my_type];
-		for (int i = 0; i < alpha_scalar_moments; i++)
-			buff_site_energy_ += linear_coeffs[species_count + i]*linear_mults[i] * mom_val[alpha_moment_mapping[i]] * linear_coeffs[nbh.my_type];
+			// convolving with coefficients
+			buff_site_energy_ +=   regression_coeffs[nbh.my_type]+ linear_coeffs[nbh.my_type];
+			for (int i = 0; i < alpha_scalar_moments; i++)
+				buff_site_energy_ += linear_scalar_coeffs[i] * linear_mults_data[i] * mom_val[alpha_moment_mapping[i]] * linear_coeffs[nbh.my_type];
 
 		// Backpropagation starts
 
-		// Backpropagation step 1: site energy derivative is the corresponding linear combination
-		for (int i = 0; i < alpha_scalar_moments; i++)
-			site_energy_ders_wrt_moments_[alpha_moment_mapping[i]] = linear_coeffs[species_count + i]*linear_mults[i];
+			// Backpropagation step 1: site energy derivative is the corresponding linear combination
+			for (int i = 0; i < alpha_scalar_moments; i++)
+				site_energy_ders_wrt_moments_[alpha_moment_mapping[i]] = linear_scalar_coeffs[i] * linear_mults_data[i];
 
 
 		// Backpropagation step 2: expressing through basic moments:
@@ -1768,11 +1833,11 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				dloss_dmom[i] = se_weight * site_energy_ders_wrt_moments_[i];
 
 
-		if (se_ders_weights)
-		{
+			if (se_ders_weights)
+			{
 
-			for (int i = 0; i < alpha_index_times_count; i++) {
-				const double val0 = mom_val[alpha_index_times_.comp0[i]];
+				for (int i = 0; i < alpha_index_times_count; i++) {
+					const double val0 = mom_val[alpha_index_times_.comp0[i]];
 				const double val1 = mom_val[alpha_index_times_.comp1[i]];
 				const double val2 = alpha_index_times_.comp2[i];
 
@@ -1780,253 +1845,320 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				dloss_dsenders[alpha_index_times_.comp3[i]] += dloss_dsenders[alpha_index_times_.comp0[i]] * val2 * val1;
 
 
-			}
+				}
 
+				for (int i = 0; i < alpha_index_times_count; i++) {
+					const double val2 = alpha_index_times_.comp2[i];
 
-			for (int i = 0; i < alpha_index_times_count; i++) {
-				const double val2 = alpha_index_times_.comp2[i];
+					dloss_dmom[alpha_index_times_.comp1[i]] += dloss_dsenders[alpha_index_times_.comp0[i]] *
+						site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]] * val2;
 
-				dloss_dmom[alpha_index_times_.comp1[i]] += dloss_dsenders[alpha_index_times_.comp0[i]] *
-					site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]] * val2;
+					dloss_dmom[alpha_index_times_.comp0[i]] += dloss_dsenders[alpha_index_times_.comp1[i]] *
+						site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]] * val2;
+				}
 
-				dloss_dmom[alpha_index_times_.comp0[i]] += dloss_dsenders[alpha_index_times_.comp1[i]] *
-					site_energy_ders_wrt_moments_[alpha_index_times_.comp3[i]] * val2;
+				for (int i = alpha_index_times_count - 1; i >= 0; i--) {
+					double val0 = mom_val[alpha_index_times_.comp0[i]];
+					double val1 = mom_val[alpha_index_times_.comp1[i]];
+					const double val2 = alpha_index_times_.comp2[i];
 
-
-			}
-
-			for (int i = alpha_index_times_count - 1; i >= 0; i--) {
-				double val0 = mom_val[alpha_index_times_.comp0[i]];
-				double val1 = mom_val[alpha_index_times_.comp1[i]];
-				double val2 = alpha_index_times_.comp2[i];
-
-				dloss_dmom[alpha_index_times_.comp0[i]] += dloss_dmom[alpha_index_times_.comp3[i]] * val2*val1;
-					dloss_dmom[alpha_index_times_.comp1[i]] += dloss_dmom[alpha_index_times_.comp3[i]] * val2*val0;
+					dloss_dmom[alpha_index_times_.comp0[i]] += dloss_dmom[alpha_index_times_.comp3[i]] * val2 * val1;
+					dloss_dmom[alpha_index_times_.comp1[i]] += dloss_dmom[alpha_index_times_.comp3[i]] * val2 * val0;
+				}
 
 				}
 
-			}
+			FillWithZero(buff_site_energy_ders_);
+			if (se_ders_weights == nullptr) {
+				for (int j = 0; j < nbh.count; j++) {
+					const Vector3& neighb_vec = nbh.vecs[j];
+					const int type_outer = nbh.types[j];
+					const double r = nbh.dists[j];
+					const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
+					const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
+					const double type_scale = center_type_coeff * outer_type_coeff;
+					const NeighborGradCache cache = neighbor_cache(j);
 
-		FillWithZero(buff_site_energy_ders_);
-		for (int j = 0; j < nbh.count; j++) {
-			const Vector3& neighb_vec = nbh.vecs[j];
-			const int type_outer = nbh.types[j];
-			const double r = nbh.dists[j];
-			const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
-			const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
-			const double type_scale = center_type_coeff * outer_type_coeff;
-			const double inv_r = 1.0 / r;
+					for (int i = 0; i < alpha_index_basic_count; i++) {
+						const int mu = alpha_index_basic_.comp0[i];
+						const int sigma_block = basic_sigma_block_cache_[i];
+						const int k = basic_total_degree_cache_[i];
+						const int radial_offset = basic_radial_offset_cache_[i];
+						const double powk = 1.0 / cache.dist_powers[k];
+						const double pow0 = cache.coords_powers_x[alpha_index_basic_.comp1[i]];
+						const double pow1 = cache.coords_powers_y[alpha_index_basic_.comp2[i]];
+						const double pow2 = cache.coords_powers_z[alpha_index_basic_.comp3[i]];
+						const double mult0 = pow0 * pow1 * pow2;
+						const double dloss_weight = site_linear_coeff * dloss_dmom[i];
+						const int radial_base = sigma_block * R;
+						const double mu_dot_val = cache.mu_contract_vals[mu];
+						const double mu_dot_der = cache.mu_contract_ders[mu];
+						const double mu_dot_der_s = cache.mu_contract_ders_s[mu];
+						const double mu_dot_der_ss = cache.mu_contract_ders_ss[mu];
+						const double radial_basis_scale = powk * mult0;
+						const double val = type_scale * mu_dot_val * powk;
+						const double der = type_scale * mu_dot_der;
+						const double center_grad = outer_type_coeff * mu_dot_val * radial_basis_scale;
+						const double outer_grad = center_type_coeff * mu_dot_val * radial_basis_scale;
+						const double sigma_grad = type_scale * mu_dot_der_s * radial_basis_scale;
+						const double sigma_ss_grad = type_scale * mu_dot_der_ss * radial_basis_scale;
 
-			prepare_neighbor_state(neighb_vec, type_outer, r);
+						for (int xi = 0; xi < R; xi++) {
+							const double rb_val = cache.radial_vals[radial_base + xi];
+							const double basic_grad = rb_val * radial_basis_scale;
+							grad_out[radial_offset + xi] += dloss_weight * basic_grad * type_scale;
+						}
 
-			for (int i = 0; i < alpha_index_basic_count; i++) {
-				const int mu = alpha_index_basic_.comp0[i];
-				const int sigma_block = mu_to_K[mu];
-				const int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
-				const int radial_offset = radial_coeff_base + mu * (R + C);
-				const double powk = 1.0 / grad_dist_powers_[k];
-				const double pow0 = grad_coords_powers_x_[alpha_index_basic_.comp1[i]];
-				const double pow1 = grad_coords_powers_y_[alpha_index_basic_.comp2[i]];
-				const double pow2 = grad_coords_powers_z_[alpha_index_basic_.comp3[i]];
-				const double mult0 = pow0 * pow1 * pow2;
-				const double dloss_weight = site_linear_coeff * dloss_dmom[i];
-				const double coord_weight = site_linear_coeff * site_energy_ders_wrt_moments_[i];
-				const int k_ = mu_to_K[mu];
-				const int radial_base = k_ * R;
-				const int deriv_base = 5 * radial_base;
-				const double mu_dot_val = mu_contract_vals[mu];
-				const double mu_dot_der = mu_contract_ders[mu];
-				const double mu_dot_der_s = mu_contract_ders_s[mu];
-				const double mu_dot_der_ss = mu_contract_ders_ss[mu];
-				const double mu_dot_coord_der_s = mu_contract_coord_ders_s[mu];
-				const double mu_dot_coord_der_ss = mu_contract_coord_ders_ss[mu];
-				const double radial_basis_scale = powk * mult0;
-				const double val = type_scale * mu_dot_val * powk;
-				const double der = type_scale * mu_dot_der;
-				double center_grad = outer_type_coeff * mu_dot_val * radial_basis_scale;
-				double outer_grad = center_type_coeff * mu_dot_val * radial_basis_scale;
-				double sigma_grad = type_scale * mu_dot_der_s * radial_basis_scale;
-				double sigma_ss_grad = type_scale * mu_dot_der_ss * radial_basis_scale;
-				double coord_center_grad = 0.0;
-				double coord_outer_grad = 0.0;
-				double coord_sigma_grad = 0.0;
-				double coord_sigma_ss_grad = 0.0;
+						double local_der = der * powk - k * val / r;
+						double jac_x = mult0 * local_der * neighb_vec[0] / r;
+						double jac_y = mult0 * local_der * neighb_vec[1] / r;
+						double jac_z = mult0 * local_der * neighb_vec[2] / r;
 
-				for (int xi = 0; xi < R; xi++) {
-					const double rb_val = val_[radial_base + xi];
-					const double rb_der = der_[deriv_base + xi];
-					const double basic_grad = rb_val * radial_basis_scale;
-					out_grad_accumulator[radial_offset + xi] += dloss_weight * basic_grad * type_scale;
+						if (alpha_index_basic_.comp1[i] != 0)
+							jac_x += val * alpha_index_basic_.comp1[i]
+								* cache.coords_powers_x[alpha_index_basic_.comp1[i] - 1]
+								* pow1 * pow2;
+						if (alpha_index_basic_.comp2[i] != 0)
+							jac_y += val * alpha_index_basic_.comp2[i]
+								* pow0
+								* cache.coords_powers_y[alpha_index_basic_.comp2[i] - 1]
+								* pow2;
+						if (alpha_index_basic_.comp3[i] != 0)
+							jac_z += val * alpha_index_basic_.comp3[i]
+								* pow0 * pow1
+								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 
-					if (se_ders_weights != nullptr) {
-						const double rb_der_s = der_[deriv_base + xi + R];
-						const double rb_der_coord_s = der_[deriv_base + xi + 2 * R];
-						const double rb_der_ss = der_[deriv_base + xi + 3 * R];
-						const double rb_der_coord_ss = der_[deriv_base + xi + 4 * R];
-						double derx = neighb_vec[0] * inv_r * (rb_der * radial_basis_scale - rb_val * k * radial_basis_scale * inv_r);
-						double dery = neighb_vec[1] * inv_r * (rb_der * radial_basis_scale - rb_val * k * radial_basis_scale * inv_r);
-						double derz = neighb_vec[2] * inv_r * (rb_der * radial_basis_scale - rb_val * k * radial_basis_scale * inv_r);
-						double derx_s = neighb_vec[0] * inv_r * (rb_der_coord_s * radial_basis_scale - rb_der_s * k * radial_basis_scale * inv_r);
-						double dery_s = neighb_vec[1] * inv_r * (rb_der_coord_s * radial_basis_scale - rb_der_s * k * radial_basis_scale * inv_r);
-						double derz_s = neighb_vec[2] * inv_r * (rb_der_coord_s * radial_basis_scale - rb_der_s * k * radial_basis_scale * inv_r);
-						double derx_ss = neighb_vec[0] * inv_r * (rb_der_coord_ss * radial_basis_scale - rb_der_ss * k * radial_basis_scale * inv_r);
-						double dery_ss = neighb_vec[1] * inv_r * (rb_der_coord_ss * radial_basis_scale - rb_der_ss * k * radial_basis_scale * inv_r);
-						double derz_ss = neighb_vec[2] * inv_r * (rb_der_coord_ss * radial_basis_scale - rb_der_ss * k * radial_basis_scale * inv_r);
+						buff_site_energy_ders_[j][0] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_x;
+						buff_site_energy_ders_[j][1] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_y;
+						buff_site_energy_ders_[j][2] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_z;
+
+						const int sigma_coeff_offset = C + 2 * C * C * sigma_block + type_central * C + type_outer;
+						grad_out[shared_type_offset + type_central] += dloss_weight * center_grad;
+						grad_out[shared_type_offset + type_outer] += dloss_weight * outer_grad;
+						grad_out[sigma_coeff_offset] += dloss_weight * sigma_grad;
+						grad_out[sigma_coeff_offset + C * C] += dloss_weight * sigma_ss_grad;
+					}
+
+					if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls" && r < p_RadialBasis->min_dist) {
+						const double multiplier = 10000.0;
+						for (int a = 0; a < 3; a++)
+							buff_site_energy_ders_[j][a] += -10.0 * multiplier * (exp(-10.0 * (r - 1.0)) / r) * neighb_vec[a];
+					}
+				}
+
+				if (shift_)
+					grad_out[type_central] += se_weight;
+				grad_out[coeff_count + type_central] += se_weight * ((buff_site_energy_ - regression_coeffs[nbh.my_type]) / linear_coeffs[nbh.my_type]);
+
+				for (int i = 0; i < alpha_scalar_moments; i++) {
+					const int moment_index = alpha_moment_mapping[i];
+					grad_out[i + coeff_count + species_count] +=
+						linear_coeffs[nbh.my_type] * se_weight * mom_val[moment_index] * linear_mults_data[i];
+				}
+			} else {
+				for (int j = 0; j < nbh.count; j++) {
+					const Vector3& neighb_vec = nbh.vecs[j];
+					const Vector3& se_weight_vec = se_ders_weights[j];
+					const int type_outer = nbh.types[j];
+					const double r = nbh.dists[j];
+					const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
+					const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
+					const double type_scale = center_type_coeff * outer_type_coeff;
+					const double inv_r = 1.0 / r;
+					const NeighborGradCache cache = neighbor_cache(j);
+
+					for (int i = 0; i < alpha_index_basic_count; i++) {
+						const int mu = alpha_index_basic_.comp0[i];
+						const int sigma_block = basic_sigma_block_cache_[i];
+						const int k = basic_total_degree_cache_[i];
+						const int radial_offset = basic_radial_offset_cache_[i];
+						const double powk = 1.0 / cache.dist_powers[k];
+						const double pow0 = cache.coords_powers_x[alpha_index_basic_.comp1[i]];
+						const double pow1 = cache.coords_powers_y[alpha_index_basic_.comp2[i]];
+						const double pow2 = cache.coords_powers_z[alpha_index_basic_.comp3[i]];
+						const double mult0 = pow0 * pow1 * pow2;
+						const double dloss_weight = site_linear_coeff * dloss_dmom[i];
+						const double coord_weight = site_linear_coeff * site_energy_ders_wrt_moments_[i];
+						const int radial_base = sigma_block * R;
+						const int deriv_base = 5 * radial_base;
+						const double mu_dot_val = cache.mu_contract_vals[mu];
+						const double mu_dot_der = cache.mu_contract_ders[mu];
+						const double mu_dot_der_s = cache.mu_contract_ders_s[mu];
+						const double mu_dot_der_ss = cache.mu_contract_ders_ss[mu];
+						const double mu_dot_coord_der_s = cache.mu_contract_coord_ders_s[mu];
+						const double mu_dot_coord_der_ss = cache.mu_contract_coord_ders_ss[mu];
+						const double radial_basis_scale = powk * mult0;
+						const double val = type_scale * mu_dot_val * powk;
+						const double der = type_scale * mu_dot_der;
+						double center_grad = outer_type_coeff * mu_dot_val * radial_basis_scale;
+						double outer_grad = center_type_coeff * mu_dot_val * radial_basis_scale;
+						double sigma_grad = type_scale * mu_dot_der_s * radial_basis_scale;
+						double sigma_ss_grad = type_scale * mu_dot_der_ss * radial_basis_scale;
+						double coord_center_grad = 0.0;
+						double coord_outer_grad = 0.0;
+						double coord_sigma_grad = 0.0;
+						double coord_sigma_ss_grad = 0.0;
+
+						for (int xi = 0; xi < R; xi++) {
+							const double rb_val = cache.radial_vals[radial_base + xi];
+							const double rb_der = cache.radial_ders[deriv_base + xi];
+							const double rb_der_s = cache.radial_ders[deriv_base + xi + R];
+							const double rb_der_coord_s = cache.radial_ders[deriv_base + xi + 2 * R];
+							const double rb_der_ss = cache.radial_ders[deriv_base + xi + 3 * R];
+							const double rb_der_coord_ss = cache.radial_ders[deriv_base + xi + 4 * R];
+							const double basic_grad = rb_val * radial_basis_scale;
+							double radial_grad = dloss_weight * basic_grad;
+							double derx = neighb_vec[0] * inv_r * (rb_der * radial_basis_scale - rb_val * k * radial_basis_scale * inv_r);
+							double dery = neighb_vec[1] * inv_r * (rb_der * radial_basis_scale - rb_val * k * radial_basis_scale * inv_r);
+							double derz = neighb_vec[2] * inv_r * (rb_der * radial_basis_scale - rb_val * k * radial_basis_scale * inv_r);
+							double derx_s = neighb_vec[0] * inv_r * (rb_der_coord_s * radial_basis_scale - rb_der_s * k * radial_basis_scale * inv_r);
+							double dery_s = neighb_vec[1] * inv_r * (rb_der_coord_s * radial_basis_scale - rb_der_s * k * radial_basis_scale * inv_r);
+							double derz_s = neighb_vec[2] * inv_r * (rb_der_coord_s * radial_basis_scale - rb_der_s * k * radial_basis_scale * inv_r);
+							double derx_ss = neighb_vec[0] * inv_r * (rb_der_coord_ss * radial_basis_scale - rb_der_ss * k * radial_basis_scale * inv_r);
+							double dery_ss = neighb_vec[1] * inv_r * (rb_der_coord_ss * radial_basis_scale - rb_der_ss * k * radial_basis_scale * inv_r);
+							double derz_ss = neighb_vec[2] * inv_r * (rb_der_coord_ss * radial_basis_scale - rb_der_ss * k * radial_basis_scale * inv_r);
+
+							if (alpha_index_basic_.comp1[i] != 0) {
+								const double coord_term = alpha_index_basic_.comp1[i]
+									* cache.coords_powers_x[alpha_index_basic_.comp1[i] - 1]
+									* pow1 * pow2;
+								derx += rb_val * powk * coord_term;
+								derx_s += rb_der_s * powk * coord_term;
+								derx_ss += rb_der_ss * powk * coord_term;
+							}
+							if (alpha_index_basic_.comp2[i] != 0) {
+								const double coord_term = alpha_index_basic_.comp2[i]
+									* pow0
+									* cache.coords_powers_y[alpha_index_basic_.comp2[i] - 1]
+									* pow2;
+								dery += rb_val * powk * coord_term;
+								dery_s += rb_der_s * powk * coord_term;
+								dery_ss += rb_der_ss * powk * coord_term;
+							}
+							if (alpha_index_basic_.comp3[i] != 0) {
+								const double coord_term = alpha_index_basic_.comp3[i]
+									* pow0 * pow1
+									* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+								derz += rb_val * powk * coord_term;
+								derz_s += rb_der_s * powk * coord_term;
+								derz_ss += rb_der_ss * powk * coord_term;
+							}
+
+							const double coord_grad = se_weight_vec[0] * derx
+								+ se_weight_vec[1] * dery
+								+ se_weight_vec[2] * derz;
+							const double coord_grad_s = se_weight_vec[0] * derx_s
+								+ se_weight_vec[1] * dery_s
+								+ se_weight_vec[2] * derz_s;
+							const double coord_grad_ss = se_weight_vec[0] * derx_ss
+								+ se_weight_vec[1] * dery_ss
+								+ se_weight_vec[2] * derz_ss;
+
+							radial_grad += coord_weight * coord_grad;
+							grad_out[radial_offset + xi] += radial_grad * type_scale;
+							coord_center_grad += outer_type_coeff * coord_grad;
+							coord_outer_grad += center_type_coeff * coord_grad;
+							coord_sigma_grad += type_scale * coord_grad_s;
+							coord_sigma_ss_grad += type_scale * coord_grad_ss;
+						}
+
+						double local_der = der * powk - k * val / r;
+						double jac_x = mult0 * local_der * neighb_vec[0] / r;
+						double jac_y = mult0 * local_der * neighb_vec[1] / r;
+						double jac_z = mult0 * local_der * neighb_vec[2] / r;
+
+						if (alpha_index_basic_.comp1[i] != 0)
+							jac_x += val * alpha_index_basic_.comp1[i]
+								* cache.coords_powers_x[alpha_index_basic_.comp1[i] - 1]
+								* pow1 * pow2;
+						if (alpha_index_basic_.comp2[i] != 0)
+							jac_y += val * alpha_index_basic_.comp2[i]
+								* pow0
+								* cache.coords_powers_y[alpha_index_basic_.comp2[i] - 1]
+								* pow2;
+						if (alpha_index_basic_.comp3[i] != 0)
+							jac_z += val * alpha_index_basic_.comp3[i]
+								* pow0 * pow1
+								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+
+						buff_site_energy_ders_[j][0] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_x;
+						buff_site_energy_ders_[j][1] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_y;
+						buff_site_energy_ders_[j][2] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_z;
+
+						double derx = neighb_vec[0] * inv_r * (mu_dot_der * radial_basis_scale - mu_dot_val * k * radial_basis_scale * inv_r);
+						double dery = neighb_vec[1] * inv_r * (mu_dot_der * radial_basis_scale - mu_dot_val * k * radial_basis_scale * inv_r);
+						double derz = neighb_vec[2] * inv_r * (mu_dot_der * radial_basis_scale - mu_dot_val * k * radial_basis_scale * inv_r);
+						double derx_s = neighb_vec[0] * inv_r * (mu_dot_coord_der_s * radial_basis_scale - mu_dot_der_s * k * radial_basis_scale * inv_r);
+						double dery_s = neighb_vec[1] * inv_r * (mu_dot_coord_der_s * radial_basis_scale - mu_dot_der_s * k * radial_basis_scale * inv_r);
+						double derz_s = neighb_vec[2] * inv_r * (mu_dot_coord_der_s * radial_basis_scale - mu_dot_der_s * k * radial_basis_scale * inv_r);
+						double derx_ss = neighb_vec[0] * inv_r * (mu_dot_coord_der_ss * radial_basis_scale - mu_dot_der_ss * k * radial_basis_scale * inv_r);
+						double dery_ss = neighb_vec[1] * inv_r * (mu_dot_coord_der_ss * radial_basis_scale - mu_dot_der_ss * k * radial_basis_scale * inv_r);
+						double derz_ss = neighb_vec[2] * inv_r * (mu_dot_coord_der_ss * radial_basis_scale - mu_dot_der_ss * k * radial_basis_scale * inv_r);
 
 						if (alpha_index_basic_.comp1[i] != 0) {
 							const double coord_term = alpha_index_basic_.comp1[i]
-								* grad_coords_powers_x_[alpha_index_basic_.comp1[i] - 1]
+								* cache.coords_powers_x[alpha_index_basic_.comp1[i] - 1]
 								* pow1 * pow2;
-							derx += rb_val * powk * coord_term;
-							derx_s += rb_der_s * powk * coord_term;
-							derx_ss += rb_der_ss * powk * coord_term;
+							derx += mu_dot_val * powk * coord_term;
+							derx_s += mu_dot_der_s * powk * coord_term;
+							derx_ss += mu_dot_der_ss * powk * coord_term;
 						}
 						if (alpha_index_basic_.comp2[i] != 0) {
 							const double coord_term = alpha_index_basic_.comp2[i]
 								* pow0
-								* grad_coords_powers_y_[alpha_index_basic_.comp2[i] - 1]
+								* cache.coords_powers_y[alpha_index_basic_.comp2[i] - 1]
 								* pow2;
-							dery += rb_val * powk * coord_term;
-							dery_s += rb_der_s * powk * coord_term;
-							dery_ss += rb_der_ss * powk * coord_term;
+							dery += mu_dot_val * powk * coord_term;
+							dery_s += mu_dot_der_s * powk * coord_term;
+							dery_ss += mu_dot_der_ss * powk * coord_term;
 						}
 						if (alpha_index_basic_.comp3[i] != 0) {
 							const double coord_term = alpha_index_basic_.comp3[i]
 								* pow0 * pow1
-								* grad_coords_powers_z_[alpha_index_basic_.comp3[i] - 1];
-							derz += rb_val * powk * coord_term;
-							derz_s += rb_der_s * powk * coord_term;
-							derz_ss += rb_der_ss * powk * coord_term;
+								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+							derz += mu_dot_val * powk * coord_term;
+							derz_s += mu_dot_der_s * powk * coord_term;
+							derz_ss += mu_dot_der_ss * powk * coord_term;
 						}
 
-						const double coord_grad = se_ders_weights[j][0] * derx
-							+ se_ders_weights[j][1] * dery
-							+ se_ders_weights[j][2] * derz;
-						const double coord_grad_s = se_ders_weights[j][0] * derx_s
-							+ se_ders_weights[j][1] * dery_s
-							+ se_ders_weights[j][2] * derz_s;
-						const double coord_grad_ss = se_ders_weights[j][0] * derx_ss
-							+ se_ders_weights[j][1] * dery_ss
-							+ se_ders_weights[j][2] * derz_ss;
+						const double coord_grad = se_weight_vec[0] * derx
+							+ se_weight_vec[1] * dery
+							+ se_weight_vec[2] * derz;
+						const double coord_grad_s = se_weight_vec[0] * derx_s
+							+ se_weight_vec[1] * dery_s
+							+ se_weight_vec[2] * derz_s;
+						const double coord_grad_ss = se_weight_vec[0] * derx_ss
+							+ se_weight_vec[1] * dery_ss
+							+ se_weight_vec[2] * derz_ss;
 
-						out_grad_accumulator[radial_offset + xi] += coord_weight * coord_grad * type_scale;
+						const int sigma_coeff_offset = C + 2 * C * C * sigma_block + type_central * C + type_outer;
+						grad_out[shared_type_offset + type_central] += dloss_weight * center_grad + coord_weight * outer_type_coeff * coord_grad;
+						grad_out[shared_type_offset + type_outer] += dloss_weight * outer_grad + coord_weight * center_type_coeff * coord_grad;
+						grad_out[sigma_coeff_offset] += dloss_weight * sigma_grad + coord_weight * type_scale * coord_grad_s;
+						grad_out[sigma_coeff_offset + C * C] += dloss_weight * sigma_ss_grad + coord_weight * type_scale * coord_grad_ss;
+					}
+
+					if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls" && r < p_RadialBasis->min_dist) {
+						const double multiplier = 10000.0;
+						for (int a = 0; a < 3; a++)
+							buff_site_energy_ders_[j][a] += -10.0 * multiplier * (exp(-10.0 * (r - 1.0)) / r) * neighb_vec[a];
 					}
 				}
 
-				double local_der = der * powk - k * val / r;
-				double jac_x = mult0 * local_der * neighb_vec[0] / r;
-				double jac_y = mult0 * local_der * neighb_vec[1] / r;
-				double jac_z = mult0 * local_der * neighb_vec[2] / r;
+				if (shift_)
+					grad_out[type_central] += se_weight;
+				double center_linear_grad = se_weight * ((buff_site_energy_ - regression_coeffs[nbh.my_type]) / linear_coeffs[nbh.my_type]);
+				for (int i = 0; i < alpha_scalar_moments; i++)
+					center_linear_grad += dloss_dsenders[alpha_moment_mapping[i]] * linear_mults_data[i] * linear_scalar_coeffs[i];
+				grad_out[coeff_count + type_central] += center_linear_grad;
 
-				if (alpha_index_basic_.comp1[i] != 0)
-					jac_x += val * alpha_index_basic_.comp1[i]
-						* grad_coords_powers_x_[alpha_index_basic_.comp1[i] - 1]
-						* pow1 * pow2;
-				if (alpha_index_basic_.comp2[i] != 0)
-					jac_y += val * alpha_index_basic_.comp2[i]
-						* pow0
-						* grad_coords_powers_y_[alpha_index_basic_.comp2[i] - 1]
-						* pow2;
-				if (alpha_index_basic_.comp3[i] != 0)
-					jac_z += val * alpha_index_basic_.comp3[i]
-						* pow0 * pow1
-						* grad_coords_powers_z_[alpha_index_basic_.comp3[i] - 1];
-
-				buff_site_energy_ders_[j][0] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_x;
-				buff_site_energy_ders_[j][1] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_y;
-				buff_site_energy_ders_[j][2] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_z;
-
-				if (se_ders_weights != nullptr) {
-					double derx = neighb_vec[0] * inv_r * (mu_dot_der * radial_basis_scale - mu_dot_val * k * radial_basis_scale * inv_r);
-					double dery = neighb_vec[1] * inv_r * (mu_dot_der * radial_basis_scale - mu_dot_val * k * radial_basis_scale * inv_r);
-					double derz = neighb_vec[2] * inv_r * (mu_dot_der * radial_basis_scale - mu_dot_val * k * radial_basis_scale * inv_r);
-					double derx_s = neighb_vec[0] * inv_r * (mu_dot_coord_der_s * radial_basis_scale - mu_dot_der_s * k * radial_basis_scale * inv_r);
-					double dery_s = neighb_vec[1] * inv_r * (mu_dot_coord_der_s * radial_basis_scale - mu_dot_der_s * k * radial_basis_scale * inv_r);
-					double derz_s = neighb_vec[2] * inv_r * (mu_dot_coord_der_s * radial_basis_scale - mu_dot_der_s * k * radial_basis_scale * inv_r);
-					double derx_ss = neighb_vec[0] * inv_r * (mu_dot_coord_der_ss * radial_basis_scale - mu_dot_der_ss * k * radial_basis_scale * inv_r);
-					double dery_ss = neighb_vec[1] * inv_r * (mu_dot_coord_der_ss * radial_basis_scale - mu_dot_der_ss * k * radial_basis_scale * inv_r);
-					double derz_ss = neighb_vec[2] * inv_r * (mu_dot_coord_der_ss * radial_basis_scale - mu_dot_der_ss * k * radial_basis_scale * inv_r);
-
-					if (alpha_index_basic_.comp1[i] != 0) {
-						const double coord_term = alpha_index_basic_.comp1[i]
-							* grad_coords_powers_x_[alpha_index_basic_.comp1[i] - 1]
-							* pow1 * pow2;
-						derx += mu_dot_val * powk * coord_term;
-						derx_s += mu_dot_der_s * powk * coord_term;
-						derx_ss += mu_dot_der_ss * powk * coord_term;
-					}
-					if (alpha_index_basic_.comp2[i] != 0) {
-						const double coord_term = alpha_index_basic_.comp2[i]
-							* pow0
-							* grad_coords_powers_y_[alpha_index_basic_.comp2[i] - 1]
-							* pow2;
-						dery += mu_dot_val * powk * coord_term;
-						dery_s += mu_dot_der_s * powk * coord_term;
-						dery_ss += mu_dot_der_ss * powk * coord_term;
-					}
-					if (alpha_index_basic_.comp3[i] != 0) {
-						const double coord_term = alpha_index_basic_.comp3[i]
-							* pow0 * pow1
-							* grad_coords_powers_z_[alpha_index_basic_.comp3[i] - 1];
-						derz += mu_dot_val * powk * coord_term;
-						derz_s += mu_dot_der_s * powk * coord_term;
-						derz_ss += mu_dot_der_ss * powk * coord_term;
-					}
-
-					const double coord_grad = se_ders_weights[j][0] * derx
-						+ se_ders_weights[j][1] * dery
-						+ se_ders_weights[j][2] * derz;
-					const double coord_grad_s = se_ders_weights[j][0] * derx_s
-						+ se_ders_weights[j][1] * dery_s
-						+ se_ders_weights[j][2] * derz_s;
-					const double coord_grad_ss = se_ders_weights[j][0] * derx_ss
-						+ se_ders_weights[j][1] * dery_ss
-						+ se_ders_weights[j][2] * derz_ss;
-
-					coord_center_grad = outer_type_coeff * coord_grad;
-					coord_outer_grad = center_type_coeff * coord_grad;
-					coord_sigma_grad = type_scale * coord_grad_s;
-					coord_sigma_ss_grad = type_scale * coord_grad_ss;
-				}
-
-				out_grad_accumulator[shared_type_offset + type_central] += dloss_weight * center_grad;
-				out_grad_accumulator[shared_type_offset + type_outer] += dloss_weight * outer_grad;
-				out_grad_accumulator[C + 2 * C * C * sigma_block + type_central * C + type_outer] += dloss_weight * sigma_grad;
-				out_grad_accumulator[C + 2 * C * C * sigma_block + C * C + type_central * C + type_outer] += dloss_weight * sigma_ss_grad;
-
-				if (se_ders_weights != nullptr) {
-					out_grad_accumulator[shared_type_offset + type_central] += coord_weight * coord_center_grad;
-					out_grad_accumulator[shared_type_offset + type_outer] += coord_weight * coord_outer_grad;
-					out_grad_accumulator[C + 2 * C * C * sigma_block + type_central * C + type_outer] += coord_weight * coord_sigma_grad;
-					out_grad_accumulator[C + 2 * C * C * sigma_block + C * C + type_central * C + type_outer] += coord_weight * coord_sigma_ss_grad;
+				for (int i = 0; i < alpha_scalar_moments; i++) {
+					const int moment_index = alpha_moment_mapping[i];
+					const double scalar_grad = se_weight * mom_val[moment_index] + dloss_dsenders[moment_index];
+					grad_out[i + coeff_count + species_count] +=
+						linear_coeffs[nbh.my_type] * scalar_grad * linear_mults_data[i];
 				}
 			}
-
-			if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls" && r < p_RadialBasis->min_dist) {
-				const double multiplier = 10000.0;
-				for (int a = 0; a < 3; a++)
-					buff_site_energy_ders_[j][a] += -10.0 * multiplier * (exp(-10.0 * (r - 1.0)) / r) * neighb_vec[a];
-			}
-		}
-                if (shift_){
-                out_grad_accumulator[type_central]+= se_weight;}
-					out_grad_accumulator[coeff_count + type_central] += se_weight * (  (buff_site_energy_ - regression_coeffs[nbh.my_type]) / linear_coeffs[nbh.my_type]);
-					for (int i = 0; i < alpha_scalar_moments; i++)
-					{
-					out_grad_accumulator[coeff_count + type_central] += dloss_dsenders[alpha_moment_mapping[i]] * linear_mults[i] * linear_coeffs[species_count + i];
-					//out_grad_accumulator[coeff_count + type_central] += se_weight * (linear_coeffs[species_count + i] * linear_mults[i] * mom_val[alpha_moment_mapping[i]]);
-				}
-                
-                
-
-		for (int i = 0; i < alpha_scalar_moments; i++)
-		{
-			out_grad_accumulator[i + coeff_count + species_count] += linear_coeffs[nbh.my_type] * se_weight*mom_val[alpha_moment_mapping[i]]*linear_mults[i];		//from site energy
-
-			if (se_ders_weights != nullptr)
-				out_grad_accumulator[i + coeff_count + species_count] += linear_coeffs[nbh.my_type] * dloss_dsenders[alpha_moment_mapping[i]]*linear_mults[i];			//from site forces
-
-		}
 
 	}
 

@@ -85,10 +85,26 @@ protected:
 	std::vector<double> grad_mu_contract_ders_ss_;
 	std::vector<double> grad_mu_contract_coord_ders_s_;
 	std::vector<double> grad_mu_contract_coord_ders_ss_;
+	std::vector<double> grad_neighbor_dist_powers_cache_;
+	std::vector<double> grad_neighbor_coords_powers_x_cache_;
+	std::vector<double> grad_neighbor_coords_powers_y_cache_;
+	std::vector<double> grad_neighbor_coords_powers_z_cache_;
+	std::vector<double> grad_neighbor_radial_vals_cache_;
+	std::vector<double> grad_neighbor_radial_ders_cache_;
+	std::vector<double> grad_neighbor_mu_contract_vals_cache_;
+	std::vector<double> grad_neighbor_mu_contract_ders_cache_;
+	std::vector<double> grad_neighbor_mu_contract_ders_s_cache_;
+	std::vector<double> grad_neighbor_mu_contract_ders_ss_cache_;
+	std::vector<double> grad_neighbor_mu_contract_coord_ders_s_cache_;
+	std::vector<double> grad_neighbor_mu_contract_coord_ders_ss_cache_;
+	std::vector<int> basic_total_degree_cache_;
+	std::vector<int> basic_sigma_block_cache_;
+	std::vector<int> basic_radial_offset_cache_;
 
 
 
 	void CalcSiteEnergyDers(const Neighborhood& nbh) override;
+	void PrepareEvalCaches() override;
 
 public:
 	double scaling = 1.0; //!< how to scale moments

@@ -20,8 +20,9 @@ void AnyLocalMLIP::Load(const std::string& filename)		//!< Loads MLIP from file
 	Warning("AnyLocalMLIP: Load method is not implemented for this MLIP");
 }
 
-double AnyLocalMLIP::SiteEnergy(const Neighborhood & nbh) 	//!< 
+double AnyLocalMLIP::SiteEnergy(const Neighborhood & nbh)	//!<
 {
+	PrepareEvalCaches();
 	CalcSiteEnergyDers(nbh);
 	return buff_site_energy_;
 }
@@ -35,9 +36,10 @@ void AnyLocalMLIP::CalcSiteEnergyDers(const Neighborhood& nbh)
 }
 
 //! Must calculate gradient of site energy w.r.t. coefficients and add it to second argument array
-void AnyLocalMLIP::AddSiteEnergyGrad(const Neighborhood& nbh, 
-									 std::vector<double>& out_se_grad_accumulator) 
+void AnyLocalMLIP::AddSiteEnergyGrad(const Neighborhood& nbh,
+									 std::vector<double>& out_se_grad_accumulator)
 {
+	PrepareEvalCaches();
 	AccumulateCombinationGrad(nbh, out_se_grad_accumulator, 1.0, nullptr);
 }
 
@@ -107,6 +109,7 @@ void AnyLocalMLIP::CalcStressesGrads(const Configuration & cfg, Array3D & out_st
 	for (int i = 0; i < cfg.size(); i++)
 		dir_size = std::max(dir_size, nbhs[i].count);
 	std::vector<Vector3> dir(dir_size);
+	PrepareEvalCaches();
 
 	for (int i = 0; i < cfg.size(); i++)
 	{
@@ -145,6 +148,7 @@ void AnyLocalMLIP::CalcEFSGrads(const Configuration & cfg,
 	for (int i = 0; i < cfg.size(); i++)
 		dir_size = std::max(dir_size, nbhs[i].count);
 	std::vector<Vector3> dir(dir_size);
+	PrepareEvalCaches();
 
 	for (int i = 0; i < cfg.size(); i++)
 	{
@@ -220,6 +224,7 @@ void AnyLocalMLIP::CalcEFS(Configuration& cfg)
 void AnyLocalMLIP::CalcEFS(Configuration& cfg, const Neighborhoods& neighborhoods)
 {
 	ResetEFS(cfg);
+	PrepareEvalCaches();
 
 	cfg.has_energy(true);
 	cfg.has_forces(true);
@@ -261,6 +266,7 @@ void AnyLocalMLIP::CalcEnergyGrad(Configuration & cfg, std::vector<double>& out_
 	FillWithZero(out_energy_grad);
 
 	Neighborhoods neighborhoods(cfg, CutOff());
+	PrepareEvalCaches();
 	for (const Neighborhood& nbh : neighborhoods)
 		AddSiteEnergyGrad(nbh, out_energy_grad);
 }
@@ -286,6 +292,7 @@ void AnyLocalMLIP::AccumulateEFSCombinationGrad(Configuration &cfg,
 												const Neighborhoods& neighborhoods)
 {
 	out_grads_accumulator.resize(CoeffCount());
+	PrepareEvalCaches();
 
 	for (int ind = 0; ind < cfg.size(); ind++) {
 		const Neighborhood& nbh = neighborhoods[ind];
@@ -332,6 +339,10 @@ void AnyLocalMLIP::AccumulateEFSCombinationGrad(Configuration &cfg,
 										&tmp_se_ders_weights_[0]);
 		}
 	}
+}
+
+void AnyLocalMLIP::PrepareEvalCaches()
+{
 }
 
 //#pragma warning(pop)

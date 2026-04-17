@@ -52,11 +52,12 @@ public:
 	virtual void CalcSiteEnergyDers(const Neighborhood& nbh);										// Must calculate site energy and derivatives of site energy w.r.t. positions of neghboring atoms for a given neighborhood. Must update buff_site_energy_ and buff_site_energy_ders_
 
 protected:
-	//! Basic function required for training of nonlinear MLIPs. 
+	//! Basic function required for training of nonlinear MLIPs.
 	virtual void AccumulateCombinationGrad( const Neighborhood& nbh,								// Must calculate and accumulate for a given atomic neighborhood nbh the gradient w.r.t coefficients of a linear combination site_energy*se_weight + scalar_product(se_ders_weights, site_energy_ders). It must also update buff_site_energy_ and buff_site_energy_ders_
 											Array1D& out_grad_accumulator,							// Gradient of linear combination must be accumulated in out_grad_accumulator. It should not be zeroed before accumulation in this function
 											const double se_weight = 0.0,							// se_weight is a weight of site energy gradients (w.r.t. coefficients) in a linear combination
 											const Vector3* se_ders_weights = nullptr) = 0;			// se_ders_weights is an array of gradients (w.r.t. coefficients) of site energy derivatives (w.r.t. atomic positions) in a linear combination. If last two arguments are default it must just update buff_site_energy_ and buff_site_energy_ders_
+	virtual void PrepareEvalCaches();															// Optional hook for derived classes to refresh cached coefficient views before repeated neighborhood evaluation
 
 	// Function accumalating gradients of site energy. Required for different purposes
 	virtual void AddSiteEnergyGrad(const Neighborhood& nbh, Array1D& out_se_grad_accumulator);		// Must calculate gradient of site energy w.r.t. coefficients and add it to out_se_grad_accumulator. out_se_grad_accumulator is not zeroed before calculation
