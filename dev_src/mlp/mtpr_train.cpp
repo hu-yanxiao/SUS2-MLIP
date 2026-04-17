@@ -653,7 +653,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	trainer.bfgs_trace_file = bfgs_trace_fnm;
 
 	if (prank == 0)
-		std::cout << "SUS2-MLIP developer version v29 (v25 baseline + forward mu-contract + linear 1k-5k optimize)"
+		std::cout << "SUS2-MLIP developer version (2026-04)"
 		          << " | potential from " << args[0]
 		          << ", database: " << args[1] << std::endl;
 
