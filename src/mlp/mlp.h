@@ -21,7 +21,8 @@ inline void PrintSUS2Banner(std::ostream& os, bool mpi_enabled, int mpi_size)
 		<< "  ___) | |_| |___) |/ __/ \n"
 		<< " |____/ \\___/|____/|_____|\n"
 		<< '\n'
-		<< "SUS2-MLIP v29\n"
+		<< "SUS2-MLIP Developer Version v29\n"
+		<< "Branch: codex/developer\n"
 		<< "Base: v25 baseline + forward mu-contract + linear 1k-5k optimize\n"
 		<< "Author: Hu Yanxiao | SUSTech\n";
 

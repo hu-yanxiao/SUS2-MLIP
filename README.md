@@ -1,6 +1,7 @@
 # SUS2-MLIP
 SUS2-MLIP:**S**uper-Linear Machine Learning Interatomic Potentials with Physics-Informed **U**niversal **S**caling and **U**ltra-**S**mall Parameterization. 
 This project adopts MLIP-2-compatible file conventions, such as `.cfg` datasets and `.mtp`-parsable model files.
+> This `codex/developer` branch is the developer version of SUS2-MLIP. It may contain in-progress features, developer-oriented behavior, and branch-specific changes that differ from the release branch.
 ![image](https://github.com/user-attachments/assets/0aaaa76f-b4f8-459e-b8ec-1ddc08849693)
 
 # Installation
