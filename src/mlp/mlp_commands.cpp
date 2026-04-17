@@ -23,7 +23,7 @@
 #include "../../src/mlp/train.h"
 #include "../../src/mlp/calc_errors.h"
 
-const char version_str[] = "v29-v25-forward-mu-contract-linear-1k-5k";
+const char version_str[] = "SUS2-MLIP V1.0.0";
 
 using namespace std;
 
