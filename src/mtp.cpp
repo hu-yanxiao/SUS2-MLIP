@@ -701,9 +701,11 @@ void MTP::Load(const std::string& filename)
 		len = (int)((string)tmpline).length();
 		if (len > 0 && tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
 			tmpline[len - 1] = '\0';
+	}
 
-		if (((string)tmpline).compare(0, 10, "version = ") != 0)
-			ERROR("MTP file must contain a version header");
+	if (((string)tmpline).compare(0, 10, "version = ") == 0 &&
+		(string)tmpline != "version = 1.0.2")
+	{
 
 		// name/description reading block
 		ifs >> tmpstr;
@@ -789,7 +791,7 @@ void MTP::Load(const std::string& filename)
 			Warning("MTP: parameters have not been loaded");
 	}
 	else
-		ERROR("MTP file must have version \"1.0.2\" or \"1.0.3\" or \"1.1.0\"");
+		ERROR("MTP file must contain a version header");
 
 	ifs.close();
 

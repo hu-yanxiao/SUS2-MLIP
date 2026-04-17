@@ -33,16 +33,16 @@ void MLMTPR::Load(const string& filename)
 	if (len > 0 && tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
 		tmpline[len - 1] = '\0';
 
-	if ((string)tmpline != "MTP")
-		ERROR("Can read only MTP format potentials");
-
+	if ((string)tmpline == "MTP")
+	{
 		// version reading block
 		ifs.getline(tmpline, 1000);
 		len = (int)((string)tmpline).length();
 		if (len > 0 && tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
 			tmpline[len - 1] = '\0';
-		if (((string)tmpline).compare(0, 10, "version = ") != 0)
-			ERROR("MTP file must contain a version header");
+	}
+	if (((string)tmpline).compare(0, 10, "version = ") != 0)
+		ERROR("MTP file must contain a version header");
 
 		// name/description reading block
 		ifs >> tmpstr;
