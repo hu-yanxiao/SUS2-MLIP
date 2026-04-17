@@ -27,6 +27,7 @@
 #include <cstring>
 #include <array>
 #include <limits>
+#include <random>
 #include <sstream>
 
 using namespace std;
@@ -621,7 +622,6 @@ void MTPR_trainer::TrainLinear(int prank,
 }
 
 void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training_set, int max_step, const std::vector<Neighborhoods>* neighborhoods) {
-	int nlin= p_mlmtpr->alpha_count + p_mlmtpr->species_count - 1;
 //	int n_coeffe= p_mlip->CoeffCount();
 //	double* x = p_mlip->Coeff();
         int n_coeffe= p_mlmtpr->CoeffCount();
@@ -637,17 +637,10 @@ void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training
                                 }
 
 	//
-	int n_s = p_mlmtpr->species_count;
-	int n_r = p_mlmtpr->radial_func_count;
-	int n_k = p_mlmtpr->K_;
-	int n_rb =p_mlmtpr->Get_RB_size();
-
-	//
 	int num_step = 0;
 
 	int m = (int)training_set.size(); // train set size on the current core
 	int K = 0;                     // train set size over all cores
-        double _loss = 0;
 	K = m;
 
 #ifdef MLIP_MPI												   
@@ -656,7 +649,7 @@ void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training
              TrainLinear(prank, training_set, neighborhoods, "random_sample init");
              if (prank == 0 ) {std::cout << _x.size() <<" " <<n_coeffe<<std::endl; }
 		//	 CalcObjectiveFunctionGrad(training_set);
-	      _loss= ObjectiveFunction(training_set, neighborhoods);
+	      ObjectiveFunction(training_set, neighborhoods);
              loss_ /= K;
              std_ /= K;
 if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
@@ -673,27 +666,11 @@ if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
 	while (num_step < max_step) {
 		if (prank == 0) {
 			std::random_device rand_device;
-			std::default_random_engine generator(rand_device());
-			std::uniform_real_distribution<> uniform(-1.0, 1.0);
+			std::mt19937_64 generator(rand_device());
 
-			std::cout << "Random sample of radial coefficients" << std::endl;
-
-			for (int k = 0; k < 1; k++)
-				for (int l = k; l < 1; l++)
-					for (int i = 0; i < n_r; i++) {
-						for (int j = 0; j < n_rb; j++)
-						{	x[n_s+2*n_s*n_s*n_k+i * (n_rb+n_s) + j]= 0.5 * uniform(generator);
-                                                        
-                                               //      if (j >= n_rb){ p_mlmtpr->regression_coeffs[i * (n_rb+n_s)+j]= 1.00 ;}    
-                                                 //    if (num_step < 3) {std::cout << p_mlmtpr->regression_coeffs[i * n_r + j] << std::endl;} 
-                                                }
-						//      mtpr.regression_coeffs[k*mtpr.radial_func_count*rb_size +
-						//              i*rb_size + min(i, rb_size - 1)] = 5e-7 * uniform(generator);
-					}
-
-		    //  if (num_step< 1) {std::cout << x[0] <<  x[-1]  << std::endl;}
-                       
-                }
+			std::cout << "Random sample of nonlinear coefficients" << std::endl;
+			p_mlmtpr->RandomizeNonlinearCoeffs(generator, 0.5, true, 0.20);
+		}
 #ifdef MLIP_MPI
         //        MPI_Barrier(MPI_COMM_WORLD);
 	//	MPI_Bcast(&(p_mlmtpr->regression_coeffs[0]), n_coeffe, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -709,7 +686,7 @@ if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
 		TrainLinear(prank, training_set, neighborhoods, "random_sample step " + std::to_string(num_step));
 //              if (prank == 0 && num_step< 3) {std::cout << p_mlmtpr->regression_coeffs[0] << " " <<p_mlmtpr->regression_coeffs[(n_rb+n_s)*n_r-3]  <<" " <<n_coeffe<<std::endl; }
 	//	CalcObjectiveFunctionGrad(training_set);
-		_loss= ObjectiveFunction(training_set, neighborhoods);
+		ObjectiveFunction(training_set, neighborhoods);
 		loss_ /= K;
 		std_ /= K;
 #ifdef MLIP_MPI

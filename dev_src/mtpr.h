@@ -7,6 +7,7 @@
 #include "../src/basic_mlip.h"
 #include "../src/common/multidimensional_arrays.h"
 #include <map>
+#include <random>
 #ifndef MLIP_MTPR_H
 #define MLIP_MTPR_H
 
@@ -172,6 +173,17 @@ public:
         void Save_2(const std::string& filename);
 	void RadialCoeffsInit(std::ifstream& ifs_rad);
 	void Perform_scaling();
+	int ScalingCoeffCount() const;
+	int RadialCoeffOffset() const;
+	int RadialCoeffBlockSize() const;
+	int ScalingSlopeOffset(int scaling_block, int type_central, int type_outer) const;
+	int ScalingShiftOffset(int scaling_block, int type_central, int type_outer) const;
+	double OrderedPairStrength(int type_central, int type_outer) const;
+	double NormalizedOrderedPairStrength(int type_central, int type_outer) const;
+	void InitializeDefaultScalingCoeffs();
+	void RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter);
+	void RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_scale);
+	void RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter);
 
 	int CoeffCount() //!< number of coefficients
 	{

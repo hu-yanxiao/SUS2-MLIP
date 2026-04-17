@@ -12,6 +12,7 @@
 #include <ctime>
 #include <limits>
 #include <numeric>
+#include <random>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -775,29 +776,14 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 						 std::cout << std::endl;
 
 		                    }
-	//random initialization of radial coefficients
+	// Random initialization of nonlinear coefficients
 	if (opts["init-params"] == "random" && !mtpr.inited) {
 		if (prank == 0) {
 			std::random_device rand_device;
-			std::default_random_engine generator(rand_device());
-			std::uniform_real_distribution<> uniform(-1.0, 1.0);
+			std::mt19937_64 generator(rand_device());
 
-			std::cout << "Random initialization of radial coefficients" << std::endl;
-			int rb_size = mtpr.Get_RB_size();
-			for (int k = 0; k < 1; k++)
-				for (int l = k; l < 1; l++)
-					for (int i = 0; i < mtpr.radial_func_count; i++) {
-						for (int j = 0; j < rb_size + mtpr.species_count; j++) {
-							mtpr.regression_coeffs[mtpr.species_count+2*mtpr.species_count*mtpr.species_count* mtpr.K_ +(k * mtpr.species_count + l) * mtpr.radial_func_count * rb_size +
-							i * (rb_size+ mtpr.species_count) + j ]
-							= 5e-3 * uniform(generator);
-                                                if (j >= rb_size) {mtpr.regression_coeffs[mtpr.species_count+2*mtpr.species_count*mtpr.species_count* mtpr.K_ +(k * mtpr.species_count + l) * mtpr.radial_func_count * rb_size +
-                                                        i * (rb_size+ mtpr.species_count)+j ] = 1.0 ; }
-
-                                                 }
-						//	mtpr.regression_coeffs[k*mtpr.radial_func_count*rb_size +
-						//		i*rb_size + min(i, rb_size - 1)] = 5e-7 * uniform(generator);
-					}
+			std::cout << "Random initialization of nonlinear coefficients" << std::endl;
+			mtpr.RandomizeNonlinearCoeffs(generator, 5e-3, true, 0.12);
 		}
     //     if (prank == 0) {std::cout << mtpr.regression_coeffs[mtpr.radial_func_count*( mtpr.Get_RB_size() + mtpr.species_count)-4] << std::endl;}
 #ifdef MLIP_MPI

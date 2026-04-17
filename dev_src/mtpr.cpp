@@ -5,6 +5,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include "mtpr.h"
 
 #ifdef MLIP_MPI
@@ -12,6 +13,127 @@
 #endif
 
 using namespace std;
+
+namespace {
+
+constexpr double kRandomScalMin = 2.0;
+constexpr double kRandomScalMax = 5.0;
+constexpr double kRandomShiftMin = 1.5;
+constexpr double kRandomShiftMax = 2.5;
+
+double Clamp01(double value)
+{
+	return std::max(0.0, std::min(1.0, value));
+}
+
+double Lerp(double start, double end, double t)
+{
+	return start + (end - start) * t;
+}
+
+}  // namespace
+
+int MLMTPR::ScalingCoeffCount() const
+{
+	return 2 * species_count * species_count * K_;
+}
+
+int MLMTPR::RadialCoeffOffset() const
+{
+	return species_count + ScalingCoeffCount();
+}
+
+int MLMTPR::RadialCoeffBlockSize() const
+{
+	return p_RadialBasis->rb_size + species_count;
+}
+
+int MLMTPR::ScalingSlopeOffset(int scaling_block, int type_central, int type_outer) const
+{
+	const int pair_count = species_count * species_count;
+	return species_count + 2 * scaling_block * pair_count + type_central * species_count + type_outer;
+}
+
+int MLMTPR::ScalingShiftOffset(int scaling_block, int type_central, int type_outer) const
+{
+	const int pair_count = species_count * species_count;
+	return ScalingSlopeOffset(scaling_block, type_central, type_outer) + pair_count;
+}
+
+double MLMTPR::OrderedPairStrength(int type_central, int type_outer) const
+{
+	return std::sqrt(static_cast<double>(type_central + 1))
+	     + std::sqrt(static_cast<double>(type_outer + 1));
+}
+
+double MLMTPR::NormalizedOrderedPairStrength(int type_central, int type_outer) const
+{
+	if (species_count <= 1)
+		return 0.5;
+
+	const double min_strength = OrderedPairStrength(0, 0);
+	const double max_strength = OrderedPairStrength(species_count - 1, species_count - 1);
+	if (max_strength <= min_strength)
+		return 0.5;
+
+	return Clamp01((OrderedPairStrength(type_central, type_outer) - min_strength) /
+	               (max_strength - min_strength));
+}
+
+void MLMTPR::InitializeDefaultScalingCoeffs()
+{
+	for (int type_central = 0; type_central < species_count; ++type_central) {
+		for (int type_outer = 0; type_outer < species_count; ++type_outer) {
+			for (int scaling_block = 0; scaling_block < K_; ++scaling_block) {
+				const double strength = NormalizedOrderedPairStrength(type_central, type_outer);
+				regression_coeffs[ScalingSlopeOffset(scaling_block, type_central, type_outer)] =
+					Lerp(kRandomScalMax, kRandomScalMin, strength);
+				regression_coeffs[ScalingShiftOffset(scaling_block, type_central, type_outer)] =
+					Lerp(kRandomShiftMin, kRandomShiftMax, strength);
+			}
+		}
+	}
+}
+
+void MLMTPR::RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter)
+{
+	std::uniform_real_distribution<double> jitter(-strength_jitter, strength_jitter);
+	for (int scaling_block = 0; scaling_block < K_; ++scaling_block) {
+		for (int type_central = 0; type_central < species_count; ++type_central) {
+			for (int type_outer = 0; type_outer < species_count; ++type_outer) {
+				const double strength = NormalizedOrderedPairStrength(type_central, type_outer);
+				const double sample = Clamp01(strength + jitter(generator));
+				regression_coeffs[ScalingSlopeOffset(scaling_block, type_central, type_outer)] =
+					Lerp(kRandomScalMax, kRandomScalMin, sample);
+				regression_coeffs[ScalingShiftOffset(scaling_block, type_central, type_outer)] =
+					Lerp(kRandomShiftMin, kRandomShiftMax, sample);
+			}
+		}
+	}
+}
+
+void MLMTPR::RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_scale)
+{
+	std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+	const int radial_coeff_offset = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int rb_size = p_RadialBasis->rb_size;
+
+	for (int mu = 0; mu < radial_func_count; ++mu) {
+		const int block_offset = radial_coeff_offset + mu * block_size;
+		for (int xi = 0; xi < rb_size; ++xi)
+			regression_coeffs[block_offset + xi] = radial_scale * uniform(generator);
+		for (int type = 0; type < species_count; ++type)
+			regression_coeffs[block_offset + rb_size + type] = 1.0;
+	}
+}
+
+void MLMTPR::RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter)
+{
+	if (include_scaling)
+		RandomizeScalingCoeffs(generator, scaling_strength_jitter);
+	RandomizeRadialCoeffs(generator, radial_scale);
+}
 
 
 void MLMTPR::Load(const string& filename)
@@ -225,14 +347,7 @@ void MLMTPR::Load(const string& filename)
 //	ifs >> tmpstr;
         if (tmpstr != "scal_coeffs")
         {
-           double s2=p_RadialBasis->min_dist;
-	   double s1=3.3*2/(-p_RadialBasis->min_dist+p_RadialBasis->max_dist);
-			for (int i = 0; i < pairs_count; i++) {
-				for (int j = 0; j < K_;j++) {
-					regression_coeffs[species_count + j * 2 * pairs_count + pairs_count + i] = s2;
-					regression_coeffs[species_count + j * 2 * pairs_count + i] = 3;
-				}
-			}
+           InitializeDefaultScalingCoeffs();
                 }
         else
         {ifs.ignore(4);
