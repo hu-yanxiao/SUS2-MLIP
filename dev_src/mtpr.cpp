@@ -30,7 +30,7 @@ void MLMTPR::Load(const string& filename)
 
 	ifs.getline(tmpline, 1000);
 	int len = (int)((string)tmpline).length();
-	if (tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
+	if (len > 0 && tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
 		tmpline[len - 1] = '\0';
 
 	if ((string)tmpline != "MTP")
@@ -39,10 +39,10 @@ void MLMTPR::Load(const string& filename)
 		// version reading block
 		ifs.getline(tmpline, 1000);
 		len = (int)((string)tmpline).length();
-		if (tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
+		if (len > 0 && tmpline[len - 1] == '\r')	// Ensures compatibility between Linux and Windows line endings
 			tmpline[len - 1] = '\0';
-		if ((string)tmpline != "version = 1.1.0")
-			ERROR("MTP file must have version \"1.1.0\"");
+		if (((string)tmpline).compare(0, 10, "version = ") != 0)
+			ERROR("MTP file must contain a version header");
 
 		// name/description reading block
 		ifs >> tmpstr;
