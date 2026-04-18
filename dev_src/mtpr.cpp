@@ -17,7 +17,7 @@ using namespace std;
 namespace {
 
 constexpr double kRandomScalMin = 2.0;
-constexpr double kRandomScalMax = 5.0;
+constexpr double kRandomScalMax = 4.0;
 constexpr double kRandomShiftMin = 1.5;
 constexpr double kRandomShiftMax = 2.5;
 
