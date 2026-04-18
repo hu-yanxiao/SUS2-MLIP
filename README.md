@@ -117,7 +117,8 @@ mlp-sus2 calc-errors trained_sus2mlip target.cfg
 # External Tools
 ## LAMMPS
 The current LAMMPS interface is provided in the `sus2-interface-20260410.tar.gz` archive included in this release snapshot.  
-**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp` enables the list-based treatment of radial functions in the LAMMPS interface.
+The interface package name is `ML-SUS2`, and the LAMMPS runtime syntax remains `pair_style sus2mtp` / `pair_style sus2mtp/kk`.  
+**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp` enables the list-based treatment of radial functions in the LAMMPS interface. The optional `tabstep` keyword controls the table spacing, with a default of `1.0e-4` Angstrom.
 ## PySUS2
 PySUS2 is a comprehensive suite of tools and Python modules developed based on the SUS2-MLIP model, designed for atomistic simulations. It supports a range of functionalities including structure relaxation, phonon dispersion analysis, and lattice thermal conductivity calculations.  
 (in progress)
