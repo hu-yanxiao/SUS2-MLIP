@@ -48,28 +48,6 @@ constexpr int kAcceptedDiagDoubleCount = 11;
 constexpr int kAcceptedDiagCountCount = 3;
 constexpr int kTraceFlushInterval = 16;
 
-void ReduceMinMaxDouble(double local_value, double& min_value, double& max_value)
-{
-#ifdef MLIP_MPI
-	MPI_Reduce(&local_value, &min_value, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
-	MPI_Reduce(&local_value, &max_value, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-#else
-	min_value = local_value;
-	max_value = local_value;
-#endif
-}
-
-void ReduceMinMaxLongLong(long long local_value, long long& min_value, long long& max_value)
-{
-#ifdef MLIP_MPI
-	MPI_Reduce(&local_value, &min_value, 1, MPI_LONG_LONG_INT, MPI_MIN, 0, MPI_COMM_WORLD);
-	MPI_Reduce(&local_value, &max_value, 1, MPI_LONG_LONG_INT, MPI_MAX, 0, MPI_COMM_WORLD);
-#else
-	min_value = local_value;
-	max_value = local_value;
-#endif
-}
-
 double EstimateConfigurationVolume(const Configuration& cfg)
 {
 	double volume = std::abs(cfg.lattice.det());
@@ -192,6 +170,47 @@ p_mlmtpr->shift_ = shift_;
 
 }
 
+#ifdef MLIP_MPI
+void MTPR_trainer::ConfigureTrainComm(bool has_local_work, int world_rank, int world_size)
+{
+	if (train_comm_owned_ && train_comm_ != MPI_COMM_NULL) {
+		MPI_Comm_free(&train_comm_);
+	}
+	train_comm_owned_ = false;
+	train_rank_active_ = has_local_work;
+	train_comm_is_world_ = true;
+	train_rank_ = 0;
+	train_size_ = 1;
+	train_comm_ = MPI_COMM_WORLD;
+
+	if (world_size <= 1) {
+		train_rank_active_ = true;
+		return;
+	}
+
+	MPI_Comm_split(MPI_COMM_WORLD, has_local_work ? 0 : MPI_UNDEFINED, world_rank, &train_comm_);
+	int active_count = 0;
+	int active_flag = has_local_work ? 1 : 0;
+	MPI_Allreduce(&active_flag, &active_count, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+	train_comm_is_world_ = (active_count == world_size);
+	if (!has_local_work) {
+		train_comm_ = MPI_COMM_NULL;
+		train_rank_ = -1;
+		train_size_ = 0;
+		return;
+	}
+
+	train_comm_owned_ = true;
+	MPI_Comm_rank(train_comm_, &train_rank_);
+	MPI_Comm_size(train_comm_, &train_size_);
+}
+
+void MTPR_trainer::BroadcastCoeffsWorld(int root_world_rank)
+{
+	MPI_Bcast(&p_mlmtpr->Coeff()[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, root_world_rank, MPI_COMM_WORLD);
+}
+#endif
+
 
 void MTPR_trainer::LoadWeights(ifstream& ifs)
 {
@@ -240,6 +259,10 @@ void MTPR_trainer::ClearSLAE()
 
 MTPR_trainer::~MTPR_trainer()
 {
+#ifdef MLIP_MPI
+	if (train_comm_owned_ && train_comm_ != MPI_COMM_NULL)
+		MPI_Comm_free(&train_comm_);
+#endif
 	delete[] quad_opt_vec;
 	delete[] quad_opt_matr;
 	quad_opt_vec = nullptr;
@@ -531,10 +554,18 @@ double* MTPR_trainer::ConstructLinHessian()
 }
 
 void MTPR_trainer::TrainLinear(int prank,
-							   vector<Configuration>& training_set,
-							   const std::vector<Neighborhoods>* neighborhoods,
-							   const std::string& context)
+								   vector<Configuration>& training_set,
+								   const std::vector<Neighborhoods>* neighborhoods,
+								   const std::string& context)
 {
+#ifdef MLIP_MPI
+	if (!train_rank_active_)
+		return;
+	const int mpi_rank = train_rank_;
+	const MPI_Comm train_comm = train_comm_;
+#else
+	const int mpi_rank = prank;
+#endif
 	const long long local_cfg_count = static_cast<long long>(training_set.size());
 	long long local_atom_count = 0;
 	for (const Configuration& cfg : training_set)
@@ -562,28 +593,22 @@ void MTPR_trainer::TrainLinear(int prank,
 #ifdef MLIP_MPI
 
 	int n = p_mlmtpr->alpha_count - 1 + p_mlmtpr->species_count;		// Matrix size
-	long long min_cfg_count = 0, max_cfg_count = 0;
-	long long min_atom_count = 0, max_atom_count = 0;
-	long long min_eqn_count = 0, max_eqn_count = 0;
-	double min_build_seconds = 0.0, max_build_seconds = 0.0;
 	const std::string prefix = context.empty() ? "TrainLinear" : "TrainLinear[" + context + "]";
-	ReduceMinMaxLongLong(local_cfg_count, min_cfg_count, max_cfg_count);
-	ReduceMinMaxLongLong(local_atom_count, min_atom_count, max_atom_count);
-	ReduceMinMaxLongLong(static_cast<long long>(quad_opt_eqn_count), min_eqn_count, max_eqn_count);
-	ReduceMinMaxDouble(build_seconds, min_build_seconds, max_build_seconds);
 	double reduce_start = MPI_Wtime();
-	if (prank == 0) {
+	if (mpi_rank == 0) {
 		std::cout << "[" << CurrentTimestamp() << "] TrainLinear build done"
 		          << " ctx=" << prefix
 		          << " n=" << n
-		          << " cfg[min,max]=" << min_cfg_count << "," << max_cfg_count
-		          << " atoms[min,max]=" << min_atom_count << "," << max_atom_count
-		          << " eq[min,max]=" << min_eqn_count << "," << max_eqn_count
-		          << " build_s[min,max]=" << min_build_seconds << "," << max_build_seconds
+		          << " cfg_local=" << local_cfg_count
+		          << " atoms_local=" << local_atom_count
+		          << " eq_local=" << quad_opt_eqn_count
+		          << " build_s=" << build_seconds
 		          << std::endl;
-		MPI_Reduce(MPI_IN_PLACE, quad_opt_matr, n*n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(MPI_IN_PLACE, quad_opt_vec, n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(MPI_IN_PLACE, &quad_opt_scalar, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	}
+	if (mpi_rank == 0) {
+		MPI_Reduce(MPI_IN_PLACE, quad_opt_matr, n*n, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+		MPI_Reduce(MPI_IN_PLACE, quad_opt_vec, n, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+		MPI_Reduce(MPI_IN_PLACE, &quad_opt_scalar, 1, MPI_DOUBLE, MPI_SUM, 0, train_comm);
 		const double reduce_seconds = MPI_Wtime() - reduce_start;
 		std::cout << "[" << CurrentTimestamp() << "] TrainLinear reduce done"
 		          << " ctx=" << prefix
@@ -595,9 +620,9 @@ void MTPR_trainer::TrainLinear(int prank,
 		          << " ctx=" << prefix
 		          << " solve_s=" << solve_seconds << std::endl;
 	} else {
-		MPI_Reduce(quad_opt_matr, nullptr, n*n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(quad_opt_vec, nullptr, n, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
-		MPI_Reduce(&quad_opt_scalar, nullptr, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+		MPI_Reduce(quad_opt_matr, quad_opt_matr, n*n, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+		MPI_Reduce(quad_opt_vec, quad_opt_vec, n, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+		MPI_Reduce(&quad_opt_scalar, &quad_opt_scalar, 1, MPI_DOUBLE, MPI_SUM, 0, train_comm);
 	}
 
 #else
@@ -605,15 +630,12 @@ void MTPR_trainer::TrainLinear(int prank,
 #endif
 #ifdef MLIP_MPI
 	double bcast_start = MPI_Wtime();
-        MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Bcast(&p_mlmtpr->Coeff()[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&p_mlmtpr->Coeff()[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, train_comm);
 	double bcast_seconds = MPI_Wtime() - bcast_start;
-	double min_bcast_seconds = 0.0, max_bcast_seconds = 0.0;
-	ReduceMinMaxDouble(bcast_seconds, min_bcast_seconds, max_bcast_seconds);
-	if (prank == 0) {
+	if (mpi_rank == 0) {
 		std::cout << "[" << CurrentTimestamp() << "] TrainLinear bcast done"
 		          << " ctx=" << prefix
-		          << " bcast_s[min,max]=" << min_bcast_seconds << "," << max_bcast_seconds
+		          << " bcast_s=" << bcast_seconds
 		          << std::endl;
 	}
 #endif
@@ -624,47 +646,47 @@ void MTPR_trainer::TrainLinear(int prank,
 void MTPR_trainer::random_sample(int prank, std::vector<Configuration>& training_set, int max_step, const std::vector<Neighborhoods>* neighborhoods) {
 //	int n_coeffe= p_mlip->CoeffCount();
 //	double* x = p_mlip->Coeff();
-        int n_coeffe= p_mlmtpr->CoeffCount();
-        double* x = p_mlmtpr->Coeff();
-	double c_l;
-	double std_l;
-	double p_l=1e10;
-	std::vector<double> _x;
-        _x.resize(n_coeffe);
-	_x.reserve(n_coeffe);
-        for (int i = 0;i < n_coeffe;i++) {
-                                        _x[i] = x[i];
-                                }
-
-	//
-	int num_step = 0;
-
-	int m = (int)training_set.size(); // train set size on the current core
-	int K = 0;                     // train set size over all cores
-	K = m;
-
-#ifdef MLIP_MPI												   
-	MPI_Allreduce(&m, &K, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-#endif
-             TrainLinear(prank, training_set, neighborhoods, "random_sample init");
-             if (prank == 0 ) {std::cout << _x.size() <<" " <<n_coeffe<<std::endl; }
-		//	 CalcObjectiveFunctionGrad(training_set);
-	      ObjectiveFunction(training_set, neighborhoods);
-             loss_ /= K;
-             std_ /= K;
-if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
 #ifdef MLIP_MPI
-             MPI_Barrier(MPI_COMM_WORLD);
-             MPI_Reduce(&loss_, &c_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);  
-             MPI_Reduce(&std_, &std_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	if (!train_rank_active_)
+		return;
+	const int mpi_rank = train_rank_;
+	const MPI_Comm train_comm = train_comm_;
 #else
-             c_l = loss_;
-             std_l = std_;
-             p_l = loss_ + std_ ;
+	const int mpi_rank = prank;
 #endif
-        if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
+	int n_coeffe= p_mlmtpr->CoeffCount();
+	double* x = p_mlmtpr->Coeff();
+	double c_l = 0.0;
+	double std_l = 0.0;
+	double p_l = 1e10;
+	std::vector<double> _x(n_coeffe);
+	for (int i = 0; i < n_coeffe; i++)
+		_x[i] = x[i];
+
+	int num_step = 0;
+	int m = (int)training_set.size();
+	int K = m;
+
+#ifdef MLIP_MPI
+	MPI_Allreduce(&m, &K, 1, MPI_INT, MPI_SUM, train_comm);
+#endif
+	TrainLinear(prank, training_set, neighborhoods, "random_sample init");
+	if (mpi_rank == 0) { std::cout << _x.size() << " " << n_coeffe << std::endl; }
+	ObjectiveFunction(training_set, neighborhoods);
+	loss_ /= K;
+	std_ /= K;
+	if (mpi_rank == 0) { std::cout << "__________....__________ " << std::endl; }
+#ifdef MLIP_MPI
+	MPI_Reduce(&loss_, &c_l, 1, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+	MPI_Reduce(&std_, &std_l, 1, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+#else
+	c_l = loss_;
+	std_l = std_;
+	p_l = loss_ + std_;
+#endif
+	if (mpi_rank == 0) { std::cout << "__________....__________ " << std::endl; }
 	while (num_step < max_step) {
-		if (prank == 0) {
+		if (mpi_rank == 0) {
 			std::random_device rand_device;
 			std::mt19937_64 generator(rand_device());
 
@@ -672,68 +694,45 @@ if (prank == 0 ) {std::cout <<"__________....__________ " <<std::endl; }
 			p_mlmtpr->RandomizeNonlinearCoeffs(generator, 0.5, true, 0.20);
 		}
 #ifdef MLIP_MPI
-        //        MPI_Barrier(MPI_COMM_WORLD);
-	//	MPI_Bcast(&(p_mlmtpr->regression_coeffs[0]), n_coeffe, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-                MPI_Barrier(MPI_COMM_WORLD);
-                MPI_Bcast(&x[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&x[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, train_comm);
 #endif
-     //         if (prank == 0 && num_step< 3) {
-      //                for (int i = 0; i < n_r; i++) {
-       //                    for (int j = 0; j < n_rb+ n_s; j++){
-        //                                                  std::cout << p_mlmtpr->regression_coeffs[i*(n_rb+n_s)+j] << std::endl;
-         //                                                  }
-           //                                                       }      }
 		TrainLinear(prank, training_set, neighborhoods, "random_sample step " + std::to_string(num_step));
-//              if (prank == 0 && num_step< 3) {std::cout << p_mlmtpr->regression_coeffs[0] << " " <<p_mlmtpr->regression_coeffs[(n_rb+n_s)*n_r-3]  <<" " <<n_coeffe<<std::endl; }
-	//	CalcObjectiveFunctionGrad(training_set);
 		ObjectiveFunction(training_set, neighborhoods);
 		loss_ /= K;
 		std_ /= K;
 #ifdef MLIP_MPI
-		MPI_Barrier(MPI_COMM_WORLD);
-		MPI_Reduce(&loss_, &c_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); // get c_l in rank 0 
-		MPI_Reduce(&std_, &std_l, 1, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD); 
+		MPI_Reduce(&loss_, &c_l, 1, MPI_DOUBLE, MPI_SUM, 0, train_comm);
+		MPI_Reduce(&std_, &std_l, 1, MPI_DOUBLE, MPI_SUM, 0, train_comm);
 #else
 		c_l = loss_;
 		std_l = std_;
 #endif
-		if (prank == 0) {
-			if (std_l+c_l  < p_l) {
-				p_l = std_l+c_l;
-				for (int i = 0;i < n_coeffe;i++) {
+		if (mpi_rank == 0) {
+			if (std_l + c_l < p_l) {
+				p_l = std_l + c_l;
+				for (int i = 0; i < n_coeffe; i++)
 					_x[i] = x[i];
-				}
-				std::cout << "num_step: " << num_step << " f= " << c_l << "   std^2= " << std_l/std_scaling <<"\t (*opt)"
+				std::cout << "num_step: " << num_step << " f= " << c_l << "   std^2= " << std_l/std_scaling << "\t (*opt)"
 					<< std::endl;
-
 				num_step += 1;
-				
 			}
-			else { 
-				std::cout << "num_step: " << num_step << " f= " << c_l <<"   std^2= " << std_l/std_scaling<< std::endl;
+			else {
+				std::cout << "num_step: " << num_step << " f= " << c_l << "   std^2= " << std_l/std_scaling << std::endl;
 				num_step += 1;
-			}	
+			}
 		}
 #ifdef MLIP_MPI
-                MPI_Barrier(MPI_COMM_WORLD);
-		MPI_Bcast(&num_step, 1, MPI_INT, 0, MPI_COMM_WORLD);
-		MPI_Bcast(&_x[0], n_coeffe, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&num_step, 1, MPI_INT, 0, train_comm);
+		MPI_Bcast(&_x[0], n_coeffe, MPI_DOUBLE, 0, train_comm);
 #endif
-	
 	}
-	for (int i = 0;i < n_coeffe;i++) {
+	for (int i = 0; i < n_coeffe; i++)
 		x[i] = _x[i];
-	}
 
 #ifdef MLIP_MPI
-                MPI_Barrier(MPI_COMM_WORLD);
-               // MPI_Bcast(&(p_mlmtpr->regression_coeffs[0]), n_coeffe, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-               MPI_Bcast(&x[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+	MPI_Bcast(&x[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, train_comm);
 #endif
 	std::vector<double>().swap(_x);
-	
-	
-	//
 }
 
 
@@ -758,10 +757,13 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 	std::stringstream logstrm1;
 
 #ifdef MLIP_MPI
-	MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Comm_rank(MPI_COMM_WORLD, &prank);
-	MPI_Comm_size(MPI_COMM_WORLD, &psize);
-	bfgs.UseDistributedDense(prank, psize);
+	if (!train_rank_active_)
+		return;
+	prank = train_rank_;
+	psize = train_size_;
+	MPI_Comm train_comm = train_comm_;
+	const bool allow_distributed_bfgs = train_comm_is_world_;
+	bfgs.UseDistributedDense(prank, allow_distributed_bfgs ? psize : 1, train_comm);
 	if (prank == 0) {
 		logstrm1 << "MTPR parallel training started" << endl;
 		// 		if (GetLogStream()!=nullptr) GetLogStream()->precision(15);
@@ -783,7 +785,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 	K = m;
 
 #ifdef MLIP_MPI												   
-	MPI_Allreduce(&m, &K, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&m, &K, 1, MPI_INT, MPI_SUM, train_comm);
 #endif
 
 	std::vector<Neighborhoods> training_neighborhoods;
@@ -941,7 +943,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 #ifdef MLIP_MPI
 			if (distributed_bfgs && external_x_needs_broadcast)
-				MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+				MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, train_comm);
 #endif
 			if (external_x_modified) {
 				if (distributed_bfgs || prank == 0)
@@ -970,12 +972,12 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		            &loss_grad_[0],
 		            n * sizeof(double));
 		MPI_Reduce(optimizer_reduce_local.data(),
-		           prank == 0 ? optimizer_reduce_global.data() : nullptr,
+		           prank == 0 ? optimizer_reduce_global.data() : optimizer_reduce_local.data(),
 		           n + kOptimizerReducePrefix,
 		           MPI_DOUBLE,
 		           MPI_SUM,
 		           0,
-		           MPI_COMM_WORLD);
+		           train_comm);
 		if (prank == 0) {
 			bfgs_f = optimizer_reduce_global[0];
 			std::memcpy(&bfgs_g[0],
@@ -1004,7 +1006,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			          n + kOptimizerReducePrefix,
 			          MPI_DOUBLE,
 			          0,
-			          MPI_COMM_WORLD);
+			          train_comm);
 			if (prank != 0) {
 				bfgs_f = optimizer_reduce_global[0];
 				std::memcpy(&bfgs_g[0],
@@ -1021,6 +1023,19 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					bfgs.ReduceStep(0.25);
 				}
 		}
+
+#ifdef MLIP_MPI
+		if (!distributed_bfgs) {
+			if (prank == 0)
+				std::memcpy(x, bfgs.Data(), n * sizeof(double));
+			MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, train_comm);
+			if (prank != 0) {
+				bfgs.Set_x(x, n);
+				if (freeze_species_coeffs)
+					bfgs.MaskCoordinates(species_coeff_indices);
+			}
+		}
+#endif
 
 		if (prank == 0)
 			if (!converge) {
@@ -1039,11 +1054,11 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 	#ifdef MLIP_MPI
 		if (!distributed_bfgs) {
-			int linesearch_state = linesearch ? 1 : 0;
-			MPI_Bcast(&linesearch_state, 1, MPI_INT, 0, MPI_COMM_WORLD);
-			linesearch = (linesearch_state != 0);
-		}
-	#endif
+				int linesearch_state = linesearch ? 1 : 0;
+				MPI_Bcast(&linesearch_state, 1, MPI_INT, 0, train_comm);
+				linesearch = (linesearch_state != 0);
+			}
+		#endif
 
 		if (!linesearch)
 		{
@@ -1065,20 +1080,20 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #ifdef MLIP_MPI
 			MPI_Request accepted_reduce_requests[2];
 			MPI_Ireduce(accepted_diag_local.data(),
-			            prank == 0 ? accepted_diag_global.data() : nullptr,
+			            prank == 0 ? accepted_diag_global.data() : accepted_diag_local.data(),
 			            kAcceptedDiagDoubleCount,
 			            MPI_DOUBLE,
 			            MPI_SUM,
 			            0,
-			            MPI_COMM_WORLD,
+			            train_comm,
 			            &accepted_reduce_requests[0]);
 			MPI_Ireduce(accepted_count_local.data(),
-			            prank == 0 ? accepted_count_global.data() : nullptr,
+			            prank == 0 ? accepted_count_global.data() : accepted_count_local.data(),
 			            kAcceptedDiagCountCount,
 			            MPI_LONG_LONG_INT,
 			            MPI_SUM,
 			            0,
-			            MPI_COMM_WORLD,
+			            train_comm,
 			            &accepted_reduce_requests[1]);
 #else
 			accepted_diag_global = accepted_diag_local;

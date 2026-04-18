@@ -21,7 +21,11 @@
 #include <cblas.h>
 #endif
 
-void BFGS::UseDistributedDense(int rank, int size)
+void BFGS::UseDistributedDense(int rank, int size
+#ifdef MLIP_MPI
+	, MPI_Comm comm
+#endif
+)
 {
 #ifndef MLIP_MPI
 	if (size > 1)
@@ -36,6 +40,9 @@ void BFGS::UseDistributedDense(int rank, int size)
 	use_distributed_dense_ = new_use_distributed;
 	distributed_rank_ = new_use_distributed ? rank : 0;
 	distributed_size_ = new_use_distributed ? size : 1;
+#ifdef MLIP_MPI
+	distributed_comm_ = new_use_distributed ? comm : MPI_COMM_WORLD;
+#endif
 
 	if (layout_changed && this->size > 0) {
 		const int old_size = this->size;
@@ -128,7 +135,7 @@ void BFGS::DenseMatVec(const Array1D& v, Array1D& out)
 				   distributed_row_counts_.data(),
 				   distributed_row_displs_.data(),
 				   MPI_DOUBLE,
-				   MPI_COMM_WORLD);
+				   distributed_comm_);
 #endif
 }
 

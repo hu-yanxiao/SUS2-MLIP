@@ -13,6 +13,10 @@
 #include "../src/common/bfgs.h"
 #include <vector>
 
+#ifdef MLIP_MPI
+#include <mpi.h>
+#endif
+
 class MTPR_trainer : public NonLinearRegression
 {
 public:
@@ -46,6 +50,14 @@ private:
 	Array1D bfgs_g;
 	TrainErrorSummary last_train_error_summary_;
 	bool have_last_train_error_summary_ = false;
+#ifdef MLIP_MPI
+	MPI_Comm train_comm_ = MPI_COMM_WORLD;
+	bool train_comm_owned_ = false;
+	bool train_rank_active_ = true;
+	bool train_comm_is_world_ = true;
+	int train_rank_ = 0;
+	int train_size_ = 1;
+#endif
 
 public:
 	std::string curr_pot_name="";
@@ -82,6 +94,22 @@ public:
 	~MTPR_trainer();
 	const TrainErrorSummary& LastTrainErrorSummary() const { return last_train_error_summary_; }
 	bool HasLastTrainErrorSummary() const { return have_last_train_error_summary_; }
+#ifdef MLIP_MPI
+	void ConfigureTrainComm(bool has_local_work, int world_rank, int world_size);
+	void BroadcastCoeffsWorld(int root_world_rank = 0);
+	bool TrainRankActive() const { return train_rank_active_; }
+	bool TrainCommIsWorld() const { return train_comm_is_world_; }
+	MPI_Comm TrainComm() const { return train_comm_; }
+	int TrainRank() const { return train_rank_; }
+	int TrainSize() const { return train_size_; }
+#else
+	void ConfigureTrainComm(bool, int, int) {}
+	void BroadcastCoeffsWorld(int = 0) {}
+	bool TrainRankActive() const { return true; }
+	bool TrainCommIsWorld() const { return true; }
+	int TrainRank() const { return 0; }
+	int TrainSize() const { return 1; }
+#endif
 
 	void LoadWeights(std::ifstream& ifs);						// Load weights in Linear regression from file
         void shift(bool shift_);

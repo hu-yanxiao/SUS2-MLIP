@@ -17,6 +17,10 @@
 #include "multidimensional_arrays.h"
 #include "utils.h"
 
+#ifdef MLIP_MPI
+#include <mpi.h>
+#endif
+
 
 //! Linesearch
 
@@ -261,6 +265,9 @@ private:
 	int distributed_size_ = 1;
 	int distributed_row_start_ = 0;
 	int distributed_row_count_ = 0;
+#ifdef MLIP_MPI
+	MPI_Comm distributed_comm_ = MPI_COMM_WORLD;
+#endif
 
 	void UpdateDistributedLayout();
 	void DenseMatVec(const Array1D& v, Array1D& out);
@@ -297,7 +304,11 @@ public:
 	
 	void Set_x(const double *x, int _size);				//! sets x and resets (i.e., quits) linesearch. Does not reset Hessian if size is not changed
 	void Set_x(Array1D x) { Set_x(x.data(), (int)x.size()); };//! sets x and resets (i.e., quits) linesearch
-	void UseDistributedDense(int rank, int size);
+	void UseDistributedDense(int rank, int size
+#ifdef MLIP_MPI
+		, MPI_Comm comm = MPI_COMM_WORLD
+#endif
+	);
 	bool UsingDistributedDense() const { return use_distributed_dense_; }
 	void SetInvHessDiagonal(const Array1D& diag);
 	void MaskCoordinates(const std::vector<int>& indices);

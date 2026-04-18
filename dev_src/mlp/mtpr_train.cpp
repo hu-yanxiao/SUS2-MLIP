@@ -249,7 +249,12 @@ bool ShouldCacheNeighborhoods(const std::vector<Configuration>& configs, double 
 	return bytes <= kNeighborhoodCacheBudgetBytesPerRank;
 }
 
-std::vector<size_t> BuildRescaleSubsetIndices(const std::vector<Configuration>& source)
+std::vector<size_t> BuildRescaleSubsetIndices(const std::vector<Configuration>& source
+#ifdef MLIP_MPI
+											   , MPI_Comm comm,
+											   int comm_size
+#endif
+)
 {
 	constexpr size_t kRescaleCfgLimitPerRank = 5;
 
@@ -259,9 +264,12 @@ std::vector<size_t> BuildRescaleSubsetIndices(const std::vector<Configuration>& 
 	long long global_cfg_count = static_cast<long long>(source.size());
 #ifdef MLIP_MPI
 	long long local_cfg_count = static_cast<long long>(source.size());
-	MPI_Allreduce(&local_cfg_count, &global_cfg_count, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&local_cfg_count, &global_cfg_count, 1, MPI_LONG_LONG_INT, MPI_SUM, comm);
+	const int active_size = std::max(comm_size, 1);
+#else
+	const int active_size = 1;
 #endif
-	if (global_cfg_count <= static_cast<long long>(kRescaleCfgLimitPerRank) * std::max(psize, 1))
+	if (global_cfg_count <= static_cast<long long>(kRescaleCfgLimitPerRank) * active_size)
 		return {};
 
 	std::vector<size_t> order(source.size());
@@ -422,7 +430,21 @@ DatasetStats AddConfigs(const string cfgfnm, NonLinearRegression& dtr, int proc_
 
 void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhoods>* training_neighborhoods)
 {
-	const std::vector<size_t> rescale_subset_indices = BuildRescaleSubsetIndices(training_set);
+#ifdef MLIP_MPI
+	if (!trainer.TrainRankActive())
+		return;
+	const int train_rank = trainer.TrainRank();
+	const int train_size = trainer.TrainSize();
+	MPI_Comm train_comm = trainer.TrainComm();
+#else
+	const int train_rank = prank;
+	const int train_size = 1;
+#endif
+	const std::vector<size_t> rescale_subset_indices = BuildRescaleSubsetIndices(training_set
+#ifdef MLIP_MPI
+		, train_comm, train_size
+#endif
+	);
 	std::vector<Configuration> rescale_subset =
 		GatherConfigurationsByIndex(training_set, rescale_subset_indices);
 	std::vector<Neighborhoods> rescale_subset_neighborhoods;
@@ -447,12 +469,12 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhood
 	long long rescale_cfg_total = static_cast<long long>(rescale_training_set->size());
 	long long full_cfg_total = static_cast<long long>(training_set.size());
 #ifdef MLIP_MPI
-	MPI_Allreduce(&rescale_atoms_local, &rescale_atoms_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
-	MPI_Allreduce(&full_atoms_local, &full_atoms_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&rescale_atoms_local, &rescale_atoms_total, 1, MPI_LONG_LONG_INT, MPI_SUM, train_comm);
+	MPI_Allreduce(&full_atoms_local, &full_atoms_total, 1, MPI_LONG_LONG_INT, MPI_SUM, train_comm);
 	long long rescale_cfg_local = static_cast<long long>(rescale_training_set->size());
 	long long full_cfg_local = static_cast<long long>(training_set.size());
-	MPI_Allreduce(&rescale_cfg_local, &rescale_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
-	MPI_Allreduce(&full_cfg_local, &full_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD);
+	MPI_Allreduce(&rescale_cfg_local, &rescale_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, train_comm);
+	MPI_Allreduce(&full_cfg_local, &full_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, train_comm);
 #endif
 
 	double min_scaling = mtpr.scaling;
@@ -465,7 +487,7 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhood
 		std::vector<std::vector<double> > candidate_coeffs(5, std::vector<double>(mtpr.CoeffCount()));
 		vector<double> coeffs;
 		coeffs.resize(mtpr.linear_coeffs.size() - mtpr.species_count + 2);
-		if (prank == 0) {
+		if (train_rank == 0) {
 			std::cout << "[" << CurrentTimestamp() << "] Rescaling..." << std::endl;
 			if (rescale_atoms_total < full_atoms_total || rescale_cfg_total < full_cfg_total) {
 				std::cout << "[" << CurrentTimestamp() << "] "
@@ -476,7 +498,7 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhood
 			}
 		}
 		for (int j = 0; j < 5; j++) {
-			if (prank == 0)
+			if (train_rank == 0)
 				std::cout << "[" << CurrentTimestamp() << "] "
 				          << "Rescale trial scaling=" << scalings[j] << std::endl;
 			mtpr.scaling = scalings[j];
@@ -500,7 +522,7 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhood
 			double median = coeffs[coeffs.size() / 2];
 
 			condition_number[j] = rms / median;
-			if (prank == 0)
+			if (train_rank == 0)
 				std::cout << "**condition number =" << rms / median << std::endl;
 		}
 
@@ -510,12 +532,12 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhood
 			if (condition_number[j] < condition_number[ind]) ind = j;
 
 		mtpr.scaling = scalings[ind];
-		if (prank == 0)
+		if (train_rank == 0)
 			std::cout << "[" << CurrentTimestamp() << "] "
 			          << "Rescaling selected scaling=" << mtpr.scaling << std::endl;
 		std::memcpy(mtpr.Coeff(), candidate_coeffs[ind].data(), mtpr.CoeffCount() * sizeof(double));
 #ifdef MLIP_MPI
-		MPI_Bcast(mtpr.Coeff(), mtpr.CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+		MPI_Bcast(mtpr.Coeff(), mtpr.CoeffCount(), MPI_DOUBLE, 0, train_comm);
 #endif
 		if ((min_scaling < mtpr.scaling) && (mtpr.scaling < max_scaling))
 			ind = 2;
@@ -692,6 +714,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			end = 10;
 		}
 	}
+#ifdef MLIP_MPI
+	trainer.ConfigureTrainComm(!training_set.empty(), prank, psize);
+#endif
 
 	long long train_cfg_total = train_stats_local.cfg_count;
 	long long train_atom_total = train_stats_local.atom_count;
@@ -817,14 +842,17 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 
 	       if (prank == 0)
 			std::cout << "[" << CurrentTimestamp() << "] Entering Rescale" << std::endl;
-               Rescale(trainer, mtpr, linear_training_neighborhoods_ptr);
-               if (do_sample){
-               trainer.random_sample(prank, training_set, 10, linear_training_neighborhoods_ptr);
+               if (trainer.TrainRankActive())
+	               Rescale(trainer, mtpr, linear_training_neighborhoods_ptr);
+               if (do_sample && trainer.TrainRankActive()){
+	               trainer.random_sample(prank, training_set, 10, linear_training_neighborhoods_ptr);
                }
 		if (prank == 0)
 			std::cout << "Pre-training started" << std::endl;
 
-		trainer.Train(training_set);
+		if (trainer.TrainRankActive())
+			trainer.Train(training_set);
+		trainer.BroadcastCoeffsWorld();
 
 		
                 //trainer.random_sample(prank, training_set, 20);
@@ -882,7 +910,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 //          	Rescale(trainer, mtpr);
 		bool f = true;
 		trainer.shift(f);
-		trainer.Train(training_set);
+		if (trainer.TrainRankActive())
+			trainer.Train(training_set);
+		trainer.BroadcastCoeffsWorld();
 		//string train_name = "pp.mtp";
 //		if (prank == 0)
 //			mtpr.Save("loop_1.mtp");
