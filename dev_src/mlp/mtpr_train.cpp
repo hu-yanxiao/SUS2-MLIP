@@ -34,6 +34,20 @@ struct DatasetStats {
 	long long atom_count = 0;
 };
 
+struct MomentCoeffStats {
+	double center_log = 0.0;
+	double spread_log = 0.0;
+	std::size_t count = 0;
+	bool valid = false;
+};
+
+struct RescaleEvalResult {
+	double scaling = 0.0;
+	MomentCoeffStats stats;
+	std::vector<double> coeffs;
+	bool valid = false;
+};
+
 constexpr std::size_t kNeighborhoodCacheBudgetBytesPerRank = 4ULL * 1024ULL * 1024ULL * 1024ULL;
 
 namespace {
@@ -102,6 +116,43 @@ std::pair<double, double> ParseRangeOption(const std::string& value, const std::
 	} catch (const std::exception&) {
 		ERROR(opt_name + " should contain exactly two comma-separated doubles");
 	}
+}
+
+MomentCoeffStats ComputeMomentCoeffStats(const MLMTPR& mtpr)
+{
+	constexpr double kMomentCoeffEps = 1.0e-12;
+	MomentCoeffStats stats;
+	std::vector<double> logs;
+	logs.reserve(mtpr.linear_coeffs.size());
+
+	for (int i = 0; i < static_cast<int>(mtpr.linear_coeffs.size()) - mtpr.species_count; ++i) {
+		const double coeff = std::abs(mtpr.linear_coeffs[i + mtpr.species_count]);
+		if (coeff > kMomentCoeffEps)
+			logs.push_back(std::log(coeff));
+	}
+
+	if (logs.empty())
+		return stats;
+
+	std::sort(logs.begin(), logs.end());
+	stats.count = logs.size();
+	stats.center_log = logs[logs.size() / 2];
+
+	double sq_sum = 0.0;
+	for (double value : logs) {
+		const double diff = value - stats.center_log;
+		sq_sum += diff * diff;
+	}
+	stats.spread_log = std::sqrt(sq_sum / logs.size());
+	stats.valid = true;
+	return stats;
+}
+
+double RescaleMetric(const MomentCoeffStats& stats)
+{
+	constexpr double kMetricCenterWeight = 3.0;
+	return stats.spread_log * stats.spread_log
+	     + kMetricCenterWeight * stats.center_log * stats.center_log;
 }
 
 long long SumAtoms(const std::vector<Configuration>& configs)
@@ -495,75 +546,187 @@ void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhood
 	MPI_Allreduce(&full_cfg_local, &full_cfg_total, 1, MPI_LONG_LONG_INT, MPI_SUM, train_comm);
 #endif
 
-	double min_scaling = mtpr.scaling;
-	double max_scaling = mtpr.scaling;
-	int ind;
-	do {
-		double condition_number[5];
-		double scaling = mtpr.scaling;
-		double scalings[5] = { scaling / 1.21,scaling / 1.11, scaling, scaling * 1.1, scaling * 1.2 };
-		std::vector<std::vector<double> > candidate_coeffs(5, std::vector<double>(mtpr.CoeffCount()));
-		vector<double> coeffs;
-		coeffs.resize(mtpr.linear_coeffs.size() - mtpr.species_count + 2);
-		if (train_rank == 0) {
-			std::cout << "[" << CurrentTimestamp() << "] Rescaling..." << std::endl;
-			if (rescale_atoms_total < full_atoms_total || rescale_cfg_total < full_cfg_total) {
-				std::cout << "[" << CurrentTimestamp() << "] "
-				          << "Rescale subset: "
-				          << rescale_cfg_total << "/" << full_cfg_total << " structures, "
-				          << rescale_atoms_total << "/" << full_atoms_total << " atoms"
-				          << std::endl;
-			}
+	constexpr int kCenterMaxIters = 6;
+	constexpr int kBracketExpandMaxIters = 6;
+	constexpr double kCenterTolLog = 0.15;
+	constexpr double kScalingFloor = 1.0e-12;
+	constexpr double kBracketFactor = 2.0;
+	const double factors[5] = {1.0 / 1.08, 1.0 / 1.03, 1.0, 1.03, 1.08};
+
+	if (train_rank == 0) {
+		std::cout << "[" << CurrentTimestamp() << "] Rescaling..." << std::endl;
+		if (rescale_atoms_total < full_atoms_total || rescale_cfg_total < full_cfg_total) {
+			std::cout << "[" << CurrentTimestamp() << "] "
+			          << "Rescale subset: "
+			          << rescale_cfg_total << "/" << full_cfg_total << " structures, "
+			          << rescale_atoms_total << "/" << full_atoms_total << " atoms"
+		          << std::endl;
 		}
-		for (int j = 0; j < 5; j++) {
-			if (train_rank == 0)
-				std::cout << "[" << CurrentTimestamp() << "] "
-				          << "Rescale trial scaling=" << scalings[j] << std::endl;
-			mtpr.scaling = scalings[j];
-			trainer.TrainLinear(prank,
-							   *rescale_training_set,
-							   rescale_training_neighborhoods,
-							   "rescale trial " + std::to_string(j + 1) + "/5");
-			std::memcpy(candidate_coeffs[j].data(), mtpr.Coeff(), mtpr.CoeffCount() * sizeof(double));
-			mtpr.LinCoeff();
-			double rms = 13.0;
-			coeffs[0] = -3.0;
-			coeffs[1] = -2.0;
-			for (int i = 0; i < mtpr.linear_coeffs.size() - mtpr.species_count; i++) {
+	}
 
-				coeffs[i + 2] = std::abs(mtpr.linear_coeffs[i + mtpr.species_count]);
-				rms += coeffs[i] * coeffs[i];
-			}
-			rms = sqrt(rms);
-			std::sort(coeffs.begin(), coeffs.end());
+	auto evaluate_scaling = [&](double scaling_value, const std::string& context) {
+		RescaleEvalResult result;
+		result.scaling = scaling_value;
+		result.coeffs.resize(mtpr.CoeffCount());
+		mtpr.scaling = scaling_value;
+		trainer.TrainLinear(prank,
+						   *rescale_training_set,
+						   rescale_training_neighborhoods,
+						   context);
+		std::memcpy(result.coeffs.data(), mtpr.Coeff(), mtpr.CoeffCount() * sizeof(double));
+		mtpr.LinCoeff();
+		result.stats = ComputeMomentCoeffStats(mtpr);
+		result.valid = result.stats.valid;
+		return result;
+	};
 
-			double median = coeffs[coeffs.size() / 2];
-
-			condition_number[j] = rms / median;
-			if (train_rank == 0)
-				std::cout << "**condition number =" << rms / median << std::endl;
-		}
-
-		// finds minimal condition number
-		ind = 2;
-		for (int j = 0; j < 5; j++)
-			if (condition_number[j] < condition_number[ind]) ind = j;
-
-		mtpr.scaling = scalings[ind];
+	auto log_eval = [&](const std::string& prefix, const RescaleEvalResult& eval) {
 		if (train_rank == 0)
 			std::cout << "[" << CurrentTimestamp() << "] "
-			          << "Rescaling selected scaling=" << mtpr.scaling << std::endl;
-		std::memcpy(mtpr.Coeff(), candidate_coeffs[ind].data(), mtpr.CoeffCount() * sizeof(double));
-#ifdef MLIP_MPI
-		MPI_Bcast(mtpr.Coeff(), mtpr.CoeffCount(), MPI_DOUBLE, 0, train_comm);
-#endif
-		if ((min_scaling < mtpr.scaling) && (mtpr.scaling < max_scaling))
-			ind = 2;
-		else {
-			min_scaling = std::min(min_scaling, mtpr.scaling);
-			max_scaling = std::max(max_scaling, mtpr.scaling);
+			          << prefix
+			          << " scaling=" << eval.scaling
+			          << " count=" << eval.stats.count
+			          << " center_log=" << eval.stats.center_log
+			          << " spread_log=" << eval.stats.spread_log
+			          << " typical_scale=" << std::exp(eval.stats.center_log)
+			          << std::endl;
+	};
+
+	RescaleEvalResult center_eval =
+		evaluate_scaling(mtpr.scaling, "rescale center seed");
+	if (!center_eval.valid) {
+		if (train_rank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] "
+			          << "Rescale aborted: no valid moment coefficients" << std::endl;
+		return;
+	}
+	log_eval("Rescale center seed", center_eval);
+
+	RescaleEvalResult best_center_eval = center_eval;
+	RescaleEvalResult positive_eval;
+	RescaleEvalResult negative_eval;
+	bool have_positive = false;
+	bool have_negative = false;
+
+	if (center_eval.stats.center_log >= 0.0) {
+		positive_eval = center_eval;
+		have_positive = true;
+	} else {
+		negative_eval = center_eval;
+		have_negative = true;
+	}
+
+	if (std::abs(center_eval.stats.center_log) >= kCenterTolLog) {
+		RescaleEvalResult bracket_eval = center_eval;
+		for (int iter = 0; iter < kBracketExpandMaxIters && !(have_positive && have_negative); ++iter) {
+			double trial_scaling = bracket_eval.scaling;
+			if (bracket_eval.stats.center_log > 0.0)
+				trial_scaling = std::max(kScalingFloor, bracket_eval.scaling * kBracketFactor);
+			else
+				trial_scaling = std::max(kScalingFloor, bracket_eval.scaling / kBracketFactor);
+
+			bracket_eval = evaluate_scaling(
+				trial_scaling,
+				"rescale bracket " + std::to_string(iter + 1) + "/" + std::to_string(kBracketExpandMaxIters));
+			if (!bracket_eval.valid)
+				break;
+			log_eval("Rescale bracket", bracket_eval);
+			if (std::abs(bracket_eval.stats.center_log) < std::abs(best_center_eval.stats.center_log))
+				best_center_eval = bracket_eval;
+			if (bracket_eval.stats.center_log >= 0.0) {
+				positive_eval = bracket_eval;
+				have_positive = true;
+			} else {
+				negative_eval = bracket_eval;
+				have_negative = true;
+			}
 		}
-	} while (ind != 2);
+	}
+
+	if (have_positive && have_negative) {
+		for (int iter = 0; iter < kCenterMaxIters; ++iter) {
+			const double log_pos = std::log(positive_eval.scaling);
+			const double log_neg = std::log(negative_eval.scaling);
+			double log_trial = 0.5 * (log_pos + log_neg);
+			const double center_pos = positive_eval.stats.center_log;
+			const double center_neg = negative_eval.stats.center_log;
+			if (std::abs(center_pos - center_neg) > 1.0e-12) {
+				log_trial = (log_pos * center_neg - log_neg * center_pos) / (center_neg - center_pos);
+				log_trial = std::max(std::min(log_trial, std::max(log_pos, log_neg)), std::min(log_pos, log_neg));
+				const double span = std::abs(log_pos - log_neg);
+				if (std::abs(log_trial - log_pos) < 0.1 * span || std::abs(log_trial - log_neg) < 0.1 * span)
+					log_trial = 0.5 * (log_pos + log_neg);
+			}
+			const double trial_scaling = std::max(kScalingFloor, std::exp(log_trial));
+			RescaleEvalResult trial_eval = evaluate_scaling(
+				trial_scaling,
+				"rescale center solve " + std::to_string(iter + 1) + "/" + std::to_string(kCenterMaxIters));
+			if (!trial_eval.valid)
+				break;
+			log_eval("Rescale center solve", trial_eval);
+			if (std::abs(trial_eval.stats.center_log) < std::abs(best_center_eval.stats.center_log))
+				best_center_eval = trial_eval;
+			if (std::abs(trial_eval.stats.center_log) < kCenterTolLog) {
+				best_center_eval = trial_eval;
+				break;
+			}
+			if (trial_eval.stats.center_log >= 0.0)
+				positive_eval = trial_eval;
+			else
+				negative_eval = trial_eval;
+		}
+	}
+
+	mtpr.scaling = best_center_eval.scaling;
+	std::memcpy(mtpr.Coeff(), best_center_eval.coeffs.data(), mtpr.CoeffCount() * sizeof(double));
+
+	const double base_scaling = best_center_eval.scaling;
+	double best_metric = std::numeric_limits<double>::infinity();
+	double best_scaling = base_scaling;
+	MomentCoeffStats best_stats = best_center_eval.stats;
+	std::vector<double> best_coeffs(mtpr.CoeffCount());
+	std::memcpy(best_coeffs.data(), best_center_eval.coeffs.data(), mtpr.CoeffCount() * sizeof(double));
+
+	for (int j = 0; j < 5; ++j) {
+		const double trial_scaling = std::max(kScalingFloor, base_scaling * factors[j]);
+		RescaleEvalResult trial_eval = evaluate_scaling(
+			trial_scaling,
+			"rescale fine trial " + std::to_string(j + 1) + "/5");
+		if (!trial_eval.valid)
+			continue;
+		const double metric = RescaleMetric(trial_eval.stats);
+		if (train_rank == 0) {
+			std::cout << "[" << CurrentTimestamp() << "] "
+			          << "Rescale fine stats center_log=" << trial_eval.stats.center_log
+			          << " spread_log=" << trial_eval.stats.spread_log
+			          << " metric=" << metric
+			          << std::endl;
+		}
+		if (metric < best_metric) {
+			best_metric = metric;
+			best_scaling = trial_scaling;
+			best_stats = trial_eval.stats;
+			std::memcpy(best_coeffs.data(), trial_eval.coeffs.data(), mtpr.CoeffCount() * sizeof(double));
+		}
+	}
+
+	mtpr.scaling = best_scaling;
+	if (best_metric < std::numeric_limits<double>::infinity())
+		std::memcpy(mtpr.Coeff(), best_coeffs.data(), mtpr.CoeffCount() * sizeof(double));
+#ifdef MLIP_MPI
+	MPI_Bcast(mtpr.Coeff(), mtpr.CoeffCount(), MPI_DOUBLE, 0, train_comm);
+#endif
+	if (train_rank == 0) {
+		std::cout << "[" << CurrentTimestamp() << "] "
+		          << "Rescaling selected scaling=" << mtpr.scaling;
+		if (best_stats.valid) {
+			std::cout << " center_log=" << best_stats.center_log
+			          << " spread_log=" << best_stats.spread_log
+			          << " typical_scale=" << std::exp(best_stats.center_log)
+			          << " metric=" << best_metric;
+		}
+		std::cout << std::endl;
+	}
 }
 
 void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::string>& opts)
