@@ -94,41 +94,6 @@ namespace {
 
 constexpr double kLaguerreMinRho = 1.0e-8;
 
-inline void FillLaguerreLog1pTerm(
-	int index,
-	int rb_size,
-	double scaling,
-	double cutoff_f,
-	double cutoff_der,
-	double laguerre,
-	double laguerre_der,
-	double laguerre_dder,
-	double u,
-	double u_r,
-	double u_scal,
-	double u_scal_r,
-	double u_rho,
-	double u_rho_r,
-	std::vector<double>& rb_vals,
-	std::vector<double>& rb_ders)
-{
-	const double damp = exp(-0.5 * u);
-	const double damped = damp * laguerre;
-	const double damped_u = damp * (laguerre_der - 0.5 * laguerre);
-	const double damped_uu = damp * (laguerre_dder - laguerre_der + 0.25 * laguerre);
-
-	rb_vals[index] = scaling * cutoff_f * damped;
-	rb_ders[index] = scaling * (cutoff_der * damped + cutoff_f * damped_u * u_r);
-	rb_ders[index + rb_size] = scaling * cutoff_f * damped_u * u_scal;
-	rb_ders[index + 2 * rb_size] = scaling * (
-		cutoff_der * damped_u * u_scal
-		+ cutoff_f * (damped_uu * u_r * u_scal + damped_u * u_scal_r));
-	rb_ders[index + 3 * rb_size] = scaling * cutoff_f * damped_u * u_rho;
-	rb_ders[index + 4 * rb_size] = scaling * (
-		cutoff_der * damped_u * u_rho
-		+ cutoff_f * (damped_uu * u_r * u_rho + damped_u * u_rho_r));
-}
-
 }  // namespace
 
 void RadialBasis_Shapeev::InitShapeevRB()
@@ -1405,40 +1370,64 @@ void RadialBasis_Laguerre_log1p::RB_Calc(double r, double scal, double s, int k)
 	const double cutoff_f = dr * dr;
 	const double cutoff_der = 2.0 * dr;
 
-	double laguerre_nm2 = 1.0;
-	double laguerre_der_nm2 = 0.0;
-	double laguerre_dder_nm2 = 0.0;
-	FillLaguerreLog1pTerm(0, rb_size, scaling, cutoff_f, cutoff_der,
-		laguerre_nm2, laguerre_der_nm2, laguerre_dder_nm2,
-		u, u_r, u_scal, u_scal_r, u_rho, u_rho_r, rb_vals, rb_ders);
+	const double exp_factor = exp(-0.5 * u);
+	double phi_prev = 0.0;
+	double dphi_prev = 0.0;
+	double dphi_scal_prev = 0.0;
+	double dphi_scal_r_prev = 0.0;
+	double dphi_rho_prev = 0.0;
+	double dphi_rho_r_prev = 0.0;
 
-	if (rb_size == 1)
-		return;
+	double phi_curr = scaling * cutoff_f * exp_factor;
+	double dphi_curr = scaling * cutoff_der * exp_factor - 0.5 * u_r * phi_curr;
+	double dphi_scal_curr = -0.5 * u_scal * phi_curr;
+	double dphi_scal_r_curr = -0.5 * u_scal_r * phi_curr - 0.5 * u_scal * dphi_curr;
+	double dphi_rho_curr = -0.5 * u_rho * phi_curr;
+	double dphi_rho_r_curr = -0.5 * u_rho_r * phi_curr - 0.5 * u_rho * dphi_curr;
 
-	double laguerre_nm1 = 1.0 - u;
-	double laguerre_der_nm1 = -1.0;
-	double laguerre_dder_nm1 = 0.0;
-	FillLaguerreLog1pTerm(1, rb_size, scaling, cutoff_f, cutoff_der,
-		laguerre_nm1, laguerre_der_nm1, laguerre_dder_nm1,
-		u, u_r, u_scal, u_scal_r, u_rho, u_rho_r, rb_vals, rb_ders);
+	rb_vals[0] = phi_curr;
+	rb_ders[0] = dphi_curr;
+	rb_ders[rb_size] = dphi_scal_curr;
+	rb_ders[2 * rb_size] = dphi_scal_r_curr;
+	rb_ders[3 * rb_size] = dphi_rho_curr;
+	rb_ders[4 * rb_size] = dphi_rho_r_curr;
 
-	for (int n = 1; n < rb_size - 1; ++n) {
-		const double pref = 1.0 / (n + 1.0);
-		const double coeff = 2.0 * n + 1.0 - u;
-		const double laguerre = pref * (coeff * laguerre_nm1 - n * laguerre_nm2);
-		const double laguerre_der = pref * (-laguerre_nm1 + coeff * laguerre_der_nm1 - n * laguerre_der_nm2);
-		const double laguerre_dder = pref * (-2.0 * laguerre_der_nm1 + coeff * laguerre_dder_nm1 - n * laguerre_dder_nm2);
+	for (int n = 0; n < rb_size - 1; ++n) {
+		const double inv_np1 = 1.0 / (n + 1.0);
+		const double coeff = (2.0 * n + 1.0 - u) * inv_np1;
+		const double prev_coeff = n * inv_np1;
 
-		FillLaguerreLog1pTerm(n + 1, rb_size, scaling, cutoff_f, cutoff_der,
-			laguerre, laguerre_der, laguerre_dder,
-			u, u_r, u_scal, u_scal_r, u_rho, u_rho_r, rb_vals, rb_ders);
+		const double phi_next = coeff * phi_curr - prev_coeff * phi_prev;
+		const double dphi_next = -u_r * inv_np1 * phi_curr + coeff * dphi_curr - prev_coeff * dphi_prev;
+		const double dphi_scal_next = -u_scal * inv_np1 * phi_curr + coeff * dphi_scal_curr - prev_coeff * dphi_scal_prev;
+		const double dphi_scal_r_next =
+			(-u_scal_r * phi_curr - u_scal * dphi_curr - u_r * dphi_scal_curr) * inv_np1
+			+ coeff * dphi_scal_r_curr - prev_coeff * dphi_scal_r_prev;
+		const double dphi_rho_next = -u_rho * inv_np1 * phi_curr + coeff * dphi_rho_curr - prev_coeff * dphi_rho_prev;
+		const double dphi_rho_r_next =
+			(-u_rho_r * phi_curr - u_rho * dphi_curr - u_r * dphi_rho_curr) * inv_np1
+			+ coeff * dphi_rho_r_curr - prev_coeff * dphi_rho_r_prev;
 
-		laguerre_nm2 = laguerre_nm1;
-		laguerre_der_nm2 = laguerre_der_nm1;
-		laguerre_dder_nm2 = laguerre_dder_nm1;
-		laguerre_nm1 = laguerre;
-		laguerre_der_nm1 = laguerre_der;
-		laguerre_dder_nm1 = laguerre_dder;
+		rb_vals[n + 1] = phi_next;
+		rb_ders[n + 1] = dphi_next;
+		rb_ders[n + 1 + rb_size] = dphi_scal_next;
+		rb_ders[n + 1 + 2 * rb_size] = dphi_scal_r_next;
+		rb_ders[n + 1 + 3 * rb_size] = dphi_rho_next;
+		rb_ders[n + 1 + 4 * rb_size] = dphi_rho_r_next;
+
+		phi_prev = phi_curr;
+		dphi_prev = dphi_curr;
+		dphi_scal_prev = dphi_scal_curr;
+		dphi_scal_r_prev = dphi_scal_r_curr;
+		dphi_rho_prev = dphi_rho_curr;
+		dphi_rho_r_prev = dphi_rho_r_curr;
+
+		phi_curr = phi_next;
+		dphi_curr = dphi_next;
+		dphi_scal_curr = dphi_scal_next;
+		dphi_scal_r_curr = dphi_scal_r_next;
+		dphi_rho_curr = dphi_rho_next;
+		dphi_rho_r_curr = dphi_rho_r_next;
 	}
 }
 
