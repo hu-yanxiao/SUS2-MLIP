@@ -178,12 +178,14 @@ public:
 	int RadialCoeffBlockSize() const;
 	int ScalingSlopeOffset(int scaling_block, int type_central, int type_outer) const;
 	int ScalingShiftOffset(int scaling_block, int type_central, int type_outer) const;
-	double OrderedPairStrength(int type_central, int type_outer) const;
-	double NormalizedOrderedPairStrength(int type_central, int type_outer) const;
-	void InitializeDefaultScalingCoeffs();
-	void RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter);
-	void RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_scale);
-	void RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter);
+		double OrderedPairStrength(int type_central, int type_outer) const;
+		double NormalizedOrderedPairStrength(int type_central, int type_outer) const;
+		void SetScalingSlopeRange(double start, double end);
+		void SetScalingShiftRange(double start, double end);
+		void InitializeDefaultScalingCoeffs();
+		void RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter);
+		void RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_scale);
+		void RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter);
 
 	int CoeffCount() //!< number of coefficients
 	{
@@ -248,10 +250,16 @@ public:
 
 	int alpha_count;								//!< Basis functions count 
 	int alpha_scalar_moments;						//!< = alpha_count-1 (MTP-basis except constant function)
-	int radial_func_count;							//!< number of radial basis functions used
-	int species_count;							//!< number of components present in the potential
+		int radial_func_count;							//!< number of radial basis functions used
+		int species_count;							//!< number of components present in the potential
+		bool custom_scaling_slope_range = false;
+		bool custom_scaling_shift_range = false;
+		double scaling_slope_range_start = 0.0;
+		double scaling_slope_range_end = 0.0;
+		double scaling_shift_range_start = 0.0;
+		double scaling_shift_range_end = 0.0;
 
-	void Orthogonalize();						//!<Orthogonalize the basic functions
+		void Orthogonalize();						//!<Orthogonalize the basic functions
 };
 
 

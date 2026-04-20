@@ -86,6 +86,24 @@ DatasetStats LoadConfigsFromFile(const std::string& cfgfnm, std::vector<Configur
 	return stats;
 }
 
+std::pair<double, double> ParseRangeOption(const std::string& value, const std::string& opt_name)
+{
+	const std::size_t comma = value.find(',');
+	if (comma == std::string::npos || value.find(',', comma + 1) != std::string::npos)
+		ERROR(opt_name + " should contain exactly two comma-separated doubles");
+
+	const std::string first = value.substr(0, comma);
+	const std::string second = value.substr(comma + 1);
+	if (first.empty() || second.empty())
+		ERROR(opt_name + " should contain exactly two comma-separated doubles");
+
+	try {
+		return std::make_pair(std::stod(first), std::stod(second));
+	} catch (const std::exception&) {
+		ERROR(opt_name + " should contain exactly two comma-separated doubles");
+	}
+}
+
 long long SumAtoms(const std::vector<Configuration>& configs)
 {
 	long long atoms = 0;
@@ -632,6 +650,20 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	if (opts["weighting"] != "")
 		weighting = opts["weighting"];
 
+	bool custom_scal_range = false;
+	std::pair<double, double> scal_range;
+	if (opts["scal-range"] != "") {
+		scal_range = ParseRangeOption(opts["scal-range"], "--scal-range");
+		custom_scal_range = true;
+	}
+
+	bool custom_s_range = false;
+	std::pair<double, double> s_range;
+	if (opts["s-range"] != "") {
+		s_range = ParseRangeOption(opts["s-range"], "--s-range");
+		custom_s_range = true;
+	}
+
 	if (opts["init-params"] == "")
 		opts["init-params"] = "random";
 	if (opts["init-params"] != "random" && opts["init-params"] != "same")
@@ -644,6 +676,10 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	SetTagLogStream("dev", &std::cout);
 	int end = 1;
 	MLMTPR mtpr = MLMTPR();
+	if (custom_scal_range)
+		mtpr.SetScalingSlopeRange(scal_range.first, scal_range.second);
+	if (custom_s_range)
+		mtpr.SetScalingShiftRange(s_range.first, s_range.second);
 	for (int i = 0; i < end; i++) {
 		try {
 			mtpr.Load(args[0]);
@@ -679,6 +715,10 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "SUS2-MLIP developer version (2026-04-17)"
 		          << " | potential from " << args[0]
 		          << ", database: " << args[1] << std::endl;
+	if (prank == 0 && custom_scal_range)
+		std::cout << "scal-range override: " << scal_range.first << ", " << scal_range.second << std::endl;
+	if (prank == 0 && custom_s_range)
+		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
 
 	Configuration cfg;
 	DatasetStats train_stats_local;

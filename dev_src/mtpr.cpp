@@ -18,6 +18,7 @@ namespace {
 
 constexpr double kRandomScalMin = 2.0;
 constexpr double kRandomScalMax = 4.0;
+constexpr double kLaguerreRandomScalMax = 3.0;
 constexpr double kRandomShiftMin = 1.5;
 constexpr double kRandomShiftMax = 2.5;
 
@@ -29,6 +30,41 @@ double Clamp01(double value)
 double Lerp(double start, double end, double t)
 {
 	return start + (end - start) * t;
+}
+
+double ScalingSlopeUpperBound(AnyRadialBasis* radial_basis)
+{
+	if (radial_basis != nullptr && radial_basis->GetRBTypeString() == "RBLaguerre_log1p")
+		return kLaguerreRandomScalMax;
+	return kRandomScalMax;
+}
+
+double ScalingSlopeRangeStart(const MLMTPR& mtpr)
+{
+	if (mtpr.custom_scaling_slope_range)
+		return mtpr.scaling_slope_range_start;
+	return ScalingSlopeUpperBound(mtpr.p_RadialBasis);
+}
+
+double ScalingSlopeRangeEnd(const MLMTPR& mtpr)
+{
+	if (mtpr.custom_scaling_slope_range)
+		return mtpr.scaling_slope_range_end;
+	return kRandomScalMin;
+}
+
+double ScalingShiftRangeStart(const MLMTPR& mtpr)
+{
+	if (mtpr.custom_scaling_shift_range)
+		return mtpr.scaling_shift_range_start;
+	return kRandomShiftMin;
+}
+
+double ScalingShiftRangeEnd(const MLMTPR& mtpr)
+{
+	if (mtpr.custom_scaling_shift_range)
+		return mtpr.scaling_shift_range_end;
+	return kRandomShiftMax;
 }
 
 }  // namespace
@@ -80,16 +116,34 @@ double MLMTPR::NormalizedOrderedPairStrength(int type_central, int type_outer) c
 	               (max_strength - min_strength));
 }
 
+void MLMTPR::SetScalingSlopeRange(double start, double end)
+{
+	custom_scaling_slope_range = true;
+	scaling_slope_range_start = start;
+	scaling_slope_range_end = end;
+}
+
+void MLMTPR::SetScalingShiftRange(double start, double end)
+{
+	custom_scaling_shift_range = true;
+	scaling_shift_range_start = start;
+	scaling_shift_range_end = end;
+}
+
 void MLMTPR::InitializeDefaultScalingCoeffs()
 {
+	const double scal_start = ScalingSlopeRangeStart(*this);
+	const double scal_end = ScalingSlopeRangeEnd(*this);
+	const double shift_start = ScalingShiftRangeStart(*this);
+	const double shift_end = ScalingShiftRangeEnd(*this);
 	for (int type_central = 0; type_central < species_count; ++type_central) {
 		for (int type_outer = 0; type_outer < species_count; ++type_outer) {
 			for (int scaling_block = 0; scaling_block < K_; ++scaling_block) {
 				const double strength = NormalizedOrderedPairStrength(type_central, type_outer);
 				regression_coeffs[ScalingSlopeOffset(scaling_block, type_central, type_outer)] =
-					Lerp(kRandomScalMax, kRandomScalMin, strength);
+					Lerp(scal_start, scal_end, strength);
 				regression_coeffs[ScalingShiftOffset(scaling_block, type_central, type_outer)] =
-					Lerp(kRandomShiftMin, kRandomShiftMax, strength);
+					Lerp(shift_start, shift_end, strength);
 			}
 		}
 	}
@@ -97,6 +151,10 @@ void MLMTPR::InitializeDefaultScalingCoeffs()
 
 void MLMTPR::RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter)
 {
+	const double scal_start = ScalingSlopeRangeStart(*this);
+	const double scal_end = ScalingSlopeRangeEnd(*this);
+	const double shift_start = ScalingShiftRangeStart(*this);
+	const double shift_end = ScalingShiftRangeEnd(*this);
 	std::uniform_real_distribution<double> jitter(-strength_jitter, strength_jitter);
 	for (int scaling_block = 0; scaling_block < K_; ++scaling_block) {
 		for (int type_central = 0; type_central < species_count; ++type_central) {
@@ -104,9 +162,9 @@ void MLMTPR::RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_
 				const double strength = NormalizedOrderedPairStrength(type_central, type_outer);
 				const double sample = Clamp01(strength + jitter(generator));
 				regression_coeffs[ScalingSlopeOffset(scaling_block, type_central, type_outer)] =
-					Lerp(kRandomScalMax, kRandomScalMin, sample);
+					Lerp(scal_start, scal_end, sample);
 				regression_coeffs[ScalingShiftOffset(scaling_block, type_central, type_outer)] =
-					Lerp(kRandomShiftMin, kRandomShiftMax, sample);
+					Lerp(shift_start, shift_end, sample);
 			}
 		}
 	}
