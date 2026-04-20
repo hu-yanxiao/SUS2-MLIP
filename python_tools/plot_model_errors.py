@@ -57,6 +57,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -219,6 +220,12 @@ def parse_args() -> argparse.Namespace:
         choices=("bar", "barh"),
         default="bar",
         help="Chart style. Grouped plots currently support only bar. Default: bar.",
+    )
+    parser.add_argument(
+        "--ylog",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use a logarithmic y-axis. Supported for vertical bar charts. Default: disabled.",
     )
     parser.add_argument(
         "--sort",
@@ -585,6 +592,35 @@ def format_value(value: float, value_format: str, suffix: str) -> str:
     return f"{format(value, value_format)}{suffix}"
 
 
+def ensure_positive_for_ylog(values: list[float]) -> None:
+    if any(value <= 0.0 for value in values):
+        raise ValueError("--ylog requires all plotted values to be positive.")
+
+
+def annotation_height(value: float, additive_offset: float, ylog: bool, stagger: float = 0.0) -> float:
+    if ylog:
+        return value * (1.08 + stagger)
+    return value + additive_offset * (1.0 + stagger)
+
+
+def apply_y_axis_scale(ax, values: list[float], args: argparse.Namespace) -> None:
+    if not values:
+        return
+
+    if args.ylog:
+        ensure_positive_for_ylog(values)
+        min_positive = min(values)
+        lower = 10 ** math.floor(math.log10(min_positive))
+        upper = max(values) * max(1.0 + args.padding_factor, 1.25)
+        if upper <= lower:
+            upper = lower * 10.0
+        ax.set_yscale("log")
+        ax.set_ylim(lower, upper)
+        return
+
+    ax.set_ylim(0.0, max(values) * (1.0 + args.padding_factor))
+
+
 def resolve_text(args: argparse.Namespace, metadata: dict[str, Any], mode: str) -> dict[str, str]:
     title = args.title if args.title is not None else str(metadata.get("title", ""))
     output = args.output or str(metadata.get("output", "model_errors.pdf"))
@@ -657,17 +693,16 @@ def configure_matplotlib(args: argparse.Namespace) -> None:
 
 
 def apply_axis_style(ax, style: str) -> None:
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_linewidth(0.8)
-    ax.spines["bottom"].set_linewidth(0.8)
-    ax.spines["left"].set_color("#333333")
-    ax.spines["bottom"].set_color("#333333")
+    for side in ("left", "bottom", "top", "right"):
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_linewidth(0.8)
+        ax.spines[side].set_color("#333333")
     if style == "bar":
         ax.yaxis.grid(True, linestyle=(0, (2.0, 2.0)), linewidth=0.7, color="#D5D5D5")
     else:
         ax.xaxis.grid(True, linestyle=(0, (2.0, 2.0)), linewidth=0.7, color="#D5D5D5")
-    ax.tick_params(axis="both", which="both", direction="in")
+    ax.tick_params(axis="x", which="both", direction="in", top=False, bottom=True)
+    ax.tick_params(axis="y", which="both", direction="in", right=False, left=True)
     ax.set_axisbelow(True)
 
 
@@ -711,6 +746,9 @@ def plot_single_records(records: list[Record], args: argparse.Namespace, labels:
     names = [record.name for record in records]
     values = [record.value for record in records]
     best_index = min(range(len(records)), key=lambda index: values[index]) if records else None
+
+    if args.ylog and args.style != "bar":
+        raise ValueError("--ylog is only supported with vertical bar charts.")
 
     fig, ax = plt.subplots(figsize=resolve_figure_size(args, "single", len(records)))
     if args.style == "bar":
@@ -756,7 +794,7 @@ def plot_single_records(records: list[Record], args: argparse.Namespace, labels:
             if args.style == "bar":
                 ax.text(
                     bar.get_x() + bar.get_width() / 2.0,
-                    bar.get_height() + offset,
+                    annotation_height(value, offset, args.ylog),
                     label,
                     ha="center",
                     va="bottom",
@@ -777,7 +815,7 @@ def plot_single_records(records: list[Record], args: argparse.Namespace, labels:
                 )
 
     if args.style == "bar" and values:
-        ax.set_ylim(0.0, max(values) * (1.0 + args.padding_factor))
+        apply_y_axis_scale(ax, values, args)
     if args.style == "barh" and values:
         ax.set_xlim(0.0, max(values) * (1.0 + args.padding_factor))
 
@@ -793,6 +831,10 @@ def plot_grouped_datasets(
 ) -> Path:
     if args.style != "bar":
         raise ValueError("Grouped charts currently support only --style bar.")
+    if args.ylog:
+        ensure_positive_for_ylog(
+            [record.value for dataset in datasets for record in dataset.records]
+        )
 
     configure_matplotlib(args)
     import matplotlib.pyplot as plt
@@ -863,12 +905,12 @@ def plot_grouped_datasets(
     if not args.no_annotate and max_value > 0.0:
         offset = max(max_value * 0.03, 0.04)
         for model_index, container in enumerate(containers):
-            vertical_offset = offset * (1.0 + 0.15 * (model_index % 3))
+            stagger = 0.15 * (model_index % 3)
             for dataset_index, patch in enumerate(container.patches):
                 value = datasets[dataset_index].records[model_index].value
                 ax.text(
                     patch.get_x() + patch.get_width() / 2.0,
-                    patch.get_height() + vertical_offset,
+                    annotation_height(value, offset, args.ylog, stagger),
                     format_value(value, args.value_format, args.annotation_suffix),
                     ha="center",
                     va="bottom",
@@ -882,7 +924,11 @@ def plot_grouped_datasets(
                 )
 
     if max_value > 0.0:
-        ax.set_ylim(0.0, max_value * (1.0 + args.padding_factor))
+        apply_y_axis_scale(
+            ax,
+            [record.value for dataset in datasets for record in dataset.records],
+            args,
+        )
 
     output_path = save_figure(fig, args, labels["output"])
     plt.close(fig)
