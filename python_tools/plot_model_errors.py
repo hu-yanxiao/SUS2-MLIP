@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
-"""Plot a customizable error comparison chart for different models.
+"""Plot a publication-style error comparison chart for different models.
 
 Examples
 --------
-Plot directly from command-line values:
+Plot directly from command-line values in input order:
     python3 plot_model_errors.py \
         --models NEP DeepMD SUS2 \
         --values 7.8 7.6 3.6 \
         --ylabel "Energy MAE (meV/atom)" \
-        --title "Example Dataset" \
-        --output energy_mae.png
+        --output energy_mae.pdf
 
 Plot from a JSON file:
-    python3 plot_model_errors.py --input model_errors.json --output energy_mae.png
+    python3 plot_model_errors.py --input model_errors.json --output energy_mae.pdf
 
 Supported JSON shapes:
     {
-      "title": "Example Dataset",
       "ylabel": "Energy MAE (meV/atom)",
       "models": [
-        {"name": "NEP", "value": 7.8, "color": "#7AA6C2"},
+        {"name": "NEP", "value": 7.8, "color": "#A9BDD6"},
         {"name": "DeepMD", "value": 7.6},
         {"name": "SUS2", "value": 3.6}
       ]
@@ -42,7 +40,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-DEFAULT_COLORS = [
+NATURE_COLORS = [
+    "#A9BDD6",
+    "#C8D6C1",
+    "#EBC3A8",
+    "#C7CDD9",
+    "#D8CDBF",
+    "#B8D0C9",
+    "#D6C0D8",
+    "#D8D8D8",
+]
+
+CLASSIC_COLORS = [
     "#7AA6C2",
     "#B8D8BA",
     "#F2B880",
@@ -51,6 +60,14 @@ DEFAULT_COLORS = [
     "#C9ADA7",
     "#9CC5A1",
     "#E4C1F9",
+]
+
+SERIF_FALLBACKS = [
+    "Times New Roman",
+    "Times New Roman PS MT",
+    "Times",
+    "Nimbus Roman No9 L",
+    "DejaVu Serif",
 ]
 
 
@@ -92,9 +109,44 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--theme",
+        choices=("nature", "default"),
+        default="nature",
+        help="Visual theme. Default: nature.",
+    )
+    parser.add_argument(
+        "--font-family",
+        default="Times New Roman",
+        help="Primary serif font family. Default: Times New Roman.",
+    )
+    parser.add_argument(
+        "--base-font-size",
+        type=float,
+        default=9.0,
+        help="Base font size in points. Default: 9.",
+    )
+    parser.add_argument(
+        "--label-size",
+        type=float,
+        default=10.0,
+        help="Axis-label and title size in points. Default: 10.",
+    )
+    parser.add_argument(
+        "--tick-size",
+        type=float,
+        default=9.0,
+        help="Tick-label size in points. Default: 9.",
+    )
+    parser.add_argument(
+        "--annotation-size",
+        type=float,
+        default=8.5,
+        help="Value-label size in points. Default: 8.5.",
+    )
+    parser.add_argument(
         "--title",
         default=None,
-        help="Figure title. Default: Model Error Comparison",
+        help="Figure title. Default: none for publication-style output.",
     )
     parser.add_argument(
         "--xlabel",
@@ -109,7 +161,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output image path. Default: model_errors.png",
+        help="Output path. PDF/SVG are recommended for publication. Default: model_errors.pdf",
     )
     parser.add_argument(
         "--style",
@@ -121,21 +173,33 @@ def parse_args() -> argparse.Namespace:
         "--sort",
         choices=("none", "asc", "desc"),
         default="none",
-        help="Sort models by error value. Default: none.",
+        help="Sort models by error value. Default: none, which preserves the input order.",
     )
     parser.add_argument(
         "--dpi",
         type=int,
-        default=300,
-        help="Output DPI. Default: 300.",
+        default=600,
+        help="Output DPI for raster export. Default: 600.",
     )
     parser.add_argument(
         "--figsize",
         nargs=2,
         type=float,
         metavar=("WIDTH", "HEIGHT"),
-        default=(8.0, 5.0),
-        help="Figure size in inches. Default: 8 5.",
+        default=(3.4, 2.8),
+        help="Figure size in inches. Default: 3.4 2.8 for a compact single-column figure.",
+    )
+    parser.add_argument(
+        "--bar-width",
+        type=float,
+        default=0.62,
+        help="Bar width. Default: 0.62.",
+    )
+    parser.add_argument(
+        "--padding-factor",
+        type=float,
+        default=0.14,
+        help="Extra headroom fraction added for annotations. Default: 0.14.",
     )
     parser.add_argument(
         "--value-format",
@@ -276,10 +340,11 @@ def sort_records(records: list[Record], mode: str) -> list[Record]:
     return sorted(records, key=lambda record: record.value, reverse=reverse)
 
 
-def assign_default_colors(records: list[Record]) -> list[str]:
+def assign_default_colors(records: list[Record], theme: str) -> list[str]:
+    palette = NATURE_COLORS if theme == "nature" else CLASSIC_COLORS
     assigned: list[str] = []
     for index, record in enumerate(records):
-        assigned.append(record.color or DEFAULT_COLORS[index % len(DEFAULT_COLORS)])
+        assigned.append(record.color or palette[index % len(palette)])
     return assigned
 
 
@@ -289,15 +354,15 @@ def format_value(value: float, value_format: str, suffix: str) -> str:
 
 def resolve_text(args: argparse.Namespace, metadata: dict[str, Any]) -> dict[str, str]:
     style = args.style
-    title = args.title or metadata.get("title") or "Model Error Comparison"
-    output = args.output or metadata.get("output") or "model_errors.png"
+    title = args.title if args.title is not None else metadata.get("title", "")
+    output = args.output or metadata.get("output") or "model_errors.pdf"
 
     if style == "bar":
-        xlabel = args.xlabel or metadata.get("xlabel") or "Model"
-        ylabel = args.ylabel or metadata.get("ylabel") or "Error"
+        xlabel = args.xlabel if args.xlabel is not None else metadata.get("xlabel", "Model")
+        ylabel = args.ylabel if args.ylabel is not None else metadata.get("ylabel", "Error")
     else:
-        xlabel = args.xlabel or metadata.get("xlabel") or "Error"
-        ylabel = args.ylabel or metadata.get("ylabel") or "Model"
+        xlabel = args.xlabel if args.xlabel is not None else metadata.get("xlabel", "Error")
+        ylabel = args.ylabel if args.ylabel is not None else metadata.get("ylabel", "Model")
 
     return {
         "title": str(title),
@@ -307,46 +372,105 @@ def resolve_text(args: argparse.Namespace, metadata: dict[str, Any]) -> dict[str
     }
 
 
-def plot_records(records: list[Record], args: argparse.Namespace, labels: dict[str, str]) -> Path:
+def configure_matplotlib(args: argparse.Namespace):
     import matplotlib
 
     matplotlib.use("Agg")
+    matplotlib.rcParams.update(
+        {
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "savefig.facecolor": "white",
+            "savefig.transparent": False,
+            "font.family": "serif",
+            "font.serif": [args.font_family]
+            + [font for font in SERIF_FALLBACKS if font != args.font_family],
+            "font.size": args.base_font_size,
+            "axes.labelsize": args.label_size,
+            "axes.titlesize": args.label_size,
+            "xtick.labelsize": args.tick_size,
+            "ytick.labelsize": args.tick_size,
+            "legend.fontsize": args.base_font_size,
+            "mathtext.fontset": "stix",
+            "axes.linewidth": 0.8,
+            "xtick.direction": "out",
+            "ytick.direction": "out",
+            "xtick.major.width": 0.8,
+            "ytick.major.width": 0.8,
+            "xtick.major.size": 3.5,
+            "ytick.major.size": 3.5,
+            "axes.unicode_minus": False,
+            "pdf.fonttype": 42,
+            "ps.fonttype": 42,
+            "svg.fonttype": "none",
+        }
+    )
+
+
+def apply_axis_style(ax, style: str) -> None:
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.8)
+    ax.spines["bottom"].set_linewidth(0.8)
+    ax.spines["left"].set_color("#333333")
+    ax.spines["bottom"].set_color("#333333")
+    if style == "bar":
+        ax.yaxis.grid(True, linestyle=(0, (2.0, 2.0)), linewidth=0.7, color="#D5D5D5")
+    else:
+        ax.xaxis.grid(True, linestyle=(0, (2.0, 2.0)), linewidth=0.7, color="#D5D5D5")
+    ax.set_axisbelow(True)
+
+
+def plot_records(records: list[Record], args: argparse.Namespace, labels: dict[str, str]) -> Path:
+    configure_matplotlib(args)
     import matplotlib.pyplot as plt
 
-    colors = assign_default_colors(records)
+    colors = assign_default_colors(records, args.theme)
     names = [record.name for record in records]
     values = [record.value for record in records]
     best_index = min(range(len(records)), key=lambda i: values[i]) if records else None
 
     fig, ax = plt.subplots(figsize=tuple(args.figsize))
     if args.style == "bar":
-        bars = ax.bar(names, values, color=colors, edgecolor="#2F3E46", linewidth=0.8)
+        bars = ax.bar(
+            names,
+            values,
+            color=colors,
+            edgecolor="#555555",
+            linewidth=0.75,
+            width=args.bar_width,
+            zorder=3,
+        )
         ax.set_xlabel(labels["xlabel"])
         ax.set_ylabel(labels["ylabel"])
-        ax.yaxis.grid(True, linestyle="--", alpha=0.35)
-        ax.set_axisbelow(True)
         ax.tick_params(axis="x", rotation=0)
     else:
-        bars = ax.barh(names, values, color=colors, edgecolor="#2F3E46", linewidth=0.8)
+        bars = ax.barh(
+            names,
+            values,
+            color=colors,
+            edgecolor="#555555",
+            linewidth=0.75,
+            height=args.bar_width,
+            zorder=3,
+        )
         ax.set_xlabel(labels["xlabel"])
         ax.set_ylabel(labels["ylabel"])
-        ax.xaxis.grid(True, linestyle="--", alpha=0.35)
-        ax.set_axisbelow(True)
+    apply_axis_style(ax, args.style)
 
-    ax.set_title(labels["title"])
+    if labels["title"]:
+        ax.set_title(labels["title"], pad=6.0)
 
     if args.highlight_best and best_index is not None:
-        bars[best_index].set_edgecolor("#B22222")
-        bars[best_index].set_linewidth(2.0)
-        bars[best_index].set_alpha(0.95)
+        bars[best_index].set_edgecolor("#111111")
+        bars[best_index].set_linewidth(1.1)
+        bars[best_index].set_alpha(1.0)
 
     if not args.no_annotate:
         max_value = max(values) if values else 0.0
-        offset = max(max_value * 0.02, 0.05)
+        offset = max(max_value * 0.03, 0.04)
         for index, (bar, value) in enumerate(zip(bars, values)):
             label = format_value(value, args.value_format, args.annotation_suffix)
-            if args.highlight_best and index == best_index:
-                label += " (best)"
             if args.style == "bar":
                 ax.text(
                     bar.get_x() + bar.get_width() / 2.0,
@@ -354,7 +478,9 @@ def plot_records(records: list[Record], args: argparse.Namespace, labels: dict[s
                     label,
                     ha="center",
                     va="bottom",
-                    fontsize=10,
+                    fontsize=args.annotation_size,
+                    fontweight="bold" if args.highlight_best and index == best_index else "normal",
+                    color="#111111",
                 )
             else:
                 ax.text(
@@ -363,14 +489,23 @@ def plot_records(records: list[Record], args: argparse.Namespace, labels: dict[s
                     label,
                     ha="left",
                     va="center",
-                    fontsize=10,
+                    fontsize=args.annotation_size,
+                    fontweight="bold" if args.highlight_best and index == best_index else "normal",
+                    color="#111111",
                 )
+
+    if args.style == "bar" and values:
+        upper = max(values) * (1.0 + args.padding_factor)
+        ax.set_ylim(0.0, upper)
+    if args.style == "barh" and values:
+        upper = max(values) * (1.0 + args.padding_factor)
+        ax.set_xlim(0.0, upper)
 
     output_path = Path(labels["output"]).expanduser().resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if args.tight_layout:
         fig.tight_layout()
-    fig.savefig(output_path, dpi=args.dpi, bbox_inches="tight")
+    fig.savefig(output_path, dpi=args.dpi, bbox_inches="tight", pad_inches=0.02)
     plt.close(fig)
     return output_path
 
