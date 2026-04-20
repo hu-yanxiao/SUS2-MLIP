@@ -90,6 +90,47 @@ AnyRadialBasis::AnyRadialBasis(std::ifstream & ifs)
 	ReadRadialBasis(ifs);
 }
 
+namespace {
+
+constexpr double kLaguerreMinRho = 1.0e-8;
+
+inline void FillLaguerreLog1pTerm(
+	int index,
+	int rb_size,
+	double scaling,
+	double cutoff_f,
+	double cutoff_der,
+	double laguerre,
+	double laguerre_der,
+	double laguerre_dder,
+	double u,
+	double u_r,
+	double u_scal,
+	double u_scal_r,
+	double u_rho,
+	double u_rho_r,
+	std::vector<double>& rb_vals,
+	std::vector<double>& rb_ders)
+{
+	const double damp = exp(-0.5 * u);
+	const double damped = damp * laguerre;
+	const double damped_u = damp * (laguerre_der - 0.5 * laguerre);
+	const double damped_uu = damp * (laguerre_dder - laguerre_der + 0.25 * laguerre);
+
+	rb_vals[index] = scaling * cutoff_f * damped;
+	rb_ders[index] = scaling * (cutoff_der * damped + cutoff_f * damped_u * u_r);
+	rb_ders[index + rb_size] = scaling * cutoff_f * damped_u * u_scal;
+	rb_ders[index + 2 * rb_size] = scaling * (
+		cutoff_der * damped_u * u_scal
+		+ cutoff_f * (damped_uu * u_r * u_scal + damped_u * u_scal_r));
+	rb_ders[index + 3 * rb_size] = scaling * cutoff_f * damped_u * u_rho;
+	rb_ders[index + 4 * rb_size] = scaling * (
+		cutoff_der * damped_u * u_rho
+		+ cutoff_f * (damped_uu * u_r * u_rho + damped_u * u_rho_r));
+}
+
+}  // namespace
+
 void RadialBasis_Shapeev::InitShapeevRB()
 {
 #ifdef MLIP_DEBUG
@@ -1334,6 +1375,71 @@ rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
                                 rb_ders[i + 4 * rb_size] = 2 * (mult_s_r * rb_vals[i - 1] +mult* rb_ders[i + 3 * rb_size - 1] +ksi * rb_ders[i + 4 * rb_size - 1] + mult_s* rb_ders[i - 1]) - rb_ders[i + 4 * rb_size - 2];
         }
 
+}
+
+
+void RadialBasis_Laguerre_log1p::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+	if (r < min_dist) {
+		Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+			", min_dist = " + to_string(min_dist) + '\n');
+	}
+	if (r > max_dist) {
+		ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+			", min_dist = " + to_string(min_dist) + '\n');
+	}
+#endif
+
+	const bool rho_is_active = s > kLaguerreMinRho;
+	const double rho = rho_is_active ? s : kLaguerreMinRho;
+	const double log_term = log1p(r / rho);
+	const double u = scal * log_term;
+	const double u_r = scal / (rho + r);
+	const double u_scal = log_term;
+	const double u_scal_r = 1.0 / (rho + r);
+	const double u_rho = rho_is_active ? (-scal * r / (rho * (rho + r))) : 0.0;
+	const double u_rho_r = rho_is_active ? (-scal / ((rho + r) * (rho + r))) : 0.0;
+
+	const double dr = r - max_dist;
+	const double cutoff_f = dr * dr;
+	const double cutoff_der = 2.0 * dr;
+
+	double laguerre_nm2 = 1.0;
+	double laguerre_der_nm2 = 0.0;
+	double laguerre_dder_nm2 = 0.0;
+	FillLaguerreLog1pTerm(0, rb_size, scaling, cutoff_f, cutoff_der,
+		laguerre_nm2, laguerre_der_nm2, laguerre_dder_nm2,
+		u, u_r, u_scal, u_scal_r, u_rho, u_rho_r, rb_vals, rb_ders);
+
+	if (rb_size == 1)
+		return;
+
+	double laguerre_nm1 = 1.0 - u;
+	double laguerre_der_nm1 = -1.0;
+	double laguerre_dder_nm1 = 0.0;
+	FillLaguerreLog1pTerm(1, rb_size, scaling, cutoff_f, cutoff_der,
+		laguerre_nm1, laguerre_der_nm1, laguerre_dder_nm1,
+		u, u_r, u_scal, u_scal_r, u_rho, u_rho_r, rb_vals, rb_ders);
+
+	for (int n = 1; n < rb_size - 1; ++n) {
+		const double pref = 1.0 / (n + 1.0);
+		const double coeff = 2.0 * n + 1.0 - u;
+		const double laguerre = pref * (coeff * laguerre_nm1 - n * laguerre_nm2);
+		const double laguerre_der = pref * (-laguerre_nm1 + coeff * laguerre_der_nm1 - n * laguerre_der_nm2);
+		const double laguerre_dder = pref * (-2.0 * laguerre_der_nm1 + coeff * laguerre_dder_nm1 - n * laguerre_dder_nm2);
+
+		FillLaguerreLog1pTerm(n + 1, rb_size, scaling, cutoff_f, cutoff_der,
+			laguerre, laguerre_der, laguerre_dder,
+			u, u_r, u_scal, u_scal_r, u_rho, u_rho_r, rb_vals, rb_ders);
+
+		laguerre_nm2 = laguerre_nm1;
+		laguerre_der_nm2 = laguerre_der_nm1;
+		laguerre_dder_nm2 = laguerre_dder_nm1;
+		laguerre_nm1 = laguerre;
+		laguerre_der_nm1 = laguerre_der;
+		laguerre_dder_nm1 = laguerre_dder;
+	}
 }
 
 

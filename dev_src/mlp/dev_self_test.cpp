@@ -15,6 +15,8 @@
 #include <fstream>
 #include <iostream>
 #include <ctime>
+#include <algorithm>
+#include <cmath>
 
 #ifdef MLIP_INTEL_MKL
 #include <mkl_cblas.h>
@@ -1632,10 +1634,81 @@ TEST("check radial basis derivatives with finite differences") {
 			FAIL()
 		}
 		//std::cout << cdiff << " " << bas.ders[i] << std::endl;
+		}
+	} END_TEST;
+
+TEST("check RBLaguerre_log1p derivatives with finite differences") {
+	const double r_step = 1e-5;
+	const double param_step = 1e-6;
+	const int basis_function_count = 8;
+	const double r_min = 0.0;
+	const double r_cut = 5.2;
+	const double A = 2.3;
+	const double rho = 1.7;
+	const std::vector<double> r_values = {0.2, 2.6, 5.15};
+
+	auto rel_error = [](double reference, double actual) {
+		const double scale = std::max(std::fabs(reference), std::fabs(actual));
+		if (scale < 1e-12)
+			return 0.0;
+		return std::fabs(reference - actual) / scale;
+	};
+	auto check_close = [&](const std::string& label, double reference, double actual, double abs_tol, double rel_tol) {
+		const double abs_err = std::fabs(reference - actual);
+		const double rel_err = rel_error(reference, actual);
+		if (abs_err > abs_tol && rel_err > rel_tol) {
+			std::cout << label
+			          << " ref=" << reference
+			          << " actual=" << actual
+			          << " abs_err=" << abs_err
+			          << " rel_err=" << rel_err
+			          << std::endl;
+			return false;
+		}
+		return true;
+	};
+
+	for (double r : r_values) {
+		RadialBasis_Laguerre_log1p bas(r_min, r_cut, basis_function_count);
+		bas.RB_Calc(r, A, rho);
+
+		RadialBasis_Laguerre_log1p bas_rp(r_min, r_cut, basis_function_count);
+		bas_rp.RB_Calc(r + r_step, A, rho);
+		RadialBasis_Laguerre_log1p bas_rm(r_min, r_cut, basis_function_count);
+		bas_rm.RB_Calc(r - r_step, A, rho);
+
+		RadialBasis_Laguerre_log1p bas_Ap(r_min, r_cut, basis_function_count);
+		bas_Ap.RB_Calc(r, A + param_step, rho);
+		RadialBasis_Laguerre_log1p bas_Am(r_min, r_cut, basis_function_count);
+		bas_Am.RB_Calc(r, A - param_step, rho);
+
+		RadialBasis_Laguerre_log1p bas_rhop(r_min, r_cut, basis_function_count);
+		bas_rhop.RB_Calc(r, A, rho + param_step);
+		RadialBasis_Laguerre_log1p bas_rhom(r_min, r_cut, basis_function_count);
+		bas_rhom.RB_Calc(r, A, rho - param_step);
+
+		for (int i = 0; i < basis_function_count; ++i) {
+			const double dr_fd = (bas_rp.rb_vals[i] - bas_rm.rb_vals[i]) / (2.0 * r_step);
+			const double dA_fd = (bas_Ap.rb_vals[i] - bas_Am.rb_vals[i]) / (2.0 * param_step);
+			const double drho_fd = (bas_rhop.rb_vals[i] - bas_rhom.rb_vals[i]) / (2.0 * param_step);
+			const double dr_dA_fd = (bas_rp.rb_ders[i + basis_function_count] - bas_rm.rb_ders[i + basis_function_count]) / (2.0 * r_step);
+			const double dr_drho_fd = (bas_rp.rb_ders[i + 3 * basis_function_count] - bas_rm.rb_ders[i + 3 * basis_function_count]) / (2.0 * r_step);
+
+			if (!check_close("d/dr", dr_fd, bas.rb_ders[i], 5e-5, 3e-4))
+				FAIL();
+			if (!check_close("d/dA", dA_fd, bas.rb_ders[i + basis_function_count], 5e-5, 3e-4))
+				FAIL();
+			if (!check_close("d/drho", drho_fd, bas.rb_ders[i + 3 * basis_function_count], 5e-5, 3e-4))
+				FAIL();
+			if (!check_close("d/dr(d/dA)", dr_dA_fd, bas.rb_ders[i + 2 * basis_function_count], 2e-4, 8e-4))
+				FAIL();
+			if (!check_close("d/dr(d/drho)", dr_drho_fd, bas.rb_ders[i + 4 * basis_function_count], 2e-4, 8e-4))
+				FAIL();
+		}
 	}
 } END_TEST;
 
-/*#ifndef MLIP_NOEWALD
+	/*#ifndef MLIP_NOEWALD
 TEST("Check Ewald summation") {
 	vector<string> fnm(5);
 	vector<double> madelung(5);
@@ -3335,4 +3408,3 @@ PAR_TEST("MTPR loss gradient test") {
 	return true;
 }
 #endif //MLIP_NO_SELFTEST
-

@@ -247,12 +247,14 @@ void MLMTPR::Load(const string& filename)
                 p_RadialBasis = new RadialBasis_Chebyshev_tanhexp(ifs);
         else if (rbasis_type == "RBChebyshev_tanhexp_w")
                 p_RadialBasis = new RadialBasis_Chebyshev_tanhexp_w(ifs);
-        else if (rbasis_type == "RBChebyshev_sigma")
-                p_RadialBasis = new RadialBasis_Chebyshev_sigma(ifs);
-        else if (rbasis_type == "RBBessel")
-                p_RadialBasis = new RadialBasis_Bessel(ifs);
-        else if (rbasis_type == "RBBessel_sss")
-                p_RadialBasis = new RadialBasis_Bessel_sss(ifs);
+	        else if (rbasis_type == "RBChebyshev_sigma")
+	                p_RadialBasis = new RadialBasis_Chebyshev_sigma(ifs);
+	        else if (rbasis_type == "RBLaguerre_log1p")
+	                p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
+	        else if (rbasis_type == "RBBessel")
+	                p_RadialBasis = new RadialBasis_Bessel(ifs);
+	        else if (rbasis_type == "RBBessel_sss")
+	                p_RadialBasis = new RadialBasis_Bessel_sss(ifs);
         else if (rbasis_type == "RBBesselw")
                 p_RadialBasis = new RadialBasis_Besselw(ifs);
         else if (rbasis_type == "RBBessel_sssw")

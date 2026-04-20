@@ -745,12 +745,14 @@ void MTP::Load(const std::string& filename)
 		ifs >> tmpstr;
 		if (ifs.fail())
 			ERROR("Error reading .mtp file");
-		if (tmpstr == "RBShapeev")
-			p_RadialBasis = new RadialBasis_Shapeev(ifs);
-		else if (tmpstr == "RBChebyshev")
-			p_RadialBasis = new RadialBasis_Chebyshev(ifs);
-		else if (tmpstr == "RBTaylor")
-			p_RadialBasis = new RadialBasis_Taylor(ifs);
+			if (tmpstr == "RBShapeev")
+				p_RadialBasis = new RadialBasis_Shapeev(ifs);
+			else if (tmpstr == "RBChebyshev")
+				p_RadialBasis = new RadialBasis_Chebyshev(ifs);
+			else if (tmpstr == "RBLaguerre_log1p")
+				p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
+			else if (tmpstr == "RBTaylor")
+				p_RadialBasis = new RadialBasis_Taylor(ifs);
 
 		// reading radial coeffs
 		ReadRadialCoeffs(ifs);
