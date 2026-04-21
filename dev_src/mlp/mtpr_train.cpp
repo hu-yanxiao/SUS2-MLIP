@@ -776,6 +776,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
         bool do_lin = false;
         if (opts["do-lin"] != "")
                 do_lin = true;
+	bool do_lin_rescale = false;
+	if (opts["do-lin-rescale"] != "")
+		do_lin_rescale = true;
 	int do_lin_step_limit = 1000;
 	if (opts["do-lin-steps"] != "")
 		do_lin_step_limit = stoi(opts["do-lin-steps"]);
@@ -866,6 +869,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	//LOSS FUNCTIONAL MODIFICATION!!!
 	trainer.weighting = weighting;
         trainer.do_lin=do_lin;
+	trainer.do_lin_rescale = do_lin_rescale;
 	trainer.do_lin_step_limit = do_lin_step_limit;
 	trainer.do_lin_frequency = do_lin_frequency;
 	trainer.std_scaling = weight_std;
@@ -1096,6 +1100,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			if (trainer.do_lin) {
 				std::cout << "do-lin enabled for first " << trainer.do_lin_step_limit
 				          << " BFGS steps, frequency " << trainer.do_lin_frequency << std::endl;
+				std::cout << "do-lin-rescale "
+				          << (trainer.do_lin_rescale ? "enabled" : "disabled")
+				          << std::endl;
 			} else {
 				std::cout << "do-lin disabled" << std::endl;
 			}

@@ -95,6 +95,7 @@ Commonly used training tags:
 --weighting=<string>
 --init-params=<random|same>
 --do-lin
+--do-lin-rescale
 --do-lin-steps=<int>
 --do-lin-freq=<int>
 --do-samp=<true|false>
@@ -105,6 +106,7 @@ Commonly used training tags:
 Notes:
 
 - `--do-lin` enables the linear pre-fitting path inside nonlinear training.
+- `--do-lin-rescale` runs the existing subset-based rescale pass before each full-data `TrainLinear` call inserted by BFGS `do-lin`.
 - `--do-lin-steps` sets how many accepted BFGS steps keep the do-lin path active. Default is `1000`.
 - `--do-lin-freq` sets how often `TrainLinear` is inserted while do-lin is active. Default is `50`.
 - `--do-samp=false` disables random sampling during the pre-training stage.

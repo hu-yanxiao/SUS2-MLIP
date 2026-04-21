@@ -66,6 +66,7 @@ public:
 	double linstop = 1e-8;
 	int random_perturb = 0;
         bool do_lin=true;
+	bool do_lin_rescale = false;
 	int do_lin_step_limit = 1000;
 	int do_lin_frequency = 50;
 	MTPR_trainer(MLMTPR* _p_mlip,						// Constructor requires MTP basis

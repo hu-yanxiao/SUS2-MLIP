@@ -32,6 +32,8 @@
 
 using namespace std;
 
+void Rescale(MTPR_trainer& trainer, MLMTPR& mtpr, const std::vector<Neighborhoods>* training_neighborhoods);
+
 namespace {
 
 std::string CurrentTimestamp()
@@ -933,9 +935,19 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 									bfgs.inv_hess(i,j)/=p_mlmtpr->linear_mults[i-(n-nlin+p_mlmtpr->species_count)]*p_mlmtpr->linear_mults[j-(n-nlin+p_mlmtpr->species_count)];
 
 				*/
+				const std::vector<Neighborhoods>* linear_neighborhoods =
+					cache_training_neighborhoods ? &training_neighborhoods : nullptr;
+				if (do_lin_rescale) {
+					if (prank == 0) {
+						std::cout << "[" << CurrentTimestamp() << "] "
+						          << "BFGS do-lin rescale before full linear solve"
+						          << " step=" << num_step << std::endl;
+					}
+					Rescale(*this, *p_mlmtpr, linear_neighborhoods);
+				}
 				TrainLinear(prank,
 						  training_set,
-						  cache_training_neighborhoods ? &training_neighborhoods : nullptr,
+						  linear_neighborhoods,
 						  "bfgs refresh step " + std::to_string(num_step));
 				external_x_modified = true;
 				external_x_needs_broadcast = false; // TrainLinear already broadcasts coeffs.

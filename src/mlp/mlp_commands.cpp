@@ -517,6 +517,8 @@ bool Commands(const string& command, vector<string>& args, map<string, string>& 
 		"        pre-fitted. Default is random. Other is same - this is when interaction\n"
 		"        of all species is the same (more accurate fit, but longer optimization)\n"
 		"    --do-lin: enable linear pre-fitting path inside nonlinear training.\n"
+		"    --do-lin-rescale: before each BFGS do-lin full-data TrainLinear solve,\n"
+		"                      run the existing subset-based rescale pass first.\n"
 		"    --do-lin-steps=<int>: apply do-lin for the first <int> accepted BFGS steps.\n"
 		"                           Default=1000\n"
 		"    --do-lin-freq=<int>: run TrainLinear every <int> accepted BFGS steps while\n"
