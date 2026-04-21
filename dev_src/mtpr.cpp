@@ -32,9 +32,29 @@ double Lerp(double start, double end, double t)
 	return start + (end - start) * t;
 }
 
+bool IsLaguerreLog1pBasisType(const std::string& basis_type)
+{
+	return basis_type == "RBLaguerre_log1p" || basis_type == "RBLaguerre_log1p_lmp";
+}
+
+bool IsLaguerreLog1pBasisType(AnyRadialBasis* radial_basis)
+{
+	return radial_basis != nullptr && IsLaguerreLog1pBasisType(radial_basis->GetRBTypeString());
+}
+
+bool UsesPrecomputedLmpTable(const std::string& basis_type)
+{
+	return basis_type == "RBChebyshev_sss_lmp" || basis_type == "RBLaguerre_log1p_lmp";
+}
+
+bool UsesPrecomputedLmpTable(AnyRadialBasis* radial_basis)
+{
+	return radial_basis != nullptr && UsesPrecomputedLmpTable(radial_basis->GetRBTypeString());
+}
+
 double ScalingSlopeUpperBound(AnyRadialBasis* radial_basis)
 {
-	if (radial_basis != nullptr && radial_basis->GetRBTypeString() == "RBLaguerre_log1p")
+	if (IsLaguerreLog1pBasisType(radial_basis))
 		return kLaguerreRandomScalMax;
 	return kRandomScalMax;
 }
@@ -309,6 +329,8 @@ void MLMTPR::Load(const string& filename)
 	                p_RadialBasis = new RadialBasis_Chebyshev_sigma(ifs);
 	        else if (rbasis_type == "RBLaguerre_log1p")
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
+	        else if (rbasis_type == "RBLaguerre_log1p_lmp")
+	                p_RadialBasis = new RadialBasis_Laguerre_log1p_lmp(ifs);
 	        else if (rbasis_type == "RBBessel")
 	                p_RadialBasis = new RadialBasis_Bessel(ifs);
 	        else if (rbasis_type == "RBBessel_sss")
@@ -620,7 +642,7 @@ void MLMTPR::Load(const string& filename)
 			ifs >> linear_coeffs[i + species_count] >> foo;
 
 	}
-	if (rbasis_type == "RBChebyshev_sss_lmp")
+	if (UsesPrecomputedLmpTable(rbasis_type))
 	{
 		radial_list.resize(species_count * species_count, 200002, radial_func_count);
 		radial_der_list.resize(species_count * species_count, 200002, radial_func_count);
@@ -632,7 +654,6 @@ void MLMTPR::Load(const string& filename)
 		const int C = species_count;
 		const int R = p_RadialBasis->rb_size;
 		int k_;
-		int sigma;
 		double factor;
 		for (int i = 0; i < C; i++)
 		{
@@ -648,7 +669,7 @@ void MLMTPR::Load(const string& filename)
 						p_RadialBasis->RB_Calc(dr * n,
 							regression_coeffs[C + 2 * k_ * C * C + C * i + j],
 							1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * i + j],
-							sigma);
+							0);
 						for (int xi = 0; xi < R; xi++)
 						{
 							factor = regression_coeffs[C + 2 * C * C * K_ + mu * (R + C) + xi]
@@ -1530,7 +1551,7 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 			coords_powers_y[k]=coords_powers_y[k-1]*NeighbVect_j[1];
 			coords_powers_z[k]=coords_powers_z[k-1]*NeighbVect_j[2];
 		}
-		if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_sss_lmp")
+		if (UsesPrecomputedLmpTable(p_RadialBasis))
 		{
 		int r_list;
 		r_list=std::floor(r*inv_dr);

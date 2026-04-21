@@ -1431,6 +1431,54 @@ void RadialBasis_Laguerre_log1p::RB_Calc(double r, double scal, double s, int k)
 	}
 }
 
+void RadialBasis_Laguerre_log1p_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+#ifdef MLIP_DEBUG
+	if (r < min_dist) {
+		Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+			", min_dist = " + to_string(min_dist) + '\n');
+	}
+	if (r > max_dist) {
+		ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+			", min_dist = " + to_string(min_dist) + '\n');
+	}
+#endif
+
+	const double rho = (s > kLaguerreMinRho) ? s : kLaguerreMinRho;
+	const double u = scal * log1p(r / rho);
+	const double u_r = scal / (rho + r);
+
+	const double dr = r - max_dist;
+	const double cutoff_f = dr * dr;
+	const double cutoff_der = 2.0 * dr;
+	const double exp_factor = exp(-0.5 * u);
+
+	double phi_prev = 0.0;
+	double dphi_prev = 0.0;
+	double phi_curr = scaling * cutoff_f * exp_factor;
+	double dphi_curr = scaling * cutoff_der * exp_factor - 0.5 * u_r * phi_curr;
+
+	rb_vals[0] = phi_curr;
+	rb_ders[0] = dphi_curr;
+
+	for (int n = 0; n < rb_size - 1; ++n) {
+		const double inv_np1 = 1.0 / (n + 1.0);
+		const double coeff = (2.0 * n + 1.0 - u) * inv_np1;
+		const double prev_coeff = n * inv_np1;
+
+		const double phi_next = coeff * phi_curr - prev_coeff * phi_prev;
+		const double dphi_next = -u_r * inv_np1 * phi_curr + coeff * dphi_curr - prev_coeff * dphi_prev;
+
+		rb_vals[n + 1] = phi_next;
+		rb_ders[n + 1] = dphi_next;
+
+		phi_prev = phi_curr;
+		dphi_prev = dphi_curr;
+		phi_curr = phi_next;
+		dphi_curr = dphi_next;
+	}
+}
+
 
 
 

@@ -751,6 +751,8 @@ void MTP::Load(const std::string& filename)
 				p_RadialBasis = new RadialBasis_Chebyshev(ifs);
 			else if (tmpstr == "RBLaguerre_log1p")
 				p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
+			else if (tmpstr == "RBLaguerre_log1p_lmp")
+				p_RadialBasis = new RadialBasis_Laguerre_log1p_lmp(ifs);
 			else if (tmpstr == "RBTaylor")
 				p_RadialBasis = new RadialBasis_Taylor(ifs);
 

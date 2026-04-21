@@ -1708,6 +1708,54 @@ TEST("check RBLaguerre_log1p derivatives with finite differences") {
 	}
 } END_TEST;
 
+TEST("check RBLaguerre_log1p_lmp matches full basis values and radial derivatives") {
+	const int basis_function_count = 8;
+	const double r_min = 0.0;
+	const double r_cut = 5.2;
+	const std::vector<double> A_values = {0.7, 2.3};
+	const std::vector<double> rho_values = {0.0, 0.8, 1.7};
+	const std::vector<double> r_values = {0.0, 0.2, 2.6, 5.15};
+
+	auto rel_error = [](double reference, double actual) {
+		const double scale = std::max(std::fabs(reference), std::fabs(actual));
+		if (scale < 1e-12)
+			return 0.0;
+		return std::fabs(reference - actual) / scale;
+	};
+	auto check_close = [&](const std::string& label, double reference, double actual, double abs_tol, double rel_tol) {
+		const double abs_err = std::fabs(reference - actual);
+		const double rel_err = rel_error(reference, actual);
+		if (abs_err > abs_tol && rel_err > rel_tol) {
+			std::cout << label
+			          << " ref=" << reference
+			          << " actual=" << actual
+			          << " abs_err=" << abs_err
+			          << " rel_err=" << rel_err
+			          << std::endl;
+			return false;
+		}
+		return true;
+	};
+
+	for (double A : A_values) {
+		for (double rho : rho_values) {
+			for (double r : r_values) {
+				RadialBasis_Laguerre_log1p full_basis(r_min, r_cut, basis_function_count);
+				RadialBasis_Laguerre_log1p_lmp lmp_basis(r_min, r_cut, basis_function_count);
+				full_basis.RB_Calc(r, A, rho);
+				lmp_basis.RB_Calc(r, A, rho);
+
+				for (int i = 0; i < basis_function_count; ++i) {
+					if (!check_close("value", full_basis.rb_vals[i], lmp_basis.rb_vals[i], 1e-12, 1e-10))
+						FAIL();
+					if (!check_close("d/dr", full_basis.rb_ders[i], lmp_basis.rb_ders[i], 1e-12, 1e-10))
+						FAIL();
+				}
+			}
+		}
+	}
+} END_TEST;
+
 	/*#ifndef MLIP_NOEWALD
 TEST("Check Ewald summation") {
 	vector<string> fnm(5);
