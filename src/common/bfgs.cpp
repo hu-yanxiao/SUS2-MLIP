@@ -234,6 +234,8 @@ const Array1D& BFGS::Iterate(double f, const Array1D& g) {
 		iter_step+=1;
 
 		linesearch.Iterate(f, p_dot_g);
+		if (linesearch.stagnated())
+			iter_step = 31;
 		for (int i = 0; i < size; i++) x_[i] = x_start[i] + linesearch.x() * p[i];
 	} else {
 		// if we were in linesearch, we say we are no longer in linesearch

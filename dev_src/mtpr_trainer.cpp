@@ -1051,10 +1051,14 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 		if (prank == 0)
 			if (!converge) {
-				if (bfgs.iter_step > 30) {
+				if (bfgs.linesearch_stagnated()) {
+					converge = true;
+					logstrm1 << "BFGS ended due to linesearch stagnation" << endl;
+					MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
+				} else if (bfgs.iter_step > 30) {
 					converge = true;
 					logstrm1 << "BFGS ended due to linesearch  more than  30 iterations" << endl;
-                                        logstrm1 << "d_x= "<< bfgs.x(0) - x[0] << endl;
+					logstrm1 << "d_x= "<< bfgs.x(0) - x[0] << endl;
 					MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
 				}
 					

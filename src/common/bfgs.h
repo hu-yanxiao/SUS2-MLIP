@@ -14,6 +14,8 @@
 #include <vector>
 #include <cmath>
 #include <iostream>
+#include <limits>
+#include <algorithm>
 #include "multidimensional_arrays.h"
 #include "utils.h"
 
@@ -47,11 +49,64 @@ protected:
 	double prev_x;
 	double prev_f;
 	double prev_g;
+	bool stagnated_ = false;
+
+	double StepTolerance() const {
+		double scale = 1.0;
+		scale = std::max(scale, std::abs(left_x));
+		scale = std::max(scale, std::abs(curr_x));
+		scale = std::max(scale, std::abs(right_x));
+		scale = std::max(scale, std::abs(prev_x));
+		return 64.0 * std::numeric_limits<double>::epsilon() * scale;
+	}
+
+	double BestKnownX(double curr_f) const {
+		double best_x = curr_x;
+		double best_f = curr_f;
+		if (left_f < best_f) {
+			best_f = left_f;
+			best_x = left_x;
+		}
+		if (right_f < best_f) {
+			best_f = right_f;
+			best_x = right_x;
+		}
+		return best_x;
+	}
+
+	bool RecoverFromStagnatedStep(double curr_f, double curr_g, double step_tol) {
+		if (!(left_x < right_x))
+			return false;
+
+		double recovered_x = 0.5 * (left_x + right_x);
+		if (std::abs(recovered_x - curr_x) <= step_tol) {
+			if (curr_x > left_x) {
+				const double toward_left = std::nextafter(curr_x, left_x);
+				if (toward_left != curr_x && toward_left >= left_x)
+					recovered_x = toward_left;
+			}
+			if (std::abs(recovered_x - curr_x) <= step_tol && curr_x < right_x) {
+				const double toward_right = std::nextafter(curr_x, right_x);
+				if (toward_right != curr_x && toward_right <= right_x)
+					recovered_x = toward_right;
+			}
+		}
+
+		if (std::abs(recovered_x - curr_x) <= step_tol)
+			return false;
+
+		prev_x = curr_x;
+		prev_f = curr_f;
+		prev_g = curr_g;
+		curr_x = recovered_x;
+		return true;
+	}
 
 public:
 
 	//! resets linesearch for minimizing another function.
 	void Reset(double _initial_step = 1.0) {
+		stagnated_ = false;
 		left_x = curr_x = 0.0;
 		right_x = _initial_step;
 		right_f = HUGE_DOUBLE;
@@ -61,6 +116,7 @@ public:
 	Linesearch() { Reset(); }
 
 	double x() { return curr_x; }
+	bool stagnated() const { return stagnated_; }
 
 	void ReduceStep(double ratio = 0.25) {
 		curr_x = prev_x + ratio * (curr_x - prev_x);
@@ -100,10 +156,20 @@ public:
 			<< prev_f << ", "
 			<< prev_g << "}" 
 			<< std::endl;
-#endif // MLIP_LINESEARCH_DEBUG
+		#endif // MLIP_LINESEARCH_DEBUG
 
 		// Now prev_x, prev_f, prev_g are set
-		if (prev_x == curr_x) ERROR("prev_x == curr_x");
+		const double step_tol = StepTolerance();
+		if (std::abs(prev_x - curr_x) <= step_tol) {
+			if (RecoverFromStagnatedStep(curr_f, curr_g, step_tol))
+				return;
+			if (right_x - left_x <= step_tol) {
+				stagnated_ = true;
+				curr_x = BestKnownX(curr_f);
+				return;
+			}
+			ERROR("Linesearch stagnated: unable to recover a distinct step");
+		}
 
 		if (curr_x == right_x || (curr_x > left_x && right_f == 9e99)) {
 			right_x = curr_x;
@@ -298,6 +364,7 @@ public:
 	double lr = 100;
 	int iter_step = 0;
 	bool is_in_linesearch() { return is_in_linesearch_; }
+	bool linesearch_stagnated() const { return linesearch.stagnated(); }
 
 	double wolfe_c1 = 0.1;
 	double wolfe_c2 = 0.5;
