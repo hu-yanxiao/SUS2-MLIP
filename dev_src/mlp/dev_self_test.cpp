@@ -1998,9 +1998,134 @@ TEST("check RBJacobi_sss_lmp matches full basis values and radial derivatives") 
 			}
 		}
 	}
+	} END_TEST;
+
+TEST("check RBJacobi_sss_noweight derivatives with finite differences") {
+	const double r_step = 1e-5;
+	const double param_step = 1e-6;
+	const int basis_function_count = 8;
+	const double r_min = 0.0;
+	const double r_cut = 5.2;
+	const double scal = 2.3;
+	const double shift = 1.7;
+	const std::vector<double> r_values = {0.2, 2.6, 5.15};
+	const std::vector<int> jacobi_blocks = {0, 1, 2, 3, 4, 5};
+
+	auto rel_error = [](double reference, double actual) {
+		const double scale = std::max(std::fabs(reference), std::fabs(actual));
+		if (scale < 1e-12)
+			return 0.0;
+		return std::fabs(reference - actual) / scale;
+	};
+	auto check_close = [&](const std::string& label, double reference, double actual, double abs_tol, double rel_tol) {
+		const double abs_err = std::fabs(reference - actual);
+		const double rel_err = rel_error(reference, actual);
+		if (abs_err > abs_tol && rel_err > rel_tol) {
+			std::cout << label
+			          << " ref=" << reference
+			          << " actual=" << actual
+			          << " abs_err=" << abs_err
+			          << " rel_err=" << rel_err
+			          << std::endl;
+			return false;
+		}
+		return true;
+	};
+
+	for (int jacobi_block : jacobi_blocks) {
+		for (double r : r_values) {
+			RadialBasis_Jacobi_sss_noweight bas(r_min, r_cut, basis_function_count);
+			bas.RB_Calc(r, scal, shift, jacobi_block);
+
+			RadialBasis_Jacobi_sss_noweight bas_rp(r_min, r_cut, basis_function_count);
+			bas_rp.RB_Calc(r + r_step, scal, shift, jacobi_block);
+			RadialBasis_Jacobi_sss_noweight bas_rm(r_min, r_cut, basis_function_count);
+			bas_rm.RB_Calc(r - r_step, scal, shift, jacobi_block);
+
+			RadialBasis_Jacobi_sss_noweight bas_sp(r_min, r_cut, basis_function_count);
+			bas_sp.RB_Calc(r, scal + param_step, shift, jacobi_block);
+			RadialBasis_Jacobi_sss_noweight bas_sm(r_min, r_cut, basis_function_count);
+			bas_sm.RB_Calc(r, scal - param_step, shift, jacobi_block);
+
+			RadialBasis_Jacobi_sss_noweight bas_tp(r_min, r_cut, basis_function_count);
+			bas_tp.RB_Calc(r, scal, shift + param_step, jacobi_block);
+			RadialBasis_Jacobi_sss_noweight bas_tm(r_min, r_cut, basis_function_count);
+			bas_tm.RB_Calc(r, scal, shift - param_step, jacobi_block);
+
+			for (int i = 0; i < basis_function_count; ++i) {
+				const double dr_fd = (bas_rp.rb_vals[i] - bas_rm.rb_vals[i]) / (2.0 * r_step);
+				const double dscal_fd = (bas_sp.rb_vals[i] - bas_sm.rb_vals[i]) / (2.0 * param_step);
+				const double dshift_fd = (bas_tp.rb_vals[i] - bas_tm.rb_vals[i]) / (2.0 * param_step);
+				const double dr_dscal_fd = (bas_rp.rb_ders[i + basis_function_count] - bas_rm.rb_ders[i + basis_function_count]) / (2.0 * r_step);
+				const double dr_dshift_fd = (bas_rp.rb_ders[i + 3 * basis_function_count] - bas_rm.rb_ders[i + 3 * basis_function_count]) / (2.0 * r_step);
+
+				if (!check_close("d/dr", dr_fd, bas.rb_ders[i], 5e-5, 3e-4))
+					FAIL();
+				if (!check_close("d/dscal", dscal_fd, bas.rb_ders[i + basis_function_count], 5e-5, 3e-4))
+					FAIL();
+				if (!check_close("d/dshift", dshift_fd, bas.rb_ders[i + 3 * basis_function_count], 5e-5, 3e-4))
+					FAIL();
+				if (!check_close("d/dr(d/dscal)", dr_dscal_fd, bas.rb_ders[i + 2 * basis_function_count], 2e-4, 8e-4))
+					FAIL();
+				if (!check_close("d/dr(d/dshift)", dr_dshift_fd, bas.rb_ders[i + 4 * basis_function_count], 2e-4, 8e-4))
+					FAIL();
+			}
+		}
+	}
 } END_TEST;
-	
-		/*#ifndef MLIP_NOEWALD
+
+TEST("check RBJacobi_sss_noweight_lmp matches full basis values and radial derivatives") {
+	const int basis_function_count = 8;
+	const double r_min = 0.0;
+	const double r_cut = 5.2;
+	const std::vector<double> scal_values = {0.7, 2.3};
+	const std::vector<double> shift_values = {0.0, 0.8, 1.7};
+	const std::vector<double> r_values = {0.0, 0.2, 2.6, 5.15};
+	const std::vector<int> jacobi_blocks = {0, 1, 2, 3, 4, 5};
+
+	auto rel_error = [](double reference, double actual) {
+		const double scale = std::max(std::fabs(reference), std::fabs(actual));
+		if (scale < 1e-12)
+			return 0.0;
+		return std::fabs(reference - actual) / scale;
+	};
+	auto check_close = [&](const std::string& label, double reference, double actual, double abs_tol, double rel_tol) {
+		const double abs_err = std::fabs(reference - actual);
+		const double rel_err = rel_error(reference, actual);
+		if (abs_err > abs_tol && rel_err > rel_tol) {
+			std::cout << label
+			          << " ref=" << reference
+			          << " actual=" << actual
+			          << " abs_err=" << abs_err
+			          << " rel_err=" << rel_err
+			          << std::endl;
+			return false;
+		}
+		return true;
+	};
+
+	for (int jacobi_block : jacobi_blocks) {
+		for (double scal : scal_values) {
+			for (double shift : shift_values) {
+				for (double r : r_values) {
+					RadialBasis_Jacobi_sss_noweight full_basis(r_min, r_cut, basis_function_count);
+					RadialBasis_Jacobi_sss_noweight_lmp lmp_basis(r_min, r_cut, basis_function_count);
+					full_basis.RB_Calc(r, scal, shift, jacobi_block);
+					lmp_basis.RB_Calc(r, scal, shift, jacobi_block);
+
+					for (int i = 0; i < basis_function_count; ++i) {
+						if (!check_close("value", full_basis.rb_vals[i], lmp_basis.rb_vals[i], 1e-12, 1e-10))
+							FAIL();
+						if (!check_close("d/dr", full_basis.rb_ders[i], lmp_basis.rb_ders[i], 1e-12, 1e-10))
+							FAIL();
+					}
+				}
+			}
+		}
+	}
+} END_TEST;
+		
+			/*#ifndef MLIP_NOEWALD
 TEST("Check Ewald summation") {
 	vector<string> fnm(5);
 	vector<double> madelung(5);

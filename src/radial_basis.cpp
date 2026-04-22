@@ -108,7 +108,7 @@ std::pair<int, int> JacobiAlphaBetaForBlock(int k)
 	};
 
 	if (k < 0 || k > kJacobiMaxIndexedBlock) {
-		ERROR("RBJacobi_sss supports only six indexed blocks: "
+		ERROR("RBJacobi indexed basis supports only six indexed blocks: "
 		      "k=0..5 -> (0,0),(1,0),(1,1),(2,0),(2,1),(2,2)");
 	}
 	return std::make_pair(kAlphaBetaTable[k][0], kAlphaBetaTable[k][1]);
@@ -119,6 +119,7 @@ void JacobiSSSCalc(AnyRadialBasis& basis,
 			   double scal,
 			   double s,
 			   int k,
+			   bool apply_sqrt_weight,
 			   bool include_param_derivatives)
 {
 #ifdef MLIP_DEBUG
@@ -148,19 +149,23 @@ void JacobiSSSCalc(AnyRadialBasis& basis,
 	const double x_scal_r = 0.5 * sech_sq + 0.25 * scal * (r - s) * dsech_sq_dz;
 	const double x_s_r = -0.25 * scal * scal * dsech_sq_dz;
 
-	const double one_minus_x = std::max(kJacobiEndpointEps, 1.0 - x);
-	const double one_plus_x = std::max(kJacobiEndpointEps, 1.0 + x);
-
 	double sqrt_weight = 1.0;
-	if (alpha != 0.0)
-		sqrt_weight *= pow(one_minus_x, 0.5 * alpha);
-	if (beta != 0.0)
-		sqrt_weight *= pow(one_plus_x, 0.5 * beta);
+	double log_weight_x = 0.0;
+	double log_weight_xx = 0.0;
+	if (apply_sqrt_weight) {
+		const double one_minus_x = std::max(kJacobiEndpointEps, 1.0 - x);
+		const double one_plus_x = std::max(kJacobiEndpointEps, 1.0 + x);
 
-	const double log_weight_x = -0.5 * alpha / one_minus_x + 0.5 * beta / one_plus_x;
-	const double log_weight_xx =
-		-0.5 * alpha / (one_minus_x * one_minus_x)
-		-0.5 * beta / (one_plus_x * one_plus_x);
+		if (alpha != 0.0)
+			sqrt_weight *= pow(one_minus_x, 0.5 * alpha);
+		if (beta != 0.0)
+			sqrt_weight *= pow(one_plus_x, 0.5 * beta);
+
+		log_weight_x = -0.5 * alpha / one_minus_x + 0.5 * beta / one_plus_x;
+		log_weight_xx =
+			-0.5 * alpha / (one_minus_x * one_minus_x)
+			-0.5 * beta / (one_plus_x * one_plus_x);
+	}
 
 	double y_prev = 0.0;
 	double y_prev_x = 0.0;
@@ -1622,12 +1627,22 @@ void RadialBasis_Laguerre_log1p_noenv_lmp::RB_Calc(double r, double scal, double
 
 void RadialBasis_Jacobi_sss::RB_Calc(double r, double scal, double s, int k)
 {
-	JacobiSSSCalc(*this, r, scal, s, k, true);
+	JacobiSSSCalc(*this, r, scal, s, k, true, true);
 }
 
 void RadialBasis_Jacobi_sss_lmp::RB_Calc(double r, double scal, double s, int k)
 {
-	JacobiSSSCalc(*this, r, scal, s, k, false);
+	JacobiSSSCalc(*this, r, scal, s, k, true, false);
+}
+
+void RadialBasis_Jacobi_sss_noweight::RB_Calc(double r, double scal, double s, int k)
+{
+	JacobiSSSCalc(*this, r, scal, s, k, false, true);
+}
+
+void RadialBasis_Jacobi_sss_noweight_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+	JacobiSSSCalc(*this, r, scal, s, k, false, false);
 }
 
 

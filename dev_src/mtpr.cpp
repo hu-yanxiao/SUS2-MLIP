@@ -48,7 +48,9 @@ bool IsLaguerreLog1pBasisType(AnyRadialBasis* radial_basis)
 bool IsJacobiIndexedBasisType(const std::string& basis_type)
 {
 	return basis_type == "RBJacobi_sss"
-	    || basis_type == "RBJacobi_sss_lmp";
+	    || basis_type == "RBJacobi_sss_lmp"
+	    || basis_type == "RBJacobi_sss_noweight"
+	    || basis_type == "RBJacobi_sss_noweight_lmp";
 }
 
 bool IsJacobiIndexedBasisType(AnyRadialBasis* radial_basis)
@@ -61,7 +63,8 @@ bool UsesPrecomputedLmpTable(const std::string& basis_type)
 	return basis_type == "RBChebyshev_sss_lmp"
 	    || basis_type == "RBLaguerre_log1p_lmp"
 	    || basis_type == "RBLaguerre_log1p_noenv_lmp"
-	    || basis_type == "RBJacobi_sss_lmp";
+	    || basis_type == "RBJacobi_sss_lmp"
+	    || basis_type == "RBJacobi_sss_noweight_lmp";
 }
 
 bool UsesPrecomputedLmpTable(AnyRadialBasis* radial_basis)
@@ -356,6 +359,10 @@ void MLMTPR::Load(const string& filename)
 	                p_RadialBasis = new RadialBasis_Jacobi_sss(ifs);
 	        else if (rbasis_type == "RBJacobi_sss_lmp")
 	                p_RadialBasis = new RadialBasis_Jacobi_sss_lmp(ifs);
+	        else if (rbasis_type == "RBJacobi_sss_noweight")
+	                p_RadialBasis = new RadialBasis_Jacobi_sss_noweight(ifs);
+	        else if (rbasis_type == "RBJacobi_sss_noweight_lmp")
+	                p_RadialBasis = new RadialBasis_Jacobi_sss_noweight_lmp(ifs);
 	        else if (rbasis_type == "RBBessel")
 	                p_RadialBasis = new RadialBasis_Bessel(ifs);
 	        else if (rbasis_type == "RBBessel_sss")
@@ -1376,16 +1383,16 @@ int MLMTPR::JacobiIndexedBlockForMu(int mu) const
 	if (!UsesJacobiIndexedBasis())
 		return 0;
 	if (L < 0)
-		ERROR("RBJacobi_sss requires non-negative L");
+		ERROR("RBJacobi indexed basis requires non-negative L");
 	// Internal L stores the number of angular channels, i.e. (L_max + 1).
 	const int block_span = L;
 	if (block_span <= 0)
-		ERROR("RBJacobi_sss requires positive Jacobi block span");
+		ERROR("RBJacobi indexed basis requires positive Jacobi block span");
 	if (radial_func_count % block_span != 0)
-		ERROR("RBJacobi_sss requires radial_funcs_count to be divisible by internal L-channel count");
+		ERROR("RBJacobi indexed basis requires radial_funcs_count to be divisible by internal L-channel count");
 	const int jacobi_block = mu / block_span;
 	if (jacobi_block > 5)
-		ERROR("RBJacobi_sss supports at most 6 Jacobi blocks: k=0..5");
+		ERROR("RBJacobi indexed basis supports at most 6 Jacobi blocks: k=0..5");
 	return jacobi_block;
 }
 
