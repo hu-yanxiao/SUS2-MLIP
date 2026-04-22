@@ -94,6 +94,120 @@ namespace {
 
 constexpr double kLaguerreMinRho = 1.0e-8;
 
+void LaguerreLog1pCalc(AnyRadialBasis& basis,
+			    double r,
+			    double scal,
+			    double s,
+			    bool apply_exponential_envelope,
+			    bool include_param_derivatives)
+{
+#ifdef MLIP_DEBUG
+	if (r < basis.min_dist) {
+		Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+			", min_dist = " + to_string(basis.min_dist) + '\n');
+	}
+	if (r > basis.max_dist) {
+		ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+			", min_dist = " + to_string(basis.min_dist) + '\n');
+	}
+#endif
+
+	const bool rho_is_active = s > kLaguerreMinRho;
+	const double rho = rho_is_active ? s : kLaguerreMinRho;
+	const double log_term = log1p(r / rho);
+	const double u = scal * log_term;
+	const double u_r = scal / (rho + r);
+	const double u_scal = log_term;
+	const double u_scal_r = 1.0 / (rho + r);
+	const double u_rho = rho_is_active ? (-scal * r / (rho * (rho + r))) : 0.0;
+	const double u_rho_r = rho_is_active ? (-scal / ((rho + r) * (rho + r))) : 0.0;
+
+	const double dr = r - basis.max_dist;
+	const double cutoff_f = dr * dr;
+	const double cutoff_der = 2.0 * dr;
+	const double exp_factor = apply_exponential_envelope ? exp(-0.5 * u) : 1.0;
+
+	double phi_prev = 0.0;
+	double dphi_prev = 0.0;
+	double dphi_scal_prev = 0.0;
+	double dphi_scal_r_prev = 0.0;
+	double dphi_rho_prev = 0.0;
+	double dphi_rho_r_prev = 0.0;
+
+	double phi_curr = basis.scaling * cutoff_f * exp_factor;
+	double dphi_curr = basis.scaling * cutoff_der * exp_factor;
+	double dphi_scal_curr = 0.0;
+	double dphi_scal_r_curr = 0.0;
+	double dphi_rho_curr = 0.0;
+	double dphi_rho_r_curr = 0.0;
+
+	if (apply_exponential_envelope) {
+		dphi_curr -= 0.5 * u_r * phi_curr;
+		if (include_param_derivatives) {
+			dphi_scal_curr = -0.5 * u_scal * phi_curr;
+			dphi_scal_r_curr = -0.5 * u_scal_r * phi_curr - 0.5 * u_scal * dphi_curr;
+			dphi_rho_curr = -0.5 * u_rho * phi_curr;
+			dphi_rho_r_curr = -0.5 * u_rho_r * phi_curr - 0.5 * u_rho * dphi_curr;
+		}
+	}
+
+	basis.rb_vals[0] = phi_curr;
+	basis.rb_ders[0] = dphi_curr;
+	if (include_param_derivatives) {
+		basis.rb_ders[basis.rb_size] = dphi_scal_curr;
+		basis.rb_ders[2 * basis.rb_size] = dphi_scal_r_curr;
+		basis.rb_ders[3 * basis.rb_size] = dphi_rho_curr;
+		basis.rb_ders[4 * basis.rb_size] = dphi_rho_r_curr;
+	}
+
+	for (int n = 0; n < basis.rb_size - 1; ++n) {
+		const double inv_np1 = 1.0 / (n + 1.0);
+		const double coeff = (2.0 * n + 1.0 - u) * inv_np1;
+		const double prev_coeff = n * inv_np1;
+
+		const double phi_next = coeff * phi_curr - prev_coeff * phi_prev;
+		const double dphi_next = -u_r * inv_np1 * phi_curr + coeff * dphi_curr - prev_coeff * dphi_prev;
+
+		basis.rb_vals[n + 1] = phi_next;
+		basis.rb_ders[n + 1] = dphi_next;
+
+		double dphi_scal_next = 0.0;
+		double dphi_scal_r_next = 0.0;
+		double dphi_rho_next = 0.0;
+		double dphi_rho_r_next = 0.0;
+
+		if (include_param_derivatives) {
+			dphi_scal_next = -u_scal * inv_np1 * phi_curr + coeff * dphi_scal_curr - prev_coeff * dphi_scal_prev;
+			dphi_scal_r_next =
+				(-u_scal_r * phi_curr - u_scal * dphi_curr - u_r * dphi_scal_curr) * inv_np1
+				+ coeff * dphi_scal_r_curr - prev_coeff * dphi_scal_r_prev;
+			dphi_rho_next = -u_rho * inv_np1 * phi_curr + coeff * dphi_rho_curr - prev_coeff * dphi_rho_prev;
+			dphi_rho_r_next =
+				(-u_rho_r * phi_curr - u_rho * dphi_curr - u_r * dphi_rho_curr) * inv_np1
+				+ coeff * dphi_rho_r_curr - prev_coeff * dphi_rho_r_prev;
+
+			basis.rb_ders[n + 1 + basis.rb_size] = dphi_scal_next;
+			basis.rb_ders[n + 1 + 2 * basis.rb_size] = dphi_scal_r_next;
+			basis.rb_ders[n + 1 + 3 * basis.rb_size] = dphi_rho_next;
+			basis.rb_ders[n + 1 + 4 * basis.rb_size] = dphi_rho_r_next;
+		}
+
+		phi_prev = phi_curr;
+		dphi_prev = dphi_curr;
+		dphi_scal_prev = dphi_scal_curr;
+		dphi_scal_r_prev = dphi_scal_r_curr;
+		dphi_rho_prev = dphi_rho_curr;
+		dphi_rho_r_prev = dphi_rho_r_curr;
+
+		phi_curr = phi_next;
+		dphi_curr = dphi_next;
+		dphi_scal_curr = dphi_scal_next;
+		dphi_scal_r_curr = dphi_scal_r_next;
+		dphi_rho_curr = dphi_rho_next;
+		dphi_rho_r_curr = dphi_rho_r_next;
+	}
+}
+
 }  // namespace
 
 void RadialBasis_Shapeev::InitShapeevRB()
@@ -1345,138 +1459,22 @@ rb_ders[1 + rb_size * 4] = scaling * (mult_s_r * cutoff_f + 2 * mult_s * Dr);
 
 void RadialBasis_Laguerre_log1p::RB_Calc(double r, double scal, double s, int k)
 {
-#ifdef MLIP_DEBUG
-	if (r < min_dist) {
-		Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
-			", min_dist = " + to_string(min_dist) + '\n');
-	}
-	if (r > max_dist) {
-		ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
-			", min_dist = " + to_string(min_dist) + '\n');
-	}
-#endif
-
-	const bool rho_is_active = s > kLaguerreMinRho;
-	const double rho = rho_is_active ? s : kLaguerreMinRho;
-	const double log_term = log1p(r / rho);
-	const double u = scal * log_term;
-	const double u_r = scal / (rho + r);
-	const double u_scal = log_term;
-	const double u_scal_r = 1.0 / (rho + r);
-	const double u_rho = rho_is_active ? (-scal * r / (rho * (rho + r))) : 0.0;
-	const double u_rho_r = rho_is_active ? (-scal / ((rho + r) * (rho + r))) : 0.0;
-
-	const double dr = r - max_dist;
-	const double cutoff_f = dr * dr;
-	const double cutoff_der = 2.0 * dr;
-
-	const double exp_factor = exp(-0.5 * u);
-	double phi_prev = 0.0;
-	double dphi_prev = 0.0;
-	double dphi_scal_prev = 0.0;
-	double dphi_scal_r_prev = 0.0;
-	double dphi_rho_prev = 0.0;
-	double dphi_rho_r_prev = 0.0;
-
-	double phi_curr = scaling * cutoff_f * exp_factor;
-	double dphi_curr = scaling * cutoff_der * exp_factor - 0.5 * u_r * phi_curr;
-	double dphi_scal_curr = -0.5 * u_scal * phi_curr;
-	double dphi_scal_r_curr = -0.5 * u_scal_r * phi_curr - 0.5 * u_scal * dphi_curr;
-	double dphi_rho_curr = -0.5 * u_rho * phi_curr;
-	double dphi_rho_r_curr = -0.5 * u_rho_r * phi_curr - 0.5 * u_rho * dphi_curr;
-
-	rb_vals[0] = phi_curr;
-	rb_ders[0] = dphi_curr;
-	rb_ders[rb_size] = dphi_scal_curr;
-	rb_ders[2 * rb_size] = dphi_scal_r_curr;
-	rb_ders[3 * rb_size] = dphi_rho_curr;
-	rb_ders[4 * rb_size] = dphi_rho_r_curr;
-
-	for (int n = 0; n < rb_size - 1; ++n) {
-		const double inv_np1 = 1.0 / (n + 1.0);
-		const double coeff = (2.0 * n + 1.0 - u) * inv_np1;
-		const double prev_coeff = n * inv_np1;
-
-		const double phi_next = coeff * phi_curr - prev_coeff * phi_prev;
-		const double dphi_next = -u_r * inv_np1 * phi_curr + coeff * dphi_curr - prev_coeff * dphi_prev;
-		const double dphi_scal_next = -u_scal * inv_np1 * phi_curr + coeff * dphi_scal_curr - prev_coeff * dphi_scal_prev;
-		const double dphi_scal_r_next =
-			(-u_scal_r * phi_curr - u_scal * dphi_curr - u_r * dphi_scal_curr) * inv_np1
-			+ coeff * dphi_scal_r_curr - prev_coeff * dphi_scal_r_prev;
-		const double dphi_rho_next = -u_rho * inv_np1 * phi_curr + coeff * dphi_rho_curr - prev_coeff * dphi_rho_prev;
-		const double dphi_rho_r_next =
-			(-u_rho_r * phi_curr - u_rho * dphi_curr - u_r * dphi_rho_curr) * inv_np1
-			+ coeff * dphi_rho_r_curr - prev_coeff * dphi_rho_r_prev;
-
-		rb_vals[n + 1] = phi_next;
-		rb_ders[n + 1] = dphi_next;
-		rb_ders[n + 1 + rb_size] = dphi_scal_next;
-		rb_ders[n + 1 + 2 * rb_size] = dphi_scal_r_next;
-		rb_ders[n + 1 + 3 * rb_size] = dphi_rho_next;
-		rb_ders[n + 1 + 4 * rb_size] = dphi_rho_r_next;
-
-		phi_prev = phi_curr;
-		dphi_prev = dphi_curr;
-		dphi_scal_prev = dphi_scal_curr;
-		dphi_scal_r_prev = dphi_scal_r_curr;
-		dphi_rho_prev = dphi_rho_curr;
-		dphi_rho_r_prev = dphi_rho_r_curr;
-
-		phi_curr = phi_next;
-		dphi_curr = dphi_next;
-		dphi_scal_curr = dphi_scal_next;
-		dphi_scal_r_curr = dphi_scal_r_next;
-		dphi_rho_curr = dphi_rho_next;
-		dphi_rho_r_curr = dphi_rho_r_next;
-	}
+	LaguerreLog1pCalc(*this, r, scal, s, true, true);
 }
 
 void RadialBasis_Laguerre_log1p_lmp::RB_Calc(double r, double scal, double s, int k)
 {
-#ifdef MLIP_DEBUG
-	if (r < min_dist) {
-		Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
-			", min_dist = " + to_string(min_dist) + '\n');
-	}
-	if (r > max_dist) {
-		ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
-			", min_dist = " + to_string(min_dist) + '\n');
-	}
-#endif
+	LaguerreLog1pCalc(*this, r, scal, s, true, false);
+}
 
-	const double rho = (s > kLaguerreMinRho) ? s : kLaguerreMinRho;
-	const double u = scal * log1p(r / rho);
-	const double u_r = scal / (rho + r);
+void RadialBasis_Laguerre_log1p_noenv::RB_Calc(double r, double scal, double s, int k)
+{
+	LaguerreLog1pCalc(*this, r, scal, s, false, true);
+}
 
-	const double dr = r - max_dist;
-	const double cutoff_f = dr * dr;
-	const double cutoff_der = 2.0 * dr;
-	const double exp_factor = exp(-0.5 * u);
-
-	double phi_prev = 0.0;
-	double dphi_prev = 0.0;
-	double phi_curr = scaling * cutoff_f * exp_factor;
-	double dphi_curr = scaling * cutoff_der * exp_factor - 0.5 * u_r * phi_curr;
-
-	rb_vals[0] = phi_curr;
-	rb_ders[0] = dphi_curr;
-
-	for (int n = 0; n < rb_size - 1; ++n) {
-		const double inv_np1 = 1.0 / (n + 1.0);
-		const double coeff = (2.0 * n + 1.0 - u) * inv_np1;
-		const double prev_coeff = n * inv_np1;
-
-		const double phi_next = coeff * phi_curr - prev_coeff * phi_prev;
-		const double dphi_next = -u_r * inv_np1 * phi_curr + coeff * dphi_curr - prev_coeff * dphi_prev;
-
-		rb_vals[n + 1] = phi_next;
-		rb_ders[n + 1] = dphi_next;
-
-		phi_prev = phi_curr;
-		dphi_prev = dphi_curr;
-		phi_curr = phi_next;
-		dphi_curr = dphi_next;
-	}
+void RadialBasis_Laguerre_log1p_noenv_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+	LaguerreLog1pCalc(*this, r, scal, s, false, false);
 }
 
 

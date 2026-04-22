@@ -34,7 +34,10 @@ double Lerp(double start, double end, double t)
 
 bool IsLaguerreLog1pBasisType(const std::string& basis_type)
 {
-	return basis_type == "RBLaguerre_log1p" || basis_type == "RBLaguerre_log1p_lmp";
+	return basis_type == "RBLaguerre_log1p"
+	    || basis_type == "RBLaguerre_log1p_lmp"
+	    || basis_type == "RBLaguerre_log1p_noenv"
+	    || basis_type == "RBLaguerre_log1p_noenv_lmp";
 }
 
 bool IsLaguerreLog1pBasisType(AnyRadialBasis* radial_basis)
@@ -44,7 +47,9 @@ bool IsLaguerreLog1pBasisType(AnyRadialBasis* radial_basis)
 
 bool UsesPrecomputedLmpTable(const std::string& basis_type)
 {
-	return basis_type == "RBChebyshev_sss_lmp" || basis_type == "RBLaguerre_log1p_lmp";
+	return basis_type == "RBChebyshev_sss_lmp"
+	    || basis_type == "RBLaguerre_log1p_lmp"
+	    || basis_type == "RBLaguerre_log1p_noenv_lmp";
 }
 
 bool UsesPrecomputedLmpTable(AnyRadialBasis* radial_basis)
@@ -331,6 +336,10 @@ void MLMTPR::Load(const string& filename)
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
 	        else if (rbasis_type == "RBLaguerre_log1p_lmp")
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p_lmp(ifs);
+	        else if (rbasis_type == "RBLaguerre_log1p_noenv")
+	                p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv(ifs);
+	        else if (rbasis_type == "RBLaguerre_log1p_noenv_lmp")
+	                p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv_lmp(ifs);
 	        else if (rbasis_type == "RBBessel")
 	                p_RadialBasis = new RadialBasis_Bessel(ifs);
 	        else if (rbasis_type == "RBBessel_sss")

@@ -753,6 +753,10 @@ void MTP::Load(const std::string& filename)
 				p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
 			else if (tmpstr == "RBLaguerre_log1p_lmp")
 				p_RadialBasis = new RadialBasis_Laguerre_log1p_lmp(ifs);
+			else if (tmpstr == "RBLaguerre_log1p_noenv")
+				p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv(ifs);
+			else if (tmpstr == "RBLaguerre_log1p_noenv_lmp")
+				p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv_lmp(ifs);
 			else if (tmpstr == "RBTaylor")
 				p_RadialBasis = new RadialBasis_Taylor(ifs);
 
