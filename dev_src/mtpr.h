@@ -99,13 +99,19 @@ protected:
 	std::vector<double> grad_neighbor_mu_contract_coord_ders_s_cache_;
 	std::vector<double> grad_neighbor_mu_contract_coord_ders_ss_cache_;
 	std::vector<int> basic_total_degree_cache_;
-	std::vector<int> basic_sigma_block_cache_;
+	std::vector<int> basic_scaling_block_cache_;
+	std::vector<int> basic_radial_eval_block_cache_;
 	std::vector<int> basic_radial_offset_cache_;
+	std::vector<int> mu_to_radial_eval_block_;
+	std::vector<int> radial_eval_to_scaling_block_;
+	std::vector<int> radial_eval_to_basis_k_;
 
 
 
 	void CalcSiteEnergyDers(const Neighborhood& nbh) override;
 	void PrepareEvalCaches() override;
+	bool UsesJacobiIndexedBasis() const;
+	int JacobiIndexedBlockForMu(int mu) const;
 
 public:
 	double scaling = 1.0; //!< how to scale moments

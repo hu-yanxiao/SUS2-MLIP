@@ -373,6 +373,38 @@ public:
 	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
 };
 
+class RadialBasis_Jacobi_sss : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBJacobi_sss";
+	}
+
+	RadialBasis_Jacobi_sss(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Jacobi_sss(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
+class RadialBasis_Jacobi_sss_lmp : public AnyRadialBasis
+{
+public:
+	std::string GetRBTypeString() override
+	{
+		return "RBJacobi_sss_lmp";
+	}
+
+	RadialBasis_Jacobi_sss_lmp(double _min_dist, double _max_dist, int _size)
+		: AnyRadialBasis(_min_dist, _max_dist, _size) {};
+	RadialBasis_Jacobi_sss_lmp(std::ifstream& ifs)
+		: AnyRadialBasis(ifs) {};
+
+	void RB_Calc(double r,double scal=0.1, double s= 0.1,int k=0) override;
+};
+
 
 
 

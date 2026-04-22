@@ -45,11 +45,23 @@ bool IsLaguerreLog1pBasisType(AnyRadialBasis* radial_basis)
 	return radial_basis != nullptr && IsLaguerreLog1pBasisType(radial_basis->GetRBTypeString());
 }
 
+bool IsJacobiIndexedBasisType(const std::string& basis_type)
+{
+	return basis_type == "RBJacobi_sss"
+	    || basis_type == "RBJacobi_sss_lmp";
+}
+
+bool IsJacobiIndexedBasisType(AnyRadialBasis* radial_basis)
+{
+	return radial_basis != nullptr && IsJacobiIndexedBasisType(radial_basis->GetRBTypeString());
+}
+
 bool UsesPrecomputedLmpTable(const std::string& basis_type)
 {
 	return basis_type == "RBChebyshev_sss_lmp"
 	    || basis_type == "RBLaguerre_log1p_lmp"
-	    || basis_type == "RBLaguerre_log1p_noenv_lmp";
+	    || basis_type == "RBLaguerre_log1p_noenv_lmp"
+	    || basis_type == "RBJacobi_sss_lmp";
 }
 
 bool UsesPrecomputedLmpTable(AnyRadialBasis* radial_basis)
@@ -340,6 +352,10 @@ void MLMTPR::Load(const string& filename)
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv(ifs);
 	        else if (rbasis_type == "RBLaguerre_log1p_noenv_lmp")
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv_lmp(ifs);
+	        else if (rbasis_type == "RBJacobi_sss")
+	                p_RadialBasis = new RadialBasis_Jacobi_sss(ifs);
+	        else if (rbasis_type == "RBJacobi_sss_lmp")
+	                p_RadialBasis = new RadialBasis_Jacobi_sss_lmp(ifs);
 	        else if (rbasis_type == "RBBessel")
 	                p_RadialBasis = new RadialBasis_Bessel(ifs);
 	        else if (rbasis_type == "RBBessel_sss")
@@ -668,17 +684,19 @@ void MLMTPR::Load(const string& filename)
 		{
 			for (int j = 0; j < C; j++)
 			{
-				for (int n = 0; n < 200001; n++)
-				{
-					for (int mu = 0; mu < radial_func_count; mu++)
+					for (int n = 0; n < 200001; n++)
 					{
-						k_ = mu_to_K[mu];
-						//sigma=mu_to_sigma[mu];
+						for (int mu = 0; mu < radial_func_count; mu++)
+						{
+							k_ = mu_to_K[mu];
+							const int basis_k = UsesJacobiIndexedBasis()
+								? JacobiIndexedBlockForMu(mu)
+								: mu_to_sigma[k_];
 
-						p_RadialBasis->RB_Calc(dr * n,
-							regression_coeffs[C + 2 * k_ * C * C + C * i + j],
-							1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * i + j],
-							0);
+							p_RadialBasis->RB_Calc(dr * n,
+								regression_coeffs[C + 2 * k_ * C * C + C * i + j],
+								1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * i + j],
+								basis_k);
 						for (int xi = 0; xi < R; xi++)
 						{
 							factor = regression_coeffs[C + 2 * C * C * K_ + mu * (R + C) + xi]
@@ -1132,21 +1150,23 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 				coords_powers_z[k]=coords_powers_z[k-1]*NeighbVect_j[2];
 
 			}
-			for (int k_=0; k_<K_;k_++)
+			for (int eval_block = 0; eval_block < static_cast<int>(radial_eval_to_scaling_block_.size()); ++eval_block)
 			{
-			    int sigma=mu_to_sigma[k_];
-			p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
-			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
-	//		for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-		//		der_[k_*R+xi]=p_RadialBasis->rb_ders[xi] * scaling;
-
-		}
+				const int scaling_block = radial_eval_to_scaling_block_[eval_block];
+				const int basis_k = radial_eval_to_basis_k_[eval_block];
+				p_RadialBasis->RB_Calc(
+					Neighborhood.dists[j],
+					1.0 * regression_coeffs[C + 2 * scaling_block * C * C + C * type_central + type_outer],
+					1.0 * regression_coeffs[C + 2 * scaling_block * C * C + C * C + C * type_central + type_outer],
+					basis_k);
+				for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
+					val_[eval_block * R + xi] = p_RadialBasis->rb_vals[xi] * scaling;
+			}
 
 		for (int i = 0; i < alpha_index_basic_count; i++) {
 			double val = 0;
 			int mu = alpha_index_basic_.comp0[i];
-			int k_=mu_to_K[mu];
+			const int radial_base = mu_to_radial_eval_block_[mu] * R;
 			/* p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 				p_RadialBasis->rb_vals[xi] *= scaling;
@@ -1155,7 +1175,7 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 
 
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]* val_[k_*R+xi];
+				val += regression_coeffs[C+2*C*C*K_+ mu * (R+C) + xi] *regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C*K_+0 * (R+C)+ R + type_outer]* val_[radial_base + xi];
 		
 			int k = alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
 			double powk = 1.0 / dist_powers_[k];
@@ -1201,6 +1221,15 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 	int type_central = Neighborhood.my_type;
 	std::vector<double>& val_ = radial_vals_buffer_;
 	std::vector<double>& der_ = basis_radial_ders_buffer_;
+	const auto checked_eval_base = [&](int eval_block, const char* stage) -> int {
+		if (eval_block < 0 || eval_block >= static_cast<int>(radial_eval_to_scaling_block_.size()))
+			ERROR(std::string("CalcBasisFuncsDers: eval_block out of range at ") + stage);
+		const int radial_base = eval_block * R;
+		if (radial_base < 0 || radial_base + R > static_cast<int>(val_.size())
+			|| radial_base + R > static_cast<int>(der_.size()))
+			ERROR(std::string("CalcBasisFuncsDers: radial buffer out of range at ") + stage);
+		return radial_base;
+	};
 
 	if (type_central>=species_count)
 				throw MlipException("Too few species count in the MTP potential!");
@@ -1227,33 +1256,41 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 				coords_powers_z[k]=coords_powers_z[k-1]*NeighbVect_j[2];
 			}
 			
-			for (int k_=0; k_<K_;k_++)
+			for (int eval_block = 0; eval_block < static_cast<int>(radial_eval_to_scaling_block_.size()); ++eval_block)
 			{
-		    int sigma=mu_to_sigma[k_];
-			p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
-			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++){
-				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
-				der_[k_*R+xi]=p_RadialBasis->rb_ders[xi] * scaling;
+				const int radial_base = checked_eval_base(eval_block, "buffer fill");
+				const int scaling_block = radial_eval_to_scaling_block_[eval_block];
+				const int basis_k = radial_eval_to_basis_k_[eval_block];
+				p_RadialBasis->RB_Calc(
+					Neighborhood.dists[j],
+					1.0 * regression_coeffs[C + 2 * scaling_block * C * C + C * type_central + type_outer],
+					1.0 * regression_coeffs[C + 2 * scaling_block * C * C + C * C + C * type_central + type_outer],
+					basis_k);
+				for (int xi = 0; xi < p_RadialBasis->rb_size; xi++) {
+					val_[radial_base + xi] = p_RadialBasis->rb_vals[xi] * scaling;
+					der_[radial_base + xi] = p_RadialBasis->rb_ders[xi] * scaling;
+				}
 			}
-		}
-		for (int i = 0; i < alpha_index_basic_count; i++) {
+			for (int i = 0; i < alpha_index_basic_count; i++) {
 
-			double val = 0;
-			double der = 0;
-			int mu = alpha_index_basic_.comp0[i];
-			int k_ = mu_to_K[mu];
-			/* p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
-			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-				p_RadialBasis->rb_vals[xi] *= scaling;
-			for (int xi = 0; xi < p_RadialBasis->rb_size * 5; xi++)
-				p_RadialBasis->rb_ders[xi] *= scaling; */
+				double val = 0;
+				double der = 0;
+				int mu = alpha_index_basic_.comp0[i];
+				if (mu < 0 || mu >= static_cast<int>(mu_to_radial_eval_block_.size()))
+					ERROR("CalcBasisFuncsDers: mu out of range");
+				const int radial_base = checked_eval_base(mu_to_radial_eval_block_[mu], "basic accumulation");
+				/* p_RadialBasis->RB_Calc(Neighborhood.dists[j], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer]);
+				for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
+					p_RadialBasis->rb_vals[xi] *= scaling;
+				for (int xi = 0; xi < p_RadialBasis->rb_size * 5; xi++)
+					p_RadialBasis->rb_ders[xi] *= scaling; */
 
 			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
 			{
 
 				// here \phi_xi(r) is RadialBasis::vals[xi]
-				val += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * val_[k_*R+xi];
-				der += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * der_[k_*R+xi];
+					val += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * val_[radial_base + xi];
+					der += regression_coeffs[C+2*C*C* K_ + mu * (R+C) + xi] *regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_central] * regression_coeffs[C+2*C*C* K_ +0 * (R+C)+ R + type_outer] * der_[radial_base + xi];
 
 
 			}
@@ -1329,6 +1366,29 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 	}
 }
 
+bool MLMTPR::UsesJacobiIndexedBasis() const
+{
+	return IsJacobiIndexedBasisType(p_RadialBasis);
+}
+
+int MLMTPR::JacobiIndexedBlockForMu(int mu) const
+{
+	if (!UsesJacobiIndexedBasis())
+		return 0;
+	if (L < 0)
+		ERROR("RBJacobi_sss requires non-negative L");
+	// Internal L stores the number of angular channels, i.e. (L_max + 1).
+	const int block_span = L;
+	if (block_span <= 0)
+		ERROR("RBJacobi_sss requires positive Jacobi block span");
+	if (radial_func_count % block_span != 0)
+		ERROR("RBJacobi_sss requires radial_funcs_count to be divisible by internal L-channel count");
+	const int jacobi_block = mu / block_span;
+	if (jacobi_block > 5)
+		ERROR("RBJacobi_sss supports at most 6 Jacobi blocks: k=0..5");
+	return jacobi_block;
+}
+
 void MLMTPR::MemAlloc()
 {
 	int n = alpha_count - 1 + species_count;
@@ -1367,11 +1427,31 @@ void MLMTPR::MemAlloc()
 	grad_mu_contract_coord_ders_ss_.resize(radial_func_count);
 	lmp_radial_vals_buffer_.resize(radial_func_count);
 	lmp_radial_ders_buffer_.resize(radial_func_count);
-	radial_vals_buffer_.resize(K_ * p_RadialBasis->rb_size);
-	radial_ders_buffer_.resize(K_ * p_RadialBasis->rb_size * 5);
-	basis_radial_ders_buffer_.resize(K_ * p_RadialBasis->rb_size);
+	mu_to_radial_eval_block_.resize(radial_func_count);
+	radial_eval_to_scaling_block_.clear();
+	radial_eval_to_basis_k_.clear();
+	std::map<std::pair<int, int>, int> radial_eval_lookup;
+	for (int mu = 0; mu < radial_func_count; ++mu) {
+		const int scaling_block = mu_to_K[mu];
+		const int basis_k = UsesJacobiIndexedBasis()
+			? JacobiIndexedBlockForMu(mu)
+			: mu_to_sigma[scaling_block];
+		const std::pair<int, int> eval_key(scaling_block, basis_k);
+		auto insert_result = radial_eval_lookup.emplace(eval_key, static_cast<int>(radial_eval_lookup.size()));
+		const int eval_block = insert_result.first->second;
+		mu_to_radial_eval_block_[mu] = eval_block;
+		if (insert_result.second) {
+			radial_eval_to_scaling_block_.push_back(scaling_block);
+			radial_eval_to_basis_k_.push_back(basis_k);
+		}
+	}
+	const int radial_eval_block_count = static_cast<int>(radial_eval_to_scaling_block_.size());
+	radial_vals_buffer_.resize(radial_eval_block_count * p_RadialBasis->rb_size);
+	radial_ders_buffer_.resize(radial_eval_block_count * p_RadialBasis->rb_size * 5);
+	basis_radial_ders_buffer_.resize(radial_eval_block_count * p_RadialBasis->rb_size);
 	basic_total_degree_cache_.resize(alpha_index_basic_count);
-	basic_sigma_block_cache_.resize(alpha_index_basic_count);
+	basic_scaling_block_cache_.resize(alpha_index_basic_count);
+	basic_radial_eval_block_cache_.resize(alpha_index_basic_count);
 	basic_radial_offset_cache_.resize(alpha_index_basic_count);
 	const int radial_coeff_base = species_count + 2 * species_count * species_count * K_;
 	const int radial_stride = p_RadialBasis->rb_size + species_count;
@@ -1379,7 +1459,8 @@ void MLMTPR::MemAlloc()
 		const int mu = alpha_index_basic_.comp0[i];
 		basic_total_degree_cache_[i] =
 			alpha_index_basic_.comp1[i] + alpha_index_basic_.comp2[i] + alpha_index_basic_.comp3[i];
-		basic_sigma_block_cache_[i] = mu_to_K[mu];
+		basic_scaling_block_cache_[i] = mu_to_K[mu];
+		basic_radial_eval_block_cache_[i] = mu_to_radial_eval_block_[mu];
 		basic_radial_offset_cache_[i] = radial_coeff_base + mu * radial_stride;
 	}
 
@@ -1627,32 +1708,36 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 
 		}
 		else{
-		std::vector<double>& val_ = radial_vals_buffer_;
-		std::vector<double>& der_ = radial_ders_buffer_;
-		FillWithZero(val_);
-		FillWithZero(der_);
-		for (int k_=0; k_<K_;k_++)
-		{
-		    int sigma=mu_to_sigma[k_];
-			p_RadialBasis->RB_Calc(nbh.dists[j], 1.0 * regression_coeffs[C +2* k_ *C*C+ C * type_central + type_outer], 1.0 * regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],sigma);
-			for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
-				val_[k_*R+xi]=p_RadialBasis->rb_vals[xi] * scaling;
-			for (int xi = 0; xi < p_RadialBasis->rb_size * 5; xi++)
-				der_[k_*R*5+xi]=p_RadialBasis->rb_ders[xi] * scaling;
+			std::vector<double>& val_ = radial_vals_buffer_;
+			std::vector<double>& der_ = radial_ders_buffer_;
+			FillWithZero(val_);
+			FillWithZero(der_);
+			for (int eval_block = 0; eval_block < static_cast<int>(radial_eval_to_scaling_block_.size()); ++eval_block)
+			{
+				const int scaling_block = radial_eval_to_scaling_block_[eval_block];
+				const int basis_k = radial_eval_to_basis_k_[eval_block];
+				p_RadialBasis->RB_Calc(
+					nbh.dists[j],
+					1.0 * regression_coeffs[C + 2 * scaling_block * C * C + C * type_central + type_outer],
+					1.0 * regression_coeffs[C + 2 * scaling_block * C * C + C * C + C * type_central + type_outer],
+					basis_k);
+				for (int xi = 0; xi < p_RadialBasis->rb_size; xi++)
+					val_[eval_block * R + xi] = p_RadialBasis->rb_vals[xi] * scaling;
+				for (int xi = 0; xi < p_RadialBasis->rb_size * 5; xi++)
+					der_[eval_block * R * 5 + xi] = p_RadialBasis->rb_ders[xi] * scaling;
+			}
+			const int shared_type_offset = C + 2 * C * C * K_ + R;
+			const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
+			const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
+			const double type_scale = center_type_coeff * outer_type_coeff;
 
-		}
-		const int shared_type_offset = C + 2 * C * C * K_ + R;
-		const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
-		const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
-		const double type_scale = center_type_coeff * outer_type_coeff;
-
-		for (int mu = 0; mu < K; mu++) {
-			const int k_ = mu_to_K[mu];
-			const int radial_offset = C + 2 * C * C * K_ + mu * (R + C);
-			const int radial_base = k_ * R;
-			const int deriv_base = 5 * radial_base;
-			double dot_val = 0.0;
-			double dot_der = 0.0;
+			for (int mu = 0; mu < K; mu++) {
+				const int eval_block = mu_to_radial_eval_block_[mu];
+				const int radial_offset = C + 2 * C * C * K_ + mu * (R + C);
+				const int radial_base = eval_block * R;
+				const int deriv_base = 5 * radial_base;
+				double dot_val = 0.0;
+				double dot_der = 0.0;
 
 			for (int xi = 0; xi < R; xi++) {
 				const double radial_coeff = regression_coeffs[radial_offset + xi];
@@ -1880,17 +1965,18 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 			};
 
 			auto fill_neighbor_buffers = [&](int type_outer, double r, const NeighborGradCache& cache) {
-				for (int k_ = 0; k_ < K_; k_++) {
-					const int sigma = mu_to_sigma[k_];
+				for (int eval_block = 0; eval_block < static_cast<int>(radial_eval_to_scaling_block_.size()); ++eval_block) {
+					const int scaling_block = radial_eval_to_scaling_block_[eval_block];
+					const int basis_k = radial_eval_to_basis_k_[eval_block];
 					p_RadialBasis->RB_Calc(
 						r,
-						regression_coeffs[C + 2 * k_ * C * C + C * type_central + type_outer],
-						regression_coeffs[C + 2 * k_ * C * C + C * C + C * type_central + type_outer],
-						sigma);
+						regression_coeffs[C + 2 * scaling_block * C * C + C * type_central + type_outer],
+						regression_coeffs[C + 2 * scaling_block * C * C + C * C + C * type_central + type_outer],
+						basis_k);
 					for (int xi = 0; xi < R; xi++)
-						cache.radial_vals[k_ * R + xi] = p_RadialBasis->rb_vals[xi] * scaling;
+						cache.radial_vals[eval_block * R + xi] = p_RadialBasis->rb_vals[xi] * scaling;
 					for (int xi = 0; xi < R * 5; xi++)
-						cache.radial_ders[k_ * R * 5 + xi] = p_RadialBasis->rb_ders[xi] * scaling;
+						cache.radial_ders[eval_block * R * 5 + xi] = p_RadialBasis->rb_ders[xi] * scaling;
 				}
 			};
 
@@ -1908,11 +1994,11 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 				fill_neighbor_buffers(type_outer, r, cache);
 
-				for (int mu = 0; mu < K; mu++) {
-					const int k_ = mu_to_K[mu];
-					const int radial_offset = radial_coeff_base + mu * (R + C);
-					const int radial_base = k_ * R;
-				const int deriv_base = 5 * radial_base;
+					for (int mu = 0; mu < K; mu++) {
+						const int eval_block = mu_to_radial_eval_block_[mu];
+						const int radial_offset = radial_coeff_base + mu * (R + C);
+						const int radial_base = eval_block * R;
+						const int deriv_base = 5 * radial_base;
 				double dot_val = 0.0;
 				double dot_der = 0.0;
 				double dot_der_s = 0.0;
@@ -2086,7 +2172,8 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 					for (int i = 0; i < alpha_index_basic_count; i++) {
 						const int mu = alpha_index_basic_.comp0[i];
-						const int sigma_block = basic_sigma_block_cache_[i];
+						const int scaling_block = basic_scaling_block_cache_[i];
+						const int radial_eval_block = basic_radial_eval_block_cache_[i];
 						const int k = basic_total_degree_cache_[i];
 						const int radial_offset = basic_radial_offset_cache_[i];
 						const double powk = 1.0 / cache.dist_powers[k];
@@ -2095,7 +2182,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						const double pow2 = cache.coords_powers_z[alpha_index_basic_.comp3[i]];
 						const double mult0 = pow0 * pow1 * pow2;
 						const double dloss_weight = site_linear_coeff * dloss_dmom[i];
-						const int radial_base = sigma_block * R;
+						const int radial_base = radial_eval_block * R;
 						const double mu_dot_val = cache.mu_contract_vals[mu];
 						const double mu_dot_der = cache.mu_contract_ders[mu];
 						const double mu_dot_der_s = cache.mu_contract_ders_s[mu];
@@ -2137,7 +2224,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						buff_site_energy_ders_[j][1] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_y;
 						buff_site_energy_ders_[j][2] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_z;
 
-						const int sigma_coeff_offset = C + 2 * C * C * sigma_block + type_central * C + type_outer;
+						const int sigma_coeff_offset = C + 2 * C * C * scaling_block + type_central * C + type_outer;
 						grad_out[shared_type_offset + type_central] += dloss_weight * center_grad;
 						grad_out[shared_type_offset + type_outer] += dloss_weight * outer_grad;
 						grad_out[sigma_coeff_offset] += dloss_weight * sigma_grad;
@@ -2174,7 +2261,8 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 					for (int i = 0; i < alpha_index_basic_count; i++) {
 						const int mu = alpha_index_basic_.comp0[i];
-						const int sigma_block = basic_sigma_block_cache_[i];
+						const int scaling_block = basic_scaling_block_cache_[i];
+						const int radial_eval_block = basic_radial_eval_block_cache_[i];
 						const int k = basic_total_degree_cache_[i];
 						const int radial_offset = basic_radial_offset_cache_[i];
 						const double powk = 1.0 / cache.dist_powers[k];
@@ -2184,7 +2272,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						const double mult0 = pow0 * pow1 * pow2;
 						const double dloss_weight = site_linear_coeff * dloss_dmom[i];
 						const double coord_weight = site_linear_coeff * site_energy_ders_wrt_moments_[i];
-						const int radial_base = sigma_block * R;
+						const int radial_base = radial_eval_block * R;
 						const int deriv_base = 5 * radial_base;
 						const double mu_dot_val = cache.mu_contract_vals[mu];
 						const double mu_dot_der = cache.mu_contract_ders[mu];
@@ -2336,7 +2424,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 							+ se_weight_vec[1] * dery_ss
 							+ se_weight_vec[2] * derz_ss;
 
-						const int sigma_coeff_offset = C + 2 * C * C * sigma_block + type_central * C + type_outer;
+						const int sigma_coeff_offset = C + 2 * C * C * scaling_block + type_central * C + type_outer;
 						grad_out[shared_type_offset + type_central] += dloss_weight * center_grad + coord_weight * outer_type_coeff * coord_grad;
 						grad_out[shared_type_offset + type_outer] += dloss_weight * outer_grad + coord_weight * center_type_coeff * coord_grad;
 						grad_out[sigma_coeff_offset] += dloss_weight * sigma_grad + coord_weight * type_scale * coord_grad_s;

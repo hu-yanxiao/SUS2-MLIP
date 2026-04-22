@@ -93,6 +93,149 @@ AnyRadialBasis::AnyRadialBasis(std::ifstream & ifs)
 namespace {
 
 constexpr double kLaguerreMinRho = 1.0e-8;
+constexpr double kJacobiEndpointEps = 1.0e-12;
+constexpr int kJacobiMaxIndexedBlock = 5;
+
+std::pair<int, int> JacobiAlphaBetaForBlock(int k)
+{
+	static const int kAlphaBetaTable[kJacobiMaxIndexedBlock + 1][2] = {
+		{0, 0},
+		{1, 0},
+		{1, 1},
+		{2, 0},
+		{2, 1},
+		{2, 2},
+	};
+
+	if (k < 0 || k > kJacobiMaxIndexedBlock) {
+		ERROR("RBJacobi_sss supports only six indexed blocks: "
+		      "k=0..5 -> (0,0),(1,0),(1,1),(2,0),(2,1),(2,2)");
+	}
+	return std::make_pair(kAlphaBetaTable[k][0], kAlphaBetaTable[k][1]);
+}
+
+void JacobiSSSCalc(AnyRadialBasis& basis,
+			   double r,
+			   double scal,
+			   double s,
+			   int k,
+			   bool include_param_derivatives)
+{
+#ifdef MLIP_DEBUG
+	if (r < basis.min_dist) {
+		Warning("RadialBasis: r<min_dist. r = " + to_string(r) +
+			", min_dist = " + to_string(basis.min_dist) + '\n');
+	}
+	if (r > basis.max_dist) {
+		ERROR("RadialBasis: r>MaxDist !!!. r = " + to_string(r) +
+			", min_dist = " + to_string(basis.min_dist) + '\n');
+	}
+#endif
+
+	const std::pair<int, int> alpha_beta = JacobiAlphaBetaForBlock(k);
+	const double alpha = static_cast<double>(alpha_beta.first);
+	const double beta = static_cast<double>(alpha_beta.second);
+
+	const double z = 0.5 * scal * (r - s);
+	double x = tanh(z);
+	x = std::max(-1.0 + kJacobiEndpointEps, std::min(1.0 - kJacobiEndpointEps, x));
+
+	const double sech_sq = 1.0 - x * x;
+	const double dsech_sq_dz = -2.0 * x * sech_sq;
+	const double x_r = 0.5 * scal * sech_sq;
+	const double x_scal = 0.5 * (r - s) * sech_sq;
+	const double x_s = -x_r;
+	const double x_scal_r = 0.5 * sech_sq + 0.25 * scal * (r - s) * dsech_sq_dz;
+	const double x_s_r = -0.25 * scal * scal * dsech_sq_dz;
+
+	const double one_minus_x = std::max(kJacobiEndpointEps, 1.0 - x);
+	const double one_plus_x = std::max(kJacobiEndpointEps, 1.0 + x);
+
+	double sqrt_weight = 1.0;
+	if (alpha != 0.0)
+		sqrt_weight *= pow(one_minus_x, 0.5 * alpha);
+	if (beta != 0.0)
+		sqrt_weight *= pow(one_plus_x, 0.5 * beta);
+
+	const double log_weight_x = -0.5 * alpha / one_minus_x + 0.5 * beta / one_plus_x;
+	const double log_weight_xx =
+		-0.5 * alpha / (one_minus_x * one_minus_x)
+		-0.5 * beta / (one_plus_x * one_plus_x);
+
+	double y_prev = 0.0;
+	double y_prev_x = 0.0;
+	double y_prev_xx = 0.0;
+
+	double y_curr = sqrt_weight;
+	double y_curr_x = sqrt_weight * log_weight_x;
+	double y_curr_xx = sqrt_weight * (log_weight_x * log_weight_x + log_weight_xx);
+
+	const double dr = r - basis.max_dist;
+	const double cutoff_f = dr * dr;
+	const double cutoff_der = 2.0 * dr;
+
+	auto store_basis = [&](int index, double y, double y_x, double y_xx) {
+		const double prefactor = basis.scaling * cutoff_f;
+		basis.rb_vals[index] = prefactor * y;
+		basis.rb_ders[index] = basis.scaling * (cutoff_der * y + cutoff_f * y_x * x_r);
+		if (!include_param_derivatives)
+			return;
+
+		basis.rb_ders[index + basis.rb_size] = prefactor * y_x * x_scal;
+		basis.rb_ders[index + 2 * basis.rb_size] = basis.scaling *
+			(cutoff_der * y_x * x_scal
+			 + cutoff_f * (y_xx * x_r * x_scal + y_x * x_scal_r));
+		basis.rb_ders[index + 3 * basis.rb_size] = prefactor * y_x * x_s;
+		basis.rb_ders[index + 4 * basis.rb_size] = basis.scaling *
+			(cutoff_der * y_x * x_s
+			 + cutoff_f * (y_xx * x_r * x_s + y_x * x_s_r));
+	};
+
+	store_basis(0, y_curr, y_curr_x, y_curr_xx);
+	if (basis.rb_size == 1)
+		return;
+
+	const double linear = 0.5 * ((alpha - beta) + (alpha + beta + 2.0) * x);
+	const double linear_x = 0.5 * (alpha + beta + 2.0);
+
+	double y_next = linear * y_curr;
+	double y_next_x = linear_x * y_curr + linear * y_curr_x;
+	double y_next_xx = 2.0 * linear_x * y_curr_x + linear * y_curr_xx;
+
+	store_basis(1, y_next, y_next_x, y_next_xx);
+
+	y_prev = y_curr;
+	y_prev_x = y_curr_x;
+	y_prev_xx = y_curr_xx;
+	y_curr = y_next;
+	y_curr_x = y_next_x;
+	y_curr_xx = y_next_xx;
+
+	for (int order = 2; order < basis.rb_size; ++order) {
+		const double n = static_cast<double>(order);
+		const double denom = 2.0 * n * (n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
+		const double b = 2.0 * n + alpha + beta - 1.0;
+		const double c = (2.0 * n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
+		const double d = alpha * alpha - beta * beta;
+		const double e = 2.0 * (n + alpha - 1.0) * (n + beta - 1.0) * (2.0 * n + alpha + beta);
+		const double coeff = b * (c * x + d) / denom;
+		const double coeff_x = b * c / denom;
+		const double prev_coeff = e / denom;
+
+		y_next = coeff * y_curr - prev_coeff * y_prev;
+		y_next_x = coeff_x * y_curr + coeff * y_curr_x - prev_coeff * y_prev_x;
+		y_next_xx = 2.0 * coeff_x * y_curr_x + coeff * y_curr_xx - prev_coeff * y_prev_xx;
+
+		store_basis(order, y_next, y_next_x, y_next_xx);
+
+		y_prev = y_curr;
+		y_prev_x = y_curr_x;
+		y_prev_xx = y_curr_xx;
+		y_curr = y_next;
+		y_curr_x = y_next_x;
+		y_curr_xx = y_next_xx;
+	}
+}
 
 void LaguerreLog1pCalc(AnyRadialBasis& basis,
 			    double r,
@@ -1475,6 +1618,16 @@ void RadialBasis_Laguerre_log1p_noenv::RB_Calc(double r, double scal, double s, 
 void RadialBasis_Laguerre_log1p_noenv_lmp::RB_Calc(double r, double scal, double s, int k)
 {
 	LaguerreLog1pCalc(*this, r, scal, s, false, false);
+}
+
+void RadialBasis_Jacobi_sss::RB_Calc(double r, double scal, double s, int k)
+{
+	JacobiSSSCalc(*this, r, scal, s, k, true);
+}
+
+void RadialBasis_Jacobi_sss_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+	JacobiSSSCalc(*this, r, scal, s, k, false);
 }
 
 
