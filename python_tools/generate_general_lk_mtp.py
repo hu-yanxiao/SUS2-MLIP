@@ -27,8 +27,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import DefaultDict, Dict, List, Optional, Tuple
 
-import generate_lk_from_template as lktemplate
-
 AxisCounts = Tuple[int, int, int]
 LeafKey = Tuple[int, int]  # (mu, rank)
 FINGERPRINT_MODULUS = 2147483647
@@ -843,6 +841,12 @@ class Generator:
             rank: dict(items)
             for rank, items in self._same_rank_degree2_scalar_signature_map_cache.items()
         }
+
+    def same_rank_degree2_scalar_signatures(self):
+        signatures = set()
+        for items in self.same_rank_degree2_scalar_signature_map().values():
+            signatures.update(items.values())
+        return signatures
 
     def degree2_block_signatures(self):
         if self._degree2_block_signatures_cache is not None:
@@ -2692,6 +2696,40 @@ class Generator:
             overrides[cache_key] = best_candidate
         return overrides
 
+    def scalar_gram_staged_overrides(self, preemitted_signatures):
+        overrides = {}
+        if not preemitted_signatures:
+            return overrides
+
+        for state in self.selected_scalar_states():
+            cache_key = (state.signature, 0)
+            chosen = self.compact_projection_choice(*cache_key)
+            if chosen is None:
+                continue
+
+            best_candidate = chosen
+            best_key = self.edge_first_cost_key(
+                *self.projection_candidate_total_cost(chosen, 0)
+            )
+
+            for candidate in self.projection_candidates(*cache_key):
+                if candidate == chosen:
+                    continue
+                candidate_key = self.edge_first_cost_key(
+                    *self.staged_projection_candidate_total_cost(
+                        candidate,
+                        0,
+                        preemitted_signatures,
+                    )
+                )
+                if candidate_key < best_key:
+                    best_candidate = candidate
+                    best_key = candidate_key
+
+            if best_candidate != chosen:
+                overrides[cache_key] = best_candidate
+        return overrides
+
     def staged_family_partition_basis(self, overrides, preemitted_signatures):
         emitted_basic = list(self.alpha_index_basic)
         emitted_times = []
@@ -3047,6 +3085,19 @@ class Generator:
         legacy_basis = topologically_renumber(*legacy_basis)
         candidate_bases.append(legacy_basis)
 
+        gram_scalar_signatures = self.same_rank_degree2_scalar_signatures()
+        gram_overrides = self.scalar_gram_staged_overrides(gram_scalar_signatures)
+        gram_basis = self.staged_family_partition_basis(
+            gram_overrides,
+            gram_scalar_signatures,
+        )
+        gram_basis = self.dedup_emitted_basis_fixed_point(
+            *topologically_renumber(*gram_basis)
+        )
+        gram_basis = self.dedup_k_relabel_scalar_outputs(*gram_basis)
+        gram_basis = topologically_renumber(*gram_basis)
+        candidate_bases.append(gram_basis)
+
         preemitted_signatures = self.degree2_block_signatures()
         preemitted_signatures.update(self.degree3_block_lift_signatures())
         preemitted_signatures.update(self.exact_scalar_block_lift_signatures())
@@ -3205,6 +3256,16 @@ class Generator:
         baseline_basic, baseline_times, baseline_mapping, baseline_node_count = self.basis_for_mode(
             "legacy-dedup"
         )
+        try:
+            import generate_lk_from_template as lktemplate
+        except ModuleNotFoundError:
+            self._family_basis_cache = (
+                list(baseline_basic),
+                list(baseline_times),
+                list(baseline_mapping),
+                baseline_node_count,
+            )
+            return self._family_basis_cache
         raw_template = {
             "potential_name": self.args.potential_name
             or f"sus2mlip_l{self.args.l}k{self.args.k}",
