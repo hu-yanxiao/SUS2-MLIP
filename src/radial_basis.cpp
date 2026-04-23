@@ -9,6 +9,7 @@
 #include "radial_basis.h"
 
 
+#include <array>
 #include <cmath>
 
 using namespace std;
@@ -96,22 +97,118 @@ constexpr double kLaguerreMinRho = 1.0e-8;
 constexpr double kJacobiEndpointEps = 1.0e-12;
 constexpr int kJacobiMaxIndexedBlock = 5;
 
-std::pair<int, int> JacobiAlphaBetaForBlock(int k)
+struct JacobiBlockSpec {
+	int alpha;
+	int beta;
+	double linear_const;
+	double linear_x;
+};
+
+struct JacobiRecurrenceCache {
+	std::vector<double> coeff_const;
+	std::vector<double> coeff_x;
+	std::vector<double> prev_coeff;
+};
+
+const JacobiBlockSpec& JacobiBlockSpecForIndex(int k)
 {
-	static const int kAlphaBetaTable[kJacobiMaxIndexedBlock + 1][2] = {
-		{0, 0},
-		{1, 0},
-		{1, 1},
-		{2, 0},
-		{2, 1},
-		{2, 2},
-	};
+	static const std::array<JacobiBlockSpec, kJacobiMaxIndexedBlock + 1> kSpecTable = {{
+		{0, 0,  0.0, 1.0},
+		{1, 0,  0.5, 1.5},
+		{1, 1,  0.0, 2.0},
+		{2, 0,  1.0, 2.0},
+		{2, 1,  0.5, 2.5},
+		{2, 2,  0.0, 3.0},
+	}};
 
 	if (k < 0 || k > kJacobiMaxIndexedBlock) {
 		ERROR("RBJacobi indexed basis supports only six indexed blocks: "
 		      "k=0..5 -> (0,0),(1,0),(1,1),(2,0),(2,1),(2,2)");
 	}
-	return std::make_pair(kAlphaBetaTable[k][0], kAlphaBetaTable[k][1]);
+	return kSpecTable[static_cast<size_t>(k)];
+}
+
+const JacobiRecurrenceCache& JacobiRecurrenceCacheForBlock(int k, int rb_size)
+{
+	static thread_local std::array<JacobiRecurrenceCache, kJacobiMaxIndexedBlock + 1> kCaches;
+	JacobiRecurrenceCache& cache = kCaches[static_cast<size_t>(k)];
+	const size_t required_size = static_cast<size_t>(std::max(0, rb_size));
+	if (cache.coeff_const.size() >= required_size)
+		return cache;
+
+	const size_t old_size = cache.coeff_const.size();
+	cache.coeff_const.resize(required_size, 0.0);
+	cache.coeff_x.resize(required_size, 0.0);
+	cache.prev_coeff.resize(required_size, 0.0);
+
+	const JacobiBlockSpec& spec = JacobiBlockSpecForIndex(k);
+	const double alpha = static_cast<double>(spec.alpha);
+	const double beta = static_cast<double>(spec.beta);
+	const size_t start_order = std::max<size_t>(2, old_size);
+	for (size_t order = start_order; order < required_size; ++order) {
+		const double n = static_cast<double>(order);
+		const double denom = 2.0 * n * (n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
+		const double b = 2.0 * n + alpha + beta - 1.0;
+		const double c = (2.0 * n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
+		const double d = alpha * alpha - beta * beta;
+		const double e = 2.0 * (n + alpha - 1.0) * (n + beta - 1.0) * (2.0 * n + alpha + beta);
+
+		cache.coeff_const[order] = b * d / denom;
+		cache.coeff_x[order] = b * c / denom;
+		cache.prev_coeff[order] = e / denom;
+	}
+
+	return cache;
+}
+
+void JacobiWeightTerms(const JacobiBlockSpec& spec,
+			      double x,
+			      bool apply_sqrt_weight,
+			      double& sqrt_weight,
+			      double& log_weight_x,
+			      double& log_weight_xx)
+{
+	sqrt_weight = 1.0;
+	log_weight_x = 0.0;
+	log_weight_xx = 0.0;
+	if (!apply_sqrt_weight)
+		return;
+
+	const double one_minus_x = std::max(kJacobiEndpointEps, 1.0 - x);
+	const double one_plus_x = std::max(kJacobiEndpointEps, 1.0 + x);
+
+	switch (spec.alpha) {
+	case 1:
+		sqrt_weight *= std::sqrt(one_minus_x);
+		break;
+	case 2:
+		sqrt_weight *= one_minus_x;
+		break;
+	default:
+		break;
+	}
+
+	switch (spec.beta) {
+	case 1:
+		sqrt_weight *= std::sqrt(one_plus_x);
+		break;
+	case 2:
+		sqrt_weight *= one_plus_x;
+		break;
+	default:
+		break;
+	}
+
+	if (spec.alpha != 0) {
+		const double inv_one_minus_x = 1.0 / one_minus_x;
+		log_weight_x -= 0.5 * static_cast<double>(spec.alpha) * inv_one_minus_x;
+		log_weight_xx -= 0.5 * static_cast<double>(spec.alpha) * inv_one_minus_x * inv_one_minus_x;
+	}
+	if (spec.beta != 0) {
+		const double inv_one_plus_x = 1.0 / one_plus_x;
+		log_weight_x += 0.5 * static_cast<double>(spec.beta) * inv_one_plus_x;
+		log_weight_xx -= 0.5 * static_cast<double>(spec.beta) * inv_one_plus_x * inv_one_plus_x;
+	}
 }
 
 void JacobiSSSCalc(AnyRadialBasis& basis,
@@ -133,9 +230,8 @@ void JacobiSSSCalc(AnyRadialBasis& basis,
 	}
 #endif
 
-	const std::pair<int, int> alpha_beta = JacobiAlphaBetaForBlock(k);
-	const double alpha = static_cast<double>(alpha_beta.first);
-	const double beta = static_cast<double>(alpha_beta.second);
+	const JacobiBlockSpec& spec = JacobiBlockSpecForIndex(k);
+	const JacobiRecurrenceCache& recurrence_cache = JacobiRecurrenceCacheForBlock(k, basis.rb_size);
 
 	const double z = 0.5 * scal * (r - s);
 	double x = tanh(z);
@@ -152,20 +248,7 @@ void JacobiSSSCalc(AnyRadialBasis& basis,
 	double sqrt_weight = 1.0;
 	double log_weight_x = 0.0;
 	double log_weight_xx = 0.0;
-	if (apply_sqrt_weight) {
-		const double one_minus_x = std::max(kJacobiEndpointEps, 1.0 - x);
-		const double one_plus_x = std::max(kJacobiEndpointEps, 1.0 + x);
-
-		if (alpha != 0.0)
-			sqrt_weight *= pow(one_minus_x, 0.5 * alpha);
-		if (beta != 0.0)
-			sqrt_weight *= pow(one_plus_x, 0.5 * beta);
-
-		log_weight_x = -0.5 * alpha / one_minus_x + 0.5 * beta / one_plus_x;
-		log_weight_xx =
-			-0.5 * alpha / (one_minus_x * one_minus_x)
-			-0.5 * beta / (one_plus_x * one_plus_x);
-	}
+	JacobiWeightTerms(spec, x, apply_sqrt_weight, sqrt_weight, log_weight_x, log_weight_xx);
 
 	double y_prev = 0.0;
 	double y_prev_x = 0.0;
@@ -178,30 +261,31 @@ void JacobiSSSCalc(AnyRadialBasis& basis,
 	const double dr = r - basis.max_dist;
 	const double cutoff_f = dr * dr;
 	const double cutoff_der = 2.0 * dr;
+	const double scaled_cutoff_f = basis.scaling * cutoff_f;
+	const double scaled_cutoff_der = basis.scaling * cutoff_der;
 
 	auto store_basis = [&](int index, double y, double y_x, double y_xx) {
-		const double prefactor = basis.scaling * cutoff_f;
-		basis.rb_vals[index] = prefactor * y;
-		basis.rb_ders[index] = basis.scaling * (cutoff_der * y + cutoff_f * y_x * x_r);
+		basis.rb_vals[index] = scaled_cutoff_f * y;
+		basis.rb_ders[index] = scaled_cutoff_der * y + scaled_cutoff_f * y_x * x_r;
 		if (!include_param_derivatives)
 			return;
 
-		basis.rb_ders[index + basis.rb_size] = prefactor * y_x * x_scal;
-		basis.rb_ders[index + 2 * basis.rb_size] = basis.scaling *
-			(cutoff_der * y_x * x_scal
-			 + cutoff_f * (y_xx * x_r * x_scal + y_x * x_scal_r));
-		basis.rb_ders[index + 3 * basis.rb_size] = prefactor * y_x * x_s;
-		basis.rb_ders[index + 4 * basis.rb_size] = basis.scaling *
-			(cutoff_der * y_x * x_s
-			 + cutoff_f * (y_xx * x_r * x_s + y_x * x_s_r));
+		basis.rb_ders[index + basis.rb_size] = scaled_cutoff_f * y_x * x_scal;
+		basis.rb_ders[index + 2 * basis.rb_size] =
+			scaled_cutoff_der * y_x * x_scal
+			+ scaled_cutoff_f * (y_xx * x_r * x_scal + y_x * x_scal_r);
+		basis.rb_ders[index + 3 * basis.rb_size] = scaled_cutoff_f * y_x * x_s;
+		basis.rb_ders[index + 4 * basis.rb_size] =
+			scaled_cutoff_der * y_x * x_s
+			+ scaled_cutoff_f * (y_xx * x_r * x_s + y_x * x_s_r);
 	};
 
 	store_basis(0, y_curr, y_curr_x, y_curr_xx);
 	if (basis.rb_size == 1)
 		return;
 
-	const double linear = 0.5 * ((alpha - beta) + (alpha + beta + 2.0) * x);
-	const double linear_x = 0.5 * (alpha + beta + 2.0);
+	const double linear = spec.linear_const + spec.linear_x * x;
+	const double linear_x = spec.linear_x;
 
 	double y_next = linear * y_curr;
 	double y_next_x = linear_x * y_curr + linear * y_curr_x;
@@ -217,15 +301,9 @@ void JacobiSSSCalc(AnyRadialBasis& basis,
 	y_curr_xx = y_next_xx;
 
 	for (int order = 2; order < basis.rb_size; ++order) {
-		const double n = static_cast<double>(order);
-		const double denom = 2.0 * n * (n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
-		const double b = 2.0 * n + alpha + beta - 1.0;
-		const double c = (2.0 * n + alpha + beta) * (2.0 * n + alpha + beta - 2.0);
-		const double d = alpha * alpha - beta * beta;
-		const double e = 2.0 * (n + alpha - 1.0) * (n + beta - 1.0) * (2.0 * n + alpha + beta);
-		const double coeff = b * (c * x + d) / denom;
-		const double coeff_x = b * c / denom;
-		const double prev_coeff = e / denom;
+		const double coeff = recurrence_cache.coeff_const[order] + recurrence_cache.coeff_x[order] * x;
+		const double coeff_x = recurrence_cache.coeff_x[order];
+		const double prev_coeff = recurrence_cache.prev_coeff[order];
 
 		y_next = coeff * y_curr - prev_coeff * y_prev;
 		y_next_x = coeff_x * y_curr + coeff * y_curr_x - prev_coeff * y_prev_x;
