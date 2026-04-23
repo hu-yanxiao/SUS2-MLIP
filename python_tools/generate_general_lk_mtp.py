@@ -240,6 +240,7 @@ class Generator:
         self._product_candidate_cache = {}
         self._projection_dependency_cache = {}
         self._projection_dependency_weight_cache = {}
+        self._projection_dependency_summary_cache = {}
         self._selected_scalar_states_cache = None
         self._reachable_level_cap_cache = {}
 
@@ -665,42 +666,85 @@ class Generator:
             self._selected_scalar_states_cache = tuple(states)
             return list(self._selected_scalar_states_cache)
 
-        basic_tokens = self.basic_tokens(self.alpha_index_basic)
         passthrough_states = []
         grouped_states = defaultdict(list)
         for state in states:
             if state.degree < self.args.strong_k_family_from_degree:
                 passthrough_states.append(state)
                 continue
-            canonical_poly, labels = self.canonicalize_emitted_polynomial(
-                self.scalar_polynomial(state),
-                basic_tokens,
-            )
-            grouped_states[(state.degree, canonical_poly, len(labels))].append(state)
+            family_key, canonical_to_actual = self.scalar_k_relabel_family_info(state)
+            grouped_states[family_key].append((state, canonical_to_actual))
 
         selected_states = list(passthrough_states)
         used_dependencies = set()
         ordered_groups = sorted(
             grouped_states.values(),
-            key=lambda group: min(state.components[0] for state in group),
+            key=lambda group: min(state.components[0] for state, _canonical_to_actual in group),
         )
         for group in ordered_groups:
+            if len(group) == 1:
+                best_state = group[0][0]
+                selected_states.append(best_state)
+                used_dependencies.update(
+                    self.projection_dependency_keys(best_state.signature, 0)
+                )
+                continue
+
+            anchor_state, anchor_canonical_to_actual = min(
+                group,
+                key=lambda item: item[0].components[0],
+            )
+            anchor_dep_keys, anchor_dep_items, anchor_total = self.projection_dependency_summary(
+                anchor_state.signature,
+                0,
+            )
+            anchor_actual_to_canonical = {
+                actual_channel: canonical_channel
+                for canonical_channel, actual_channel in enumerate(anchor_canonical_to_actual)
+            }
+
             best_state = None
             best_score = None
-            for state in sorted(group, key=lambda item: item.components[0]):
-                deps = self.projection_dependency_weights(state.signature, 0)
+            best_dep_keys = None
+            for state, state_canonical_to_actual in sorted(
+                group,
+                key=lambda item: item[0].components[0],
+            ):
+                if state.signature == anchor_state.signature:
+                    dep_keys = anchor_dep_keys
+                    dep_items = anchor_dep_items
+                    total = anchor_total
+                else:
+                    channel_remap = {
+                        actual_channel: state_canonical_to_actual[
+                            anchor_actual_to_canonical[actual_channel]
+                        ]
+                        for actual_channel in anchor_actual_to_canonical
+                    }
+                    dep_keys = tuple(
+                        self.relabel_projection_key(dep_key, channel_remap)
+                        for dep_key in anchor_dep_keys
+                    )
+                    dep_items = tuple(
+                        (
+                            self.relabel_projection_key(dep_key, channel_remap),
+                            weight,
+                        )
+                        for dep_key, weight in anchor_dep_items
+                    )
+                    total = anchor_total
+
                 marginal = sum(
-                    weight for key, weight in deps.items() if key not in used_dependencies
+                    weight for dep_key, weight in dep_items if dep_key not in used_dependencies
                 )
-                total = sum(deps.values())
                 score = (marginal, total, state.components[0])
                 if best_score is None or score < best_score:
                     best_score = score
                     best_state = state
+                    best_dep_keys = dep_keys
+
             selected_states.append(best_state)
-            used_dependencies.update(
-                self.projection_dependency_weights(best_state.signature, 0)
-            )
+            used_dependencies.update(best_dep_keys)
 
         selected_states.sort(key=lambda state: state.components[0])
         self._selected_scalar_states_cache = tuple(selected_states)
@@ -2149,15 +2193,81 @@ class Generator:
         raise RuntimeError(f"unknown candidate kind {candidate['kind']}")
 
     def projection_dependency_weights(self, signature, component_index):
-        cache_key = (signature, component_index)
-        if cache_key in self._projection_dependency_weight_cache:
-            return dict(self._projection_dependency_weight_cache[cache_key])
+        dep_keys, dep_items, _total = self.projection_dependency_summary(
+            signature,
+            component_index,
+        )
+        return dict(dep_items)
 
-        deps = {}
-        for dep_key in self.projection_dependency_keys(signature, component_index):
-            deps[dep_key] = self.compact_projection_local_weight(*dep_key)
-        self._projection_dependency_weight_cache[cache_key] = dict(deps)
-        return dict(deps)
+    def projection_dependency_summary(self, signature, component_index):
+        cache_key = (signature, component_index)
+        if cache_key in self._projection_dependency_summary_cache:
+            return self._projection_dependency_summary_cache[cache_key]
+
+        dep_keys = tuple(self.projection_dependency_keys(signature, component_index))
+        dep_items = tuple(
+            (dep_key, self.compact_projection_local_weight(*dep_key))
+            for dep_key in dep_keys
+        )
+        total = sum(weight for _dep_key, weight in dep_items)
+        summary = (dep_keys, dep_items, total)
+        self._projection_dependency_summary_cache[cache_key] = summary
+        self._projection_dependency_weight_cache[cache_key] = dict(dep_items)
+        return summary
+
+    def scalar_k_relabel_family_info(self, state):
+        channel_map = {}
+        canonical_to_actual = []
+        next_channel = 0
+        canonical_leaves = []
+        for mu, rank in state.leaves:
+            actual_channel = mu // (self.args.l + 1)
+            if actual_channel not in channel_map:
+                channel_map[actual_channel] = next_channel
+                canonical_to_actual.append(actual_channel)
+                next_channel += 1
+            canonical_leaves.append((channel_map[actual_channel], rank))
+        family_key = (
+            state.degree,
+            tuple(canonical_leaves),
+            state.open_counts,
+            flatten_edges(state.edges),
+        )
+        return family_key, tuple(canonical_to_actual)
+
+    def relabel_projection_key(self, projection_key, channel_remap):
+        signature, component_index = projection_key
+        leaves, open_counts, _flat_edges = signature
+        edges = self.signature_edges(signature)
+        relabeled_leaves = []
+        for mu, rank in leaves:
+            actual_channel = mu // (self.args.l + 1)
+            new_channel = channel_remap.get(actual_channel, actual_channel)
+            relabeled_leaves.append(((self.args.l + 1) * new_channel + rank, rank))
+
+        (
+            canonical_leaves,
+            canonical_open_counts,
+            canonical_edges,
+            canonical_order,
+        ) = self.canonicalize_structure(
+            tuple(relabeled_leaves),
+            open_counts,
+            edges,
+        )
+        old_layout = block_layout(open_counts)
+        old_index_tuple = old_layout.index_tuples[component_index]
+        new_index_tuple = tuple(old_index_tuple[idx] for idx in canonical_order)
+        new_layout = block_layout(canonical_open_counts)
+        new_component_index = new_layout.flatten(new_index_tuple)
+        return (
+            (
+                canonical_leaves,
+                canonical_open_counts,
+                flatten_edges(canonical_edges),
+            ),
+            new_component_index,
+        )
 
     @staticmethod
     def normalized_linear_combo_key(terms):
