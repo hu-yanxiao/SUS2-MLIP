@@ -20,8 +20,52 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
+#include <sstream>
 
 using namespace std;
+
+namespace {
+
+std::vector<int> ParseSpeciesIndexList(const std::string& value)
+{
+	std::vector<int> indices;
+	std::stringstream stream(value);
+	std::string token;
+	while (std::getline(stream, token, ',')) {
+		token.erase(std::remove_if(token.begin(), token.end(),
+			[](unsigned char ch) { return std::isspace(ch) != 0; }),
+			token.end());
+		if (token.empty())
+			ERROR("--species should be a comma-separated list of integer species indices.");
+		std::size_t parsed_chars = 0;
+		int index = 0;
+		try {
+			index = std::stoi(token, &parsed_chars);
+		} catch (const std::exception&) {
+			ERROR("--species should be a comma-separated list of integer species indices.");
+		}
+		if (parsed_chars != token.size())
+			ERROR("--species should be a comma-separated list of integer species indices.");
+		indices.push_back(index);
+	}
+	if (indices.empty())
+		ERROR("--species should contain at least one species index.");
+	return indices;
+}
+
+std::string FormatSpeciesMapping(const std::vector<int>& old_species_indices)
+{
+	std::ostringstream oss;
+	for (int i = 0; i < static_cast<int>(old_species_indices.size()); ++i) {
+		if (i != 0)
+			oss << ", ";
+		oss << old_species_indices[i] << "->" << i;
+	}
+	return oss.str();
+}
+
+}
 
 // does a number of developer unit tests
 // returns true if all tests are successful
@@ -78,6 +122,40 @@ bool DevCommands(const std::string& command, std::vector<std::string>& args, std
 		"mlp-sus2 self-test-dev\n"
 	) {
 		if(!self_test_dev()) exit(1);
+	} END_COMMAND;
+
+	BEGIN_COMMAND("prune-model",
+		"writes a species-pruned SUS2 model",
+		"mlp-sus2 prune-model input.mtp output.mtp --species=2,4,6\n"
+		"  Keeps the selected old species, preserves shared parameters, and remaps\n"
+		"  them in the output model as 0,1,2,... in the order provided.\n"
+	) {
+		if (args.size() != 2) {
+			std::cout << "mlp-sus2 prune-model: 2 arguments are required\n";
+			return 1;
+		}
+		if (opts["species"] == "") {
+			std::cout << "mlp-sus2 prune-model: --species=<comma-separated indices> is required\n";
+			return 1;
+		}
+
+		const std::vector<int> old_species_indices = ParseSpeciesIndexList(opts["species"]);
+		if (mpi_rank == 0) {
+			MLMTPR mtpr(args[0]);
+			if (!mtpr.HasCompleteParameters())
+				ERROR("prune-model requires a complete trained model with shift/scal/radial/linear coefficients.");
+			const int old_species_count = mtpr.species_count;
+			mtpr.PruneSpecies(old_species_indices);
+			mtpr.Save(args[1]);
+			std::cout << "Pruned model written to " << args[1]
+			          << " species_count " << old_species_count
+			          << " -> " << mtpr.species_count
+			          << " mapping: " << FormatSpeciesMapping(old_species_indices)
+			          << std::endl;
+		}
+#ifdef MLIP_MPI
+		MPI_Barrier(MPI_COMM_WORLD);
+#endif
 	} END_COMMAND;
 
 	BEGIN_COMMAND("select-add",

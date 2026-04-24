@@ -523,6 +523,8 @@ bool Commands(const string& command, vector<string>& args, map<string, string>& 
 		"                           Default=1000\n"
 		"    --do-lin-freq=<int>: run TrainLinear every <int> accepted BFGS steps while\n"
 		"                         do-lin is active. Default=50\n"
+		"    --fine-tune: require a complete trained model, freeze scal_coeffs, and\n"
+		"                 run one initial rescale+linear solve before BFGS.\n"
 		"    --do-samp: disable random sampling used in pre-training.\n"
 		"    --scal-range=<a,b>: override the pair-strength interpolation bounds used for\n"
 		"                        the first nonlinear scaling parameter. The first value is\n"

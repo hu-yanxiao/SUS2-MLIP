@@ -117,6 +117,15 @@ int MLMTPR::ScalingCoeffCount() const
 	return 2 * species_count * species_count * K_;
 }
 
+bool MLMTPR::HasCompleteParameters() const
+{
+	return inited
+	    && has_shift_coeffs
+	    && has_scal_coeffs
+	    && has_radial_coeffs
+	    && has_linear_coeffs;
+}
+
 int MLMTPR::RadialCoeffOffset() const
 {
 	return species_count + ScalingCoeffCount();
@@ -236,12 +245,119 @@ void MLMTPR::RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_
 	RandomizeRadialCoeffs(generator, radial_scale);
 }
 
+void MLMTPR::PruneSpecies(const std::vector<int>& old_species_indices)
+{
+	if (!HasCompleteParameters())
+		ERROR("PruneSpecies requires a complete trained model with shift/scal/radial/linear coefficients.");
+	if (old_species_indices.empty())
+		ERROR("PruneSpecies requires at least one species index.");
+
+	const int old_species_count = species_count;
+	const int new_species_count = static_cast<int>(old_species_indices.size());
+	std::vector<int> sorted_indices = old_species_indices;
+	std::sort(sorted_indices.begin(), sorted_indices.end());
+	for (int old_type : old_species_indices) {
+		if (old_type < 0 || old_type >= old_species_count)
+			ERROR("PruneSpecies species index is out of range.");
+	}
+	for (int i = 1; i < new_species_count; ++i) {
+		if (sorted_indices[i] == sorted_indices[i - 1])
+			ERROR("PruneSpecies species indices should be unique.");
+	}
+
+	const int rb_size = p_RadialBasis->rb_size;
+	const int old_pair_count = old_species_count * old_species_count;
+	const int new_pair_count = new_species_count * new_species_count;
+	const int old_scaling_offset = old_species_count;
+	const int new_scaling_offset = new_species_count;
+	const int old_radial_offset = old_species_count + 2 * old_pair_count * K_;
+	const int new_radial_offset = new_species_count + 2 * new_pair_count * K_;
+	const int old_radial_block_size = rb_size + old_species_count;
+	const int new_radial_block_size = rb_size + new_species_count;
+	const int old_linear_offset = old_radial_offset + radial_func_count * old_radial_block_size;
+	const int new_linear_offset = new_radial_offset + radial_func_count * new_radial_block_size;
+	const int old_linear_count = alpha_count + old_species_count - 1;
+	const int new_linear_count = alpha_count + new_species_count - 1;
+
+	if (static_cast<int>(regression_coeffs.size()) < old_linear_offset + old_linear_count)
+		ERROR("PruneSpecies found an inconsistent regression coefficient layout.");
+
+	const std::vector<double> old_coeffs = regression_coeffs;
+	std::vector<double> new_coeffs(new_linear_offset + new_linear_count, 0.0);
+
+	for (int new_type = 0; new_type < new_species_count; ++new_type) {
+		const int old_type = old_species_indices[new_type];
+		new_coeffs[new_type] = old_coeffs[old_type];
+	}
+
+	for (int scaling_block = 0; scaling_block < K_; ++scaling_block) {
+		for (int new_center = 0; new_center < new_species_count; ++new_center) {
+			const int old_center = old_species_indices[new_center];
+			for (int new_outer = 0; new_outer < new_species_count; ++new_outer) {
+				const int old_outer = old_species_indices[new_outer];
+				const int old_slope_offset = old_scaling_offset
+					+ 2 * scaling_block * old_pair_count
+					+ old_center * old_species_count
+					+ old_outer;
+				const int old_shift_offset = old_slope_offset + old_pair_count;
+				const int new_slope_offset = new_scaling_offset
+					+ 2 * scaling_block * new_pair_count
+					+ new_center * new_species_count
+					+ new_outer;
+				const int new_shift_offset = new_slope_offset + new_pair_count;
+				new_coeffs[new_slope_offset] = old_coeffs[old_slope_offset];
+				new_coeffs[new_shift_offset] = old_coeffs[old_shift_offset];
+			}
+		}
+	}
+
+	for (int mu = 0; mu < radial_func_count; ++mu) {
+		const int old_block_offset = old_radial_offset + mu * old_radial_block_size;
+		const int new_block_offset = new_radial_offset + mu * new_radial_block_size;
+		for (int xi = 0; xi < rb_size; ++xi)
+			new_coeffs[new_block_offset + xi] = old_coeffs[old_block_offset + xi];
+		for (int new_type = 0; new_type < new_species_count; ++new_type) {
+			const int old_type = old_species_indices[new_type];
+			new_coeffs[new_block_offset + rb_size + new_type] =
+				old_coeffs[old_block_offset + rb_size + old_type];
+		}
+	}
+
+	for (int new_type = 0; new_type < new_species_count; ++new_type) {
+		const int old_type = old_species_indices[new_type];
+		new_coeffs[new_linear_offset + new_type] = old_coeffs[old_linear_offset + old_type];
+	}
+	for (int moment = 0; moment < alpha_count - 1; ++moment) {
+		new_coeffs[new_linear_offset + new_species_count + moment] =
+			old_coeffs[old_linear_offset + old_species_count + moment];
+	}
+
+	species_count = new_species_count;
+	regression_coeffs.swap(new_coeffs);
+	linear_coeffs.assign(new_linear_count, 0.0);
+	for (int i = 0; i < new_linear_count; ++i)
+		linear_coeffs[i] = regression_coeffs[new_linear_offset + i];
+
+	radial_list.resize(0, 0, 0);
+	radial_der_list.resize(0, 0, 0);
+	max_radial.clear();
+	inited = true;
+	has_shift_coeffs = true;
+	has_scal_coeffs = true;
+	has_radial_coeffs = true;
+	has_linear_coeffs = true;
+}
+
 
 void MLMTPR::Load(const string& filename)
 {
 	alpha_count = 0;
 	energy_cmpnts = NULL;
 	stress_cmpnts = NULL;
+	has_shift_coeffs = false;
+	has_scal_coeffs = false;
+	has_radial_coeffs = false;
+	has_linear_coeffs = false;
 
 	ifstream ifs(filename);
 	if (!ifs.is_open())
@@ -458,7 +574,8 @@ void MLMTPR::Load(const string& filename)
 
                 }
         else
-        {ifs.ignore(4);
+        {has_shift_coeffs = true;
+		ifs.ignore(4);
 
                 for (int i = 0; i < species_count; i++){
                         ifs >> regression_coeffs[i] >> foo;}
@@ -471,7 +588,8 @@ void MLMTPR::Load(const string& filename)
            InitializeDefaultScalingCoeffs();
                 }
         else
-        {ifs.ignore(4);
+        {has_scal_coeffs = true;
+		ifs.ignore(4);
                 
                 for (int i = 0; i < 2*pairs_count* K_; i++){
                         ifs >> regression_coeffs[species_count+i] >> foo;}
@@ -479,6 +597,7 @@ void MLMTPR::Load(const string& filename)
                 
 	if (tmpstr == "radial_coeffs")
 	{
+		has_radial_coeffs = true;
 
 		for (int s1 = 0; s1 < 1; s1++)
 			for (int s2 = 0; s2 < 1; s2++)
@@ -508,6 +627,7 @@ void MLMTPR::Load(const string& filename)
 	{
 		//cout << "Radial coeffs not found, initializing defaults" << endl;
 		inited = false;
+		has_radial_coeffs = false;
 
 		regression_coeffs.resize(species_count+2*species_count*species_count* K_ +radial_func_count*(p_RadialBasis->rb_size + species_count));
 
@@ -658,6 +778,7 @@ void MLMTPR::Load(const string& filename)
 	}
 	else
 	{
+		has_linear_coeffs = true;
 		ifs.ignore(4);
 
 		linear_coeffs.resize(species_count);

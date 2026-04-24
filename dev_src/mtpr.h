@@ -140,6 +140,10 @@ public:
 	std::vector<double> max_radial;                         	//!< maximum values of r.b.f on the training set
 
 	bool inited = false;
+	bool has_shift_coeffs = false;
+	bool has_scal_coeffs = false;
+	bool has_radial_coeffs = false;
+	bool has_linear_coeffs = false;
         bool shift_ = true;
 	double* energy_cmpnts;								// Energy components for SLAE matrix
 	Array3D forces_cmpnts;								// Force components for SLAE matrix
@@ -179,6 +183,8 @@ public:
         void Save_2(const std::string& filename);
 	void RadialCoeffsInit(std::ifstream& ifs_rad);
 	void Perform_scaling();
+	bool HasCompleteParameters() const;
+	void PruneSpecies(const std::vector<int>& old_species_indices);
 	int ScalingCoeffCount() const;
 	int RadialCoeffOffset() const;
 	int RadialCoeffBlockSize() const;

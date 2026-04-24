@@ -779,6 +779,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	bool do_lin_rescale = false;
 	if (opts["do-lin-rescale"] != "")
 		do_lin_rescale = true;
+	bool fine_tune = false;
+	if (opts["fine-tune"] != "")
+		fine_tune = true;
 	int do_lin_step_limit = 1000;
 	if (opts["do-lin-steps"] != "")
 		do_lin_step_limit = stoi(opts["do-lin-steps"]);
@@ -856,6 +859,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			end = 10;
 		}
 	}
+	if (fine_tune && !mtpr.HasCompleteParameters())
+		ERROR("--fine-tune requires a complete trained model with shift/scal/radial/linear coefficients.");
 #ifdef MLIP_MPI
 	MPI_Comm_rank(MPI_COMM_WORLD, &prank);
 	MPI_Comm_size(MPI_COMM_WORLD, &psize);
@@ -872,6 +877,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	trainer.do_lin_rescale = do_lin_rescale;
 	trainer.do_lin_step_limit = do_lin_step_limit;
 	trainer.do_lin_frequency = do_lin_frequency;
+	trainer.freeze_scal_coeffs = fine_tune;
 	trainer.std_scaling = weight_std;
         trainer.stdd_scaling = weight_stdd;
 	trainer.linstop = bfgs_conv_tol;	//if in 100 iterations loss decreases less than this, BFGS is finished
@@ -886,6 +892,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "scal-range override: " << scal_range.first << ", " << scal_range.second << std::endl;
 	if (prank == 0 && custom_s_range)
 		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
+	if (prank == 0 && fine_tune)
+		std::cout << "fine-tune mode enabled: scal_coeffs frozen; initial rescale+linear solve will run before BFGS" << std::endl;
 
 	Configuration cfg;
 	DatasetStats train_stats_local;
@@ -1065,6 +1073,23 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
                 //trainer.random_sample(prank, training_set, 20);
 		if (prank == 0)
 			std::cout << "Pre-training ended" << std::endl;
+	}
+
+	if (fine_tune && maxits > 0) {
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Fine-tune initial Rescale start" << std::endl;
+		if (trainer.TrainRankActive())
+			Rescale(trainer, mtpr, linear_training_neighborhoods_ptr);
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Fine-tune initial linear solve start" << std::endl;
+		if (trainer.TrainRankActive())
+			trainer.TrainLinear(prank,
+			                    training_set,
+			                    linear_training_neighborhoods_ptr,
+			                    "fine-tune initial linear solve");
+		trainer.BroadcastCoeffsWorld();
+		if (prank == 0)
+			std::cout << "[" << CurrentTimestamp() << "] Fine-tune initial rescale+linear solve done" << std::endl;
 	}
 
 	//getting the lowest min_dist for the training setZ

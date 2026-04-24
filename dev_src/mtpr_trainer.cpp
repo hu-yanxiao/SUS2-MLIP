@@ -898,28 +898,86 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		          << std::endl;
 	}
 
-	bfgs.Set_x(x, n);
 	const bool distributed_bfgs = bfgs.UsingDistributedDense();
 	const bool need_std_terms = NeedStdTerms();
 
-	Array1D inv_hess_diag(n, 1.0);
-	for (int i = n - nlin + p_mlmtpr->species_count; i < n; i++)
-		inv_hess_diag[i] /= p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)] * p_mlmtpr->linear_mults[i - (n - nlin + p_mlmtpr->species_count)];
+	const int scal_coeff_begin = p_mlmtpr->species_count;
+	const int scal_coeff_end = p_mlmtpr->RadialCoeffOffset();
+	std::vector<int> active_coeff_indices;
+	active_coeff_indices.reserve(n);
+	std::vector<int> full_to_active_index(n, -1);
+	for (int full_idx = 0; full_idx < n; ++full_idx) {
+		const bool frozen_scal = freeze_scal_coeffs
+			&& full_idx >= scal_coeff_begin
+			&& full_idx < scal_coeff_end;
+		if (frozen_scal)
+			continue;
+		full_to_active_index[full_idx] = static_cast<int>(active_coeff_indices.size());
+		active_coeff_indices.push_back(full_idx);
+	}
+	const int opt_n = static_cast<int>(active_coeff_indices.size());
+	if (opt_n <= 0)
+		ERROR("MTPR_trainer::Train(): no active BFGS coordinates.");
+
+	std::vector<double> active_coeffs(opt_n, 0.0);
+	auto pack_active_coeffs = [&]() {
+		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
+			active_coeffs[active_idx] = x[active_coeff_indices[active_idx]];
+	};
+	auto set_bfgs_x_from_full_coeffs = [&]() {
+		pack_active_coeffs();
+		bfgs.Set_x(active_coeffs.data(), opt_n);
+	};
+	auto copy_bfgs_x_to_full_coeffs = [&]() {
+		const double* opt_x = bfgs.Data();
+		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
+			x[active_coeff_indices[active_idx]] = opt_x[active_idx];
+	};
+	auto full_inv_hess_diag_value = [&](int full_idx) {
+		double value = 1.0;
+		const int linear_moment_begin = n - nlin + p_mlmtpr->species_count;
+		if (full_idx >= linear_moment_begin && full_idx < n) {
+			const double mult = p_mlmtpr->linear_mults[full_idx - linear_moment_begin];
+			value /= mult * mult;
+		}
+		return value;
+	};
+	set_bfgs_x_from_full_coeffs();
+	Array1D inv_hess_diag(opt_n, 1.0);
+	for (int active_idx = 0; active_idx < opt_n; ++active_idx)
+		inv_hess_diag[active_idx] = full_inv_hess_diag_value(active_coeff_indices[active_idx]);
 	bfgs.SetInvHessDiagonal(inv_hess_diag);
 	const int species_coeff_begin = n - nlin;
-	std::vector<int> species_coeff_indices(p_mlmtpr->species_count);
-	for (int i = 0; i < p_mlmtpr->species_count; ++i)
-		species_coeff_indices[i] = species_coeff_begin + i;
+	std::vector<int> species_coeff_active_indices;
+	for (int i = 0; i < p_mlmtpr->species_count; ++i) {
+		const int active_idx = full_to_active_index[species_coeff_begin + i];
+		if (active_idx >= 0)
+			species_coeff_active_indices.push_back(active_idx);
+	}
+	auto mask_frozen_coordinates = [&](bool freeze_species) {
+		std::vector<int> frozen_indices;
+		if (freeze_species)
+			frozen_indices.insert(frozen_indices.end(), species_coeff_active_indices.begin(), species_coeff_active_indices.end());
+		if (!frozen_indices.empty())
+			bfgs.MaskCoordinates(frozen_indices);
+	};
 	auto reset_bfgs_state = [&]() {
 		bfgs.Restart();
-		bfgs.Set_x(x, n);
+		set_bfgs_x_from_full_coeffs();
 		bfgs.SetInvHessDiagonal(inv_hess_diag);
 	};
 	bool freeze_species_coeffs = do_lin && do_lin_step_limit > 0;
-	if (freeze_species_coeffs)
-		bfgs.MaskCoordinates(species_coeff_indices);
-	std::vector<double> optimizer_reduce_local(n + kOptimizerReducePrefix, 0.0);
-	std::vector<double> optimizer_reduce_global(n + kOptimizerReducePrefix, 0.0);
+	mask_frozen_coordinates(freeze_species_coeffs);
+	if (prank == 0 && freeze_scal_coeffs) {
+		std::cout << "[" << CurrentTimestamp() << "] "
+		          << "scal_coeffs excluded from BFGS Hessian"
+		          << " frozen_count=" << (scal_coeff_end - scal_coeff_begin)
+		          << " active_count=" << opt_n
+		          << " full_count=" << n << std::endl;
+	}
+	bfgs_g.resize(opt_n);
+	std::vector<double> optimizer_reduce_local(opt_n + kOptimizerReducePrefix, 0.0);
+	std::vector<double> optimizer_reduce_global(opt_n + kOptimizerReducePrefix, 0.0);
 	std::array<double, kAcceptedDiagDoubleCount> accepted_diag_local{};
 	std::array<double, kAcceptedDiagDoubleCount> accepted_diag_global{};
 	std::array<long long, kAcceptedDiagCountCount> accepted_count_local{};
@@ -986,8 +1044,13 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			bool external_x_needs_broadcast = false;
 			const bool random_perturb_applied = (max_shift != 0.0);
 			if (prank == 0) {
-				for (int i = 0; i < n - nlin; i++)
+				for (int i = 0; i < n - nlin; i++) {
+					if (freeze_scal_coeffs
+					    && i >= p_mlmtpr->species_count
+					    && i < p_mlmtpr->RadialCoeffOffset())
+						continue;
 					x[i] += distr(eng)*max_shift;
+				}
 			}
 			external_x_modified = random_perturb_applied;
 			external_x_needs_broadcast = distributed_bfgs && random_perturb_applied;
@@ -996,8 +1059,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			if (should_freeze_species_coeffs != freeze_species_coeffs) {
 				freeze_species_coeffs = should_freeze_species_coeffs;
 				reset_bfgs_state();
-				if (freeze_species_coeffs)
-					bfgs.MaskCoordinates(species_coeff_indices);
+				mask_frozen_coordinates(freeze_species_coeffs);
 				if (prank == 0) {
 					std::cout << "[" << CurrentTimestamp() << "] "
 					          << "species_coeffs BFGS freeze "
@@ -1005,7 +1067,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					          << " at step=" << num_step << std::endl;
 				}
 			} else if (freeze_species_coeffs) {
-				bfgs.MaskCoordinates(species_coeff_indices);
+				mask_frozen_coordinates(freeze_species_coeffs);
 			}
 
 			const bool run_train_linear = do_lin
@@ -1049,13 +1111,12 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #endif
 			if (external_x_modified) {
 				if (distributed_bfgs || prank == 0)
-					bfgs.Set_x(x, n);
-				if (freeze_species_coeffs)
-					bfgs.MaskCoordinates(species_coeff_indices);
+					set_bfgs_x_from_full_coeffs();
+				mask_frozen_coordinates(freeze_species_coeffs);
 			}
 		}
 
-		std::memcpy(x, bfgs.Data(), n * sizeof(double));
+		copy_bfgs_x_to_full_coeffs();
 		require_finite_coeffs_all("BFGS trial step " + std::to_string(num_step));
 
 		CalcObjectiveFunctionGrad(training_set, cache_training_neighborhoods ? &training_neighborhoods : nullptr);
@@ -1071,12 +1132,12 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 #ifdef MLIP_MPI
 		optimizer_reduce_local[0] = loss_;
-		std::memcpy(optimizer_reduce_local.data() + kOptimizerReducePrefix,
-		            &loss_grad_[0],
-		            n * sizeof(double));
+		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
+			optimizer_reduce_local[kOptimizerReducePrefix + active_idx] =
+				loss_grad_[active_coeff_indices[active_idx]];
 		MPI_Reduce(optimizer_reduce_local.data(),
 		           prank == 0 ? optimizer_reduce_global.data() : optimizer_reduce_local.data(),
-		           n + kOptimizerReducePrefix,
+		           opt_n + kOptimizerReducePrefix,
 		           MPI_DOUBLE,
 		           MPI_SUM,
 		           0,
@@ -1085,15 +1146,16 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			bfgs_f = optimizer_reduce_global[0];
 			std::memcpy(&bfgs_g[0],
 			            optimizer_reduce_global.data() + kOptimizerReducePrefix,
-			            n * sizeof(double));
+			            opt_n * sizeof(double));
 		}
 
 #else
 		bfgs_f = loss_;
-		memcpy(&bfgs_g[0], &loss_grad_[0], p_mlmtpr->CoeffCount() * sizeof(double));
+		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
+			bfgs_g[active_idx] = loss_grad_[active_coeff_indices[active_idx]];
 #endif	
 		if (freeze_species_coeffs) {
-			for (int idx : species_coeff_indices)
+			for (int idx : species_coeff_active_indices)
 				bfgs_g[idx] = 0.0;
 		}
 
@@ -1103,10 +1165,10 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				optimizer_reduce_global[0] = bfgs_f;
 				std::memcpy(optimizer_reduce_global.data() + kOptimizerReducePrefix,
 				            &bfgs_g[0],
-				            n * sizeof(double));
+				            opt_n * sizeof(double));
 			}
 			MPI_Bcast(optimizer_reduce_global.data(),
-			          n + kOptimizerReducePrefix,
+			          opt_n + kOptimizerReducePrefix,
 			          MPI_DOUBLE,
 			          0,
 			          train_comm);
@@ -1114,7 +1176,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				bfgs_f = optimizer_reduce_global[0];
 				std::memcpy(&bfgs_g[0],
 				            optimizer_reduce_global.data() + kOptimizerReducePrefix,
-				            n * sizeof(double));
+				            opt_n * sizeof(double));
 			}
 		}
 #endif
@@ -1122,12 +1184,20 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		int bfgs_status = 0;
 		if ((distributed_bfgs || prank == 0) && !converge) {
 			try {
+				mask_frozen_coordinates(freeze_species_coeffs);
 				bfgs.Iterate(bfgs_f, bfgs_g);
+				mask_frozen_coordinates(freeze_species_coeffs);
 
-				while (abs(bfgs.x(p_mlmtpr->species_count*p_mlmtpr->species_count) - x[p_mlmtpr->species_count*p_mlmtpr->species_count]) > 0.5) {
-					bfgs.ReduceStep(0.25);
+				const int guarded_full_idx = p_mlmtpr->species_count * p_mlmtpr->species_count;
+				if (guarded_full_idx >= 0 && guarded_full_idx < n) {
+					const int guarded_active_idx = full_to_active_index[guarded_full_idx];
+					if (guarded_active_idx >= 0) {
+						while (abs(bfgs.x(guarded_active_idx) - x[guarded_full_idx]) > 0.5) {
+							bfgs.ReduceStep(0.25);
+						}
+					}
 				}
-				RequireFiniteArray(bfgs.Data(), n, "BFGS proposed coefficients");
+				RequireFiniteArray(bfgs.Data(), opt_n, "BFGS proposed coefficients");
 			}
 			catch (const MlipException& exc) {
 				bfgs_status = 1;
@@ -1158,12 +1228,11 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #ifdef MLIP_MPI
 		if (!distributed_bfgs) {
 			if (prank == 0)
-				std::memcpy(x, bfgs.Data(), n * sizeof(double));
+				copy_bfgs_x_to_full_coeffs();
 			MPI_Bcast(&x[0], n, MPI_DOUBLE, 0, train_comm);
 			if (prank != 0) {
-				bfgs.Set_x(x, n);
-				if (freeze_species_coeffs)
-					bfgs.MaskCoordinates(species_coeff_indices);
+				set_bfgs_x_from_full_coeffs();
+				mask_frozen_coordinates(freeze_species_coeffs);
 			}
 		}
 #endif
