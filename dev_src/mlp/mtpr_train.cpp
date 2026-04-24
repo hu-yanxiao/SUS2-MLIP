@@ -13,6 +13,7 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -116,6 +117,39 @@ std::pair<double, double> ParseRangeOption(const std::string& value, const std::
 	} catch (const std::exception&) {
 		ERROR(opt_name + " should contain exactly two comma-separated doubles");
 	}
+}
+
+std::vector<double> ParseDoubleListOption(std::string value, const std::string& opt_name)
+{
+	for (char& ch : value) {
+		if (ch == '{' || ch == '}' || ch == ',' || ch == ';')
+			ch = ' ';
+	}
+
+	std::stringstream ss(value);
+	std::vector<double> result;
+	double parsed = 0.0;
+	while (ss >> parsed)
+		result.push_back(parsed);
+
+	if (result.empty() || (ss.fail() && !ss.eof()))
+		ERROR(opt_name + " should be a double or a comma-separated list of doubles");
+	for (double x : result) {
+		if (!std::isfinite(x))
+			ERROR(opt_name + " should contain only finite doubles");
+	}
+	return result;
+}
+
+std::string FormatDoubleList(const std::vector<double>& values)
+{
+	std::ostringstream os;
+	for (std::size_t i = 0; i < values.size(); ++i) {
+		if (i != 0)
+			os << ", ";
+		os << values[i];
+	}
+	return os.str();
 }
 
 MomentCoeffStats ComputeMomentCoeffStats(const MLMTPR& mtpr)
@@ -835,6 +869,26 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		s_range = ParseRangeOption(opts["s-range"], "--s-range");
 		custom_s_range = true;
 	}
+	bool custom_env_gate_cutoff_ratio = false;
+	double env_gate_cutoff_ratio_override = 0.5;
+	if (opts["env-gate-cutoff-ratio"] != "") {
+		try {
+			env_gate_cutoff_ratio_override = std::stod(opts["env-gate-cutoff-ratio"]);
+		} catch (const std::exception&) {
+			ERROR("--env-gate-cutoff-ratio should be a finite double in (0, 1]");
+		}
+		if (!std::isfinite(env_gate_cutoff_ratio_override) ||
+		    env_gate_cutoff_ratio_override <= 0.0 ||
+		    env_gate_cutoff_ratio_override > 1.0)
+			ERROR("--env-gate-cutoff-ratio should be a finite double in (0, 1]");
+		custom_env_gate_cutoff_ratio = true;
+	}
+	bool custom_env_gate_lambda_raw = false;
+	std::vector<double> env_gate_lambda_raw_override;
+	if (opts["env-gate-lambda-raw"] != "") {
+		env_gate_lambda_raw_override = ParseDoubleListOption(opts["env-gate-lambda-raw"], "--env-gate-lambda-raw");
+		custom_env_gate_lambda_raw = true;
+	}
 
 	if (opts["init-params"] == "")
 		opts["init-params"] = "random";
@@ -862,6 +916,21 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		catch (MlipException& exp) {
 			std::cout << exp.What() << std::endl;
 			end = 10;
+		}
+	}
+	if ((custom_env_gate_cutoff_ratio || custom_env_gate_lambda_raw) && !mtpr.HasEnvGate())
+		ERROR("--env-gate-cutoff-ratio and --env-gate-lambda-raw require a SUS2-2.0 env-gate model or --enable-env-gate");
+	if (custom_env_gate_cutoff_ratio)
+		mtpr.env_gate_cutoff_ratio = env_gate_cutoff_ratio_override;
+	if (custom_env_gate_lambda_raw) {
+		if (env_gate_lambda_raw_override.size() == 1) {
+			for (int type = 0; type < mtpr.species_count; ++type)
+				mtpr.regression_coeffs[mtpr.EnvGateLambdaRawOffset(type)] = env_gate_lambda_raw_override[0];
+		} else if (env_gate_lambda_raw_override.size() == static_cast<std::size_t>(mtpr.species_count)) {
+			for (int type = 0; type < mtpr.species_count; ++type)
+				mtpr.regression_coeffs[mtpr.EnvGateLambdaRawOffset(type)] = env_gate_lambda_raw_override[type];
+		} else {
+			ERROR("--env-gate-lambda-raw should contain one value or species_count values");
 		}
 	}
 	if (fine_tune && !mtpr.HasCompleteParameters())
@@ -897,6 +966,11 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "scal-range override: " << scal_range.first << ", " << scal_range.second << std::endl;
 	if (prank == 0 && custom_s_range)
 		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
+	if (prank == 0 && custom_env_gate_cutoff_ratio)
+		std::cout << "env-gate cutoff ratio override: " << env_gate_cutoff_ratio_override << std::endl;
+	if (prank == 0 && custom_env_gate_lambda_raw)
+		std::cout << "env-gate lambda raw override: " << FormatDoubleList(env_gate_lambda_raw_override)
+		          << (env_gate_lambda_raw_override.size() == 1 ? " (broadcast)" : "") << std::endl;
 	if (prank == 0 && fine_tune)
 		std::cout << "fine-tune mode enabled: scal_coeffs frozen; initial rescale+linear solve will run before BFGS" << std::endl;
 	if (prank == 0 && mtpr.HasEnvGate())
