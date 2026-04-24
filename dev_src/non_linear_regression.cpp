@@ -277,7 +277,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 		if ((int)type_mean.size() > 2) mean_3 += type_mean[2];
 
 		for (int i = 0; i < cfg.size(); i++)
-			type_joint[cfg.type(i)] += (cfg.cal_se[i] - type_mean[cfg.type(i)]) * 200.0 / (200.0 + orig.force(i).NormSq())
+			type_joint[cfg.type(i)] += (cfg.cal_se[i] - type_mean[cfg.type(i)]) * 20.0 / (20.0 + orig.force(i).NormSq())
 				/ type_count_scratch_[cfg.type(i)] / orig.size();
 
 		for (int type : active_type_scratch_)
@@ -285,7 +285,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 
 		for (int i = 0; i < cfg.size(); i++)
 			_std_ += (cfg.cal_se[i] - type_mean[cfg.type(i)]) * (cfg.cal_se[i] - type_mean[cfg.type(i)])
-				* 200.0 / (200.0 + orig.force(i).NormSq()) / orig.size();
+				* 20.0 / (20.0 + orig.force(i).NormSq()) / orig.size();
 
 		std_ += std_scaling * _std_;
 		stdd_ += stdd_scaling * _stdd_;
@@ -348,7 +348,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 		dLdE_i_[i] += dLdE;
 			if (need_std_terms)
 			{
-				dLdE_i_[i] += std_scaling * 2.0 * ((cfg.cal_se[i] - type_mean[cfg.type(i)]) * 200.0 / (200.0 + orig.force(i).NormSq()) / orig.size()
+				dLdE_i_[i] += std_scaling * 2.0 * ((cfg.cal_se[i] - type_mean[cfg.type(i)]) * 20.0 / (20.0 + orig.force(i).NormSq()) / orig.size()
 					- type_joint[cfg.type(i)])
 					+ stdd_scaling * 2.0 * (type_mean[cfg.type(i)] - mean_) / type_count_scratch_[cfg.type(i)];
 			}

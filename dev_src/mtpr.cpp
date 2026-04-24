@@ -2553,8 +2553,12 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 			const double* linear_scalar_coeffs = linear_coeffs.data() + species_count;
 			const double* linear_mults_data = linear_mults.data();
 			std::vector<double> env_raw_basic_vals;
+			std::vector<double> env_raw_sender_dots;
+			double env_gate_sender_dot_sum = 0.0;
 			if (HasEnvGate())
 				env_raw_basic_vals.assign(alpha_index_basic_count, 0.0);
+			if (HasEnvGate() && se_ders_weights != nullptr)
+				env_raw_sender_dots.assign(alpha_index_basic_count, 0.0);
 			FillWithZero(mom_val);
 			FillWithZero(site_energy_ders_wrt_moments_);
 			FillWithZero(dloss_dsenders);
@@ -2749,6 +2753,9 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 					const Vector3& neighb_vec = nbh.vecs[j];
 					const double r = nbh.dists[j];
 					const double inv_r = 1.0 / r;
+					env_gate_sender_dot_sum += se_ders_weights[j][0] * env_gate_ders[j][0]
+						+ se_ders_weights[j][1] * env_gate_ders[j][1]
+						+ se_ders_weights[j][2] * env_gate_ders[j][2];
 					const int type_outer = nbh.types[j];
 					const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
 					const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
@@ -2783,6 +2790,10 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 								* pow0 * pow1
 								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 
+						const double raw_sender_dot = se_ders_weights[j][0] * jac_x
+							+ se_ders_weights[j][1] * jac_y
+							+ se_ders_weights[j][2] * jac_z;
+						env_raw_sender_dots[i] += raw_sender_dot;
 						jac_x = env_gate * jac_x + env_raw_basic_vals[i] * env_gate_ders[j][0];
 						jac_y = env_gate * jac_y + env_raw_basic_vals[i] * env_gate_ders[j][1];
 						jac_z = env_gate * jac_z + env_raw_basic_vals[i] * env_gate_ders[j][2];
@@ -2889,6 +2900,14 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				const double lambda = EnvGateLambda();
 				const double tanh_rho = std::tanh(rho);
 				const double sech2_rho = 1.0 - tanh_rho * tanh_rho;
+				double gate_der_prefactor = 0.0;
+				if (se_ders_weights != nullptr) {
+					for (int i = 0; i < alpha_index_basic_count; ++i) {
+						const double coord_weight = site_linear_coeff * site_energy_ders_wrt_moments_[i];
+						gate_prefactor += coord_weight * env_raw_sender_dots[i];
+						gate_der_prefactor += coord_weight * env_raw_basic_vals[i];
+					}
+				}
 				const double dgate_dlambda_raw = -lambda * (1.0 - lambda) * tanh_rho;
 				grad_out[EnvGateLambdaRawOffset()] += gate_prefactor * dgate_dlambda_raw;
 				for (int q = 0; q < env_gate_channel_count; ++q) {
@@ -2898,6 +2917,86 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						-lambda * sech2_rho * density_coeff_der * env_gate_channel_sums[q];
 					grad_out[EnvGateLogDensityCoeffOffset(type_central, q)] +=
 						gate_prefactor * dgate_dlog_density;
+				}
+				if (se_ders_weights != nullptr && gate_der_prefactor != 0.0) {
+					const double dgate_der_prefactor_dlambda_raw =
+						-lambda * (1.0 - lambda) * sech2_rho;
+					for (int j = 0; j < nbh.count; ++j) {
+						const double r = nbh.dists[j];
+						if (r <= 0.0 || env_gate_rho_dr[j] == 0.0)
+							continue;
+						const Vector3& neighb_vec = nbh.vecs[j];
+						const double sender_projection =
+							(se_ders_weights[j][0] * neighb_vec[0]
+							 + se_ders_weights[j][1] * neighb_vec[1]
+							 + se_ders_weights[j][2] * neighb_vec[2]) / r;
+						grad_out[EnvGateLambdaRawOffset()] += gate_der_prefactor
+							* sender_projection * dgate_der_prefactor_dlambda_raw
+							* env_gate_rho_dr[j];
+					}
+
+					const bool use_env_gate_table =
+						env_gate_radial_list.size1 == species_count * species_count
+						&& env_gate_radial_list.size2 >= 2
+						&& env_gate_radial_list.size3 == env_gate_channel_count;
+					for (int j = 0; j < nbh.count; ++j) {
+						const double r = nbh.dists[j];
+						if (r <= 0.0)
+							continue;
+						const Vector3& neighb_vec = nbh.vecs[j];
+						const double sender_projection =
+							(se_ders_weights[j][0] * neighb_vec[0]
+							 + se_ders_weights[j][1] * neighb_vec[1]
+							 + se_ders_weights[j][2] * neighb_vec[2]) / r;
+						if (sender_projection == 0.0)
+							continue;
+
+						double weighted_basis_der[6] = {0, 0, 0, 0, 0, 0};
+						if (use_env_gate_table) {
+							int r_list = static_cast<int>(std::floor(r * inv_dr));
+							const int last_interval = env_gate_radial_list.size2 - 2;
+							if (r_list < 0) r_list = 0;
+							if (r_list > last_interval) r_list = last_interval;
+							const int r_next = r_list + 1;
+							double ddr = r * inv_dr - r_list;
+							if (ddr < 0.0) ddr = 0.0;
+							if (ddr > 1.0) ddr = 1.0;
+							const int pair_index = type_central * species_count + nbh.types[j];
+							for (int q = 0; q < env_gate_channel_count; ++q) {
+								const double d1 = env_gate_radial_der_list(pair_index, r_list, q);
+								const double d2 = env_gate_radial_der_list(pair_index, r_next, q);
+								weighted_basis_der[q] = d1 + ddr * (d2 - d1);
+							}
+						} else {
+							const double r_env = env_gate_cutoff_ratio * p_RadialBasis->max_dist;
+							if (r >= r_env)
+								continue;
+							const double y = r / r_env;
+							const double dy_dr = 1.0 / r_env;
+							const double cutoff = 1.0 - r / r_env;
+							const double f_env = cutoff * cutoff;
+							const double df_dr = -2.0 * cutoff / r_env;
+							double bernstein[6];
+							double bernstein_der[6];
+							BernsteinDegree5(y, bernstein, bernstein_der);
+							for (int q = 0; q < env_gate_channel_count; ++q)
+								weighted_basis_der[q] = df_dr * bernstein[q] + f_env * bernstein_der[q] * dy_dr;
+						}
+
+						for (int q = 0; q < env_gate_channel_count; ++q) {
+							const int coeff_offset = EnvGateLogDensityCoeffOffset(type_central, q);
+							const double density_coeff_der =
+								EnvGateDensityCoeffDer(regression_coeffs[coeff_offset]);
+							const double dgate_der_prefactor_dlog_density =
+								2.0 * lambda * tanh_rho * sech2_rho
+								* density_coeff_der * env_gate_channel_sums[q];
+							const double dgate_der_dlog_density =
+								dgate_der_prefactor_dlog_density * env_gate_rho_dr[j]
+								- lambda * sech2_rho * density_coeff_der * weighted_basis_der[q];
+							grad_out[coeff_offset] += gate_der_prefactor * sender_projection
+								* dgate_der_dlog_density;
+						}
+					}
 				}
 			}
 
@@ -3098,7 +3197,8 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 								+ se_weight_vec[2] * derz_ss;
 
 							radial_grad = dloss_weight * gate_scale * basic_grad;
-							radial_grad += coord_weight * gate_scale * coord_grad;
+							radial_grad += coord_weight * (gate_scale * coord_grad
+								+ env_gate_sender_dot_sum * basic_grad);
 							grad_out[radial_offset + xi] += radial_grad * type_scale;
 							coord_center_grad += gate_scale * outer_type_coeff * coord_grad;
 							coord_outer_grad += gate_scale * center_type_coeff * coord_grad;
@@ -3182,10 +3282,18 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 							+ se_weight_vec[2] * derz_ss;
 
 						const int sigma_coeff_offset = C + 2 * C * C * scaling_block + type_central * C + type_outer;
-						grad_out[shared_type_offset + type_central] += dloss_weight * gate_scale * center_grad + coord_weight * gate_scale * outer_type_coeff * coord_grad;
-						grad_out[shared_type_offset + type_outer] += dloss_weight * gate_scale * outer_grad + coord_weight * gate_scale * center_type_coeff * coord_grad;
-						grad_out[sigma_coeff_offset] += dloss_weight * gate_scale * sigma_grad + coord_weight * gate_scale * type_scale * coord_grad_s;
-						grad_out[sigma_coeff_offset + C * C] += dloss_weight * gate_scale * sigma_ss_grad + coord_weight * gate_scale * type_scale * coord_grad_ss;
+						grad_out[shared_type_offset + type_central] += dloss_weight * gate_scale * center_grad
+							+ coord_weight * (gate_scale * outer_type_coeff * coord_grad
+								+ env_gate_sender_dot_sum * center_grad);
+						grad_out[shared_type_offset + type_outer] += dloss_weight * gate_scale * outer_grad
+							+ coord_weight * (gate_scale * center_type_coeff * coord_grad
+								+ env_gate_sender_dot_sum * outer_grad);
+						grad_out[sigma_coeff_offset] += dloss_weight * gate_scale * sigma_grad
+							+ coord_weight * (gate_scale * type_scale * coord_grad_s
+								+ env_gate_sender_dot_sum * sigma_grad);
+						grad_out[sigma_coeff_offset + C * C] += dloss_weight * gate_scale * sigma_ss_grad
+							+ coord_weight * (gate_scale * type_scale * coord_grad_ss
+								+ env_gate_sender_dot_sum * sigma_ss_grad);
 					}
 
 					if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls" && r < p_RadialBasis->min_dist) {

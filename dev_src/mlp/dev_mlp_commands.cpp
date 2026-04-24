@@ -21,6 +21,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <iomanip>
+#include <limits>
 #include <sstream>
 
 using namespace std;
@@ -64,6 +67,181 @@ std::string FormatSpeciesMapping(const std::vector<int>& old_species_indices)
 	}
 	return oss.str();
 }
+
+std::string MtprCoeffGroup(const MLMTPR& mtpr, int coeff_index)
+{
+	if (coeff_index < mtpr.species_count)
+		return "shift_coeffs";
+
+	const int scal_begin = mtpr.species_count;
+	const int radial_begin = mtpr.RadialCoeffOffset();
+	if (coeff_index >= scal_begin && coeff_index < radial_begin)
+		return "scal_coeffs";
+
+	const int radial_end = radial_begin + mtpr.radial_func_count * mtpr.RadialCoeffBlockSize();
+	if (coeff_index >= radial_begin && coeff_index < radial_end)
+		return "radial_coeffs";
+
+	if (mtpr.HasEnvGate()) {
+		const int env_begin = mtpr.EnvGateCoeffOffset();
+		const int env_end = env_begin + mtpr.EnvGateCoeffCount();
+		if (coeff_index == mtpr.EnvGateLambdaRawOffset())
+			return "env_gate_lambda_raw";
+		if (coeff_index >= env_begin && coeff_index < env_end)
+			return "env_gate_log_density";
+	}
+
+	return "linear_coeffs";
+}
+
+class MTPRGradientCheckTrainer : public MTPR_trainer
+{
+public:
+	using MTPR_trainer::MTPR_trainer;
+
+	bool CheckActiveGradients(MLMTPR& mtpr,
+	                          std::vector<Configuration>& training_set,
+	                          const std::vector<int>& active_coeff_indices,
+	                          double relative_step,
+	                          double rel_tolerance,
+	                          double abs_tolerance,
+	                          int max_report)
+	{
+		struct Result {
+			int coeff_index = -1;
+			std::string group;
+			double value = 0.0;
+			double analytic = 0.0;
+			double finite_diff = 0.0;
+			double abs_error = 0.0;
+			double rel_error = 0.0;
+			bool passed = false;
+		};
+		struct GroupStats {
+			int count = 0;
+			int fail_count = 0;
+			double max_abs_error = 0.0;
+			double max_rel_error = 0.0;
+		};
+
+		if (training_set.empty())
+			ERROR("check-mtpr-grad requires at least one configuration.");
+		if (relative_step <= 0.0)
+			ERROR("check-mtpr-grad requires a positive --step value.");
+
+		SetCollectErrorMetrics(false);
+		CalcObjectiveFunctionGrad(training_set);
+		const double loss0 = loss_;
+		std::vector<double> analytic_grad = loss_grad_;
+		std::vector<Result> failures;
+		std::map<std::string, GroupStats> group_stats;
+
+		Result max_abs_result;
+		Result max_rel_result;
+		bool have_result = false;
+
+		for (int coeff_index : active_coeff_indices) {
+			const double original = mtpr.Coeff()[coeff_index];
+			const double delta = relative_step * std::max(1.0, std::abs(original));
+			mtpr.Coeff()[coeff_index] = original + delta;
+			const double loss_plus = ObjectiveFunction(training_set);
+			mtpr.Coeff()[coeff_index] = original - delta;
+			const double loss_minus = ObjectiveFunction(training_set);
+			mtpr.Coeff()[coeff_index] = original;
+
+			Result result;
+			result.coeff_index = coeff_index;
+			result.group = MtprCoeffGroup(mtpr, coeff_index);
+			result.value = original;
+			result.analytic = analytic_grad[coeff_index];
+			result.finite_diff = (loss_plus - loss_minus) / (2.0 * delta);
+			result.abs_error = std::abs(result.analytic - result.finite_diff);
+			const double denom = std::max(abs_tolerance,
+				std::max(std::abs(result.analytic), std::abs(result.finite_diff)));
+			result.rel_error = result.abs_error / denom;
+			result.passed = std::isfinite(result.analytic)
+			             && std::isfinite(result.finite_diff)
+			             && std::isfinite(result.abs_error)
+			             && std::isfinite(result.rel_error)
+			             && (result.abs_error <= abs_tolerance || result.rel_error <= rel_tolerance);
+
+			GroupStats& stats = group_stats[result.group];
+			stats.count++;
+			if (!result.passed) {
+				stats.fail_count++;
+				failures.push_back(result);
+			}
+			stats.max_abs_error = std::max(stats.max_abs_error, result.abs_error);
+			stats.max_rel_error = std::max(stats.max_rel_error, result.rel_error);
+
+			if (!have_result || result.abs_error > max_abs_result.abs_error)
+				max_abs_result = result;
+			if (!have_result || result.rel_error > max_rel_result.rel_error)
+				max_rel_result = result;
+			have_result = true;
+		}
+
+		std::sort(failures.begin(), failures.end(),
+			[](const Result& a, const Result& b) {
+				if (a.rel_error != b.rel_error)
+					return a.rel_error > b.rel_error;
+				return a.abs_error > b.abs_error;
+			});
+
+		std::cout << std::scientific << std::setprecision(8);
+		std::cout << "check-mtpr-grad loss0 " << loss0
+		          << " configs " << training_set.size()
+		          << " active_coeffs " << active_coeff_indices.size()
+		          << " step " << relative_step
+		          << " rel_tol " << rel_tolerance
+		          << " abs_tol " << abs_tolerance
+		          << std::endl;
+		for (const auto& item : group_stats) {
+			std::cout << "group " << item.first
+			          << " count " << item.second.count
+			          << " failures " << item.second.fail_count
+			          << " max_abs_err " << item.second.max_abs_error
+			          << " max_rel_err " << item.second.max_rel_error
+			          << std::endl;
+		}
+		if (have_result) {
+			std::cout << "max_abs coeff " << max_abs_result.coeff_index
+			          << " group " << max_abs_result.group
+			          << " value " << max_abs_result.value
+			          << " analytic " << max_abs_result.analytic
+			          << " finite_diff " << max_abs_result.finite_diff
+			          << " abs_err " << max_abs_result.abs_error
+			          << " rel_err " << max_abs_result.rel_error
+			          << std::endl;
+			std::cout << "max_rel coeff " << max_rel_result.coeff_index
+			          << " group " << max_rel_result.group
+			          << " value " << max_rel_result.value
+			          << " analytic " << max_rel_result.analytic
+			          << " finite_diff " << max_rel_result.finite_diff
+			          << " abs_err " << max_rel_result.abs_error
+			          << " rel_err " << max_rel_result.rel_error
+			          << std::endl;
+		}
+
+		if (!failures.empty()) {
+			const int report_count = std::min(max_report, static_cast<int>(failures.size()));
+			std::cout << "failed_coefficients " << failures.size() << std::endl;
+			for (int i = 0; i < report_count; ++i) {
+				const Result& result = failures[i];
+				std::cout << "fail coeff " << result.coeff_index
+				          << " group " << result.group
+				          << " value " << result.value
+				          << " analytic " << result.analytic
+				          << " finite_diff " << result.finite_diff
+				          << " abs_err " << result.abs_error
+				          << " rel_err " << result.rel_error
+				          << std::endl;
+			}
+		}
+
+		return failures.empty();
+	}
+};
 
 }
 
@@ -152,6 +330,109 @@ bool DevCommands(const std::string& command, std::vector<std::string>& args, std
 			          << " -> " << mtpr.species_count
 			          << " mapping: " << FormatSpeciesMapping(old_species_indices)
 			          << std::endl;
+		}
+#ifdef MLIP_MPI
+		MPI_Barrier(MPI_COMM_WORLD);
+#endif
+	} END_COMMAND;
+
+	BEGIN_COMMAND("check-mtpr-grad",
+		"finite-difference checks active SUS2 MTPR training gradients",
+		"mlp-sus2 check-mtpr-grad pot.mtp train.cfg [options]\n"
+		"  Checks every active coefficient used by BFGS, excluding redundant stored\n"
+		"  radial species rows and optionally excluding scal_coeffs with --fine-tune.\n"
+		"  Options:\n"
+		"  --energy-weight=<double>: default=1\n"
+		"  --force-weight=<double>: default=0.01\n"
+		"  --stress-weight=<double>: default=0.001\n"
+		"  --std-weight=<double>: default=0.2\n"
+		"  --stdd-weight=<double>: default=0.00001\n"
+		"  --scale-by-force=<int>: default=0\n"
+		"  --weighting=<string>: default=vibrations\n"
+		"  --step=<double>: relative finite-difference step, default=1e-6\n"
+		"  --rel-tol=<double>: default=1e-3\n"
+		"  --abs-tol=<double>: default=1e-6\n"
+		"  --max-configs=<int>: default=1\n"
+		"  --max-report=<int>: default=30\n"
+		"  --fine-tune: check the same active space as fine-tune BFGS\n"
+	) {
+		if (args.size() != 2) {
+			std::cout << "mlp-sus2 check-mtpr-grad: 2 arguments are required\n";
+			return 1;
+		}
+		if (mpi_rank == 0) {
+			double weight_energy = 1.0;
+			if (opts["energy-weight"] != "")
+				weight_energy = std::stod(opts["energy-weight"]);
+			double weight_force = 0.01;
+			if (opts["force-weight"] != "")
+				weight_force = std::stod(opts["force-weight"]);
+			double weight_stress = 0.001;
+			if (opts["stress-weight"] != "")
+				weight_stress = std::stod(opts["stress-weight"]);
+			double std_weight = 0.2;
+			if (opts["std-weight"] != "")
+				std_weight = std::stod(opts["std-weight"]);
+			double stdd_weight = 0.00001;
+			if (opts["stdd-weight"] != "")
+				stdd_weight = std::stod(opts["stdd-weight"]);
+			int scale_by_force = 0;
+			if (opts["scale-by-force"] != "")
+				scale_by_force = std::stoi(opts["scale-by-force"]);
+			double relative_step = 1e-6;
+			if (opts["step"] != "")
+				relative_step = std::stod(opts["step"]);
+			double rel_tolerance = 1e-3;
+			if (opts["rel-tol"] != "")
+				rel_tolerance = std::stod(opts["rel-tol"]);
+			double abs_tolerance = 1e-6;
+			if (opts["abs-tol"] != "")
+				abs_tolerance = std::stod(opts["abs-tol"]);
+			int max_configs = 1;
+			if (opts["max-configs"] != "")
+				max_configs = std::stoi(opts["max-configs"]);
+			int max_report = 30;
+			if (opts["max-report"] != "")
+				max_report = std::stoi(opts["max-report"]);
+			if (max_configs <= 0)
+				ERROR("--max-configs must be positive.");
+			if (max_report < 0)
+				ERROR("--max-report must be non-negative.");
+
+			MLMTPR mtpr(args[0]);
+			std::vector<Configuration> training_set;
+			std::ifstream ifs(args[1], std::ios::binary);
+			Configuration cfg;
+			while (static_cast<int>(training_set.size()) < max_configs && cfg.Load(ifs))
+				training_set.push_back(cfg);
+			if (training_set.empty())
+				ERROR("No configurations were loaded for check-mtpr-grad.");
+
+			MTPRGradientCheckTrainer trainer(&mtpr,
+				weight_energy,
+				weight_force,
+				weight_stress,
+				0.0,
+				1.0e-6,
+				"",
+				scale_by_force,
+				0);
+			trainer.std_scaling = std_weight;
+			trainer.stdd_scaling = stdd_weight;
+			if (opts["weighting"] != "")
+				trainer.weighting = opts["weighting"];
+
+			std::vector<int> active_coeff_indices;
+			const bool fine_tune = opts["fine-tune"] != "";
+			mtpr.BuildActiveCoeffIndices(active_coeff_indices, fine_tune);
+			if (!trainer.CheckActiveGradients(mtpr,
+			                                  training_set,
+			                                  active_coeff_indices,
+			                                  relative_step,
+			                                  rel_tolerance,
+			                                  abs_tolerance,
+			                                  max_report))
+				exit(2);
 		}
 #ifdef MLIP_MPI
 		MPI_Barrier(MPI_COMM_WORLD);
