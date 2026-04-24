@@ -200,13 +200,13 @@ public:
 	int RadialCoeffBlockSize() const;
 	int EnvGateCoeffCount() const;
 	int EnvGateCoeffOffset() const;
-	int EnvGateLambdaRawOffset() const;
+	int EnvGateLambdaRawOffset(int type_central) const;
 	int EnvGateLogDensityCoeffOffset(int type_central, int channel) const;
 	int LinearCoeffOffset() const;
 	void EnableEnvGateDefault();
 	void DisableEnvGate();
 	bool HasEnvGate() const;
-	double EnvGateLambda() const;
+	double EnvGateLambda(int type_central) const;
 	double ComputeEnvGate(const Neighborhood& nbh,
 	                      std::vector<Vector3>* gate_ders = nullptr,
 	                      std::vector<double>* channel_sums = nullptr,

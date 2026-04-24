@@ -85,7 +85,7 @@ std::string MtprCoeffGroup(const MLMTPR& mtpr, int coeff_index)
 	if (mtpr.HasEnvGate()) {
 		const int env_begin = mtpr.EnvGateCoeffOffset();
 		const int env_end = env_begin + mtpr.EnvGateCoeffCount();
-		if (coeff_index == mtpr.EnvGateLambdaRawOffset())
+		if (coeff_index >= env_begin && coeff_index < env_begin + mtpr.species_count)
 			return "env_gate_lambda_raw";
 		if (coeff_index >= env_begin && coeff_index < env_end)
 			return "env_gate_log_density";
