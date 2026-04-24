@@ -113,6 +113,12 @@ protected:
 
 
 	void CalcSiteEnergyDers(const Neighborhood& nbh) override;
+	void EnvGateWeightedBasis(int type_central,
+	                          int type_outer,
+	                          double r,
+	                          double r_env,
+	                          double* values,
+	                          double* ders);
 	void PrepareEvalCaches() override;
 	bool UsesJacobiIndexedBasis() const;
 	int JacobiIndexedBlockForMu(int mu) const;
@@ -210,7 +216,8 @@ public:
 	double ComputeEnvGate(const Neighborhood& nbh,
 	                      std::vector<Vector3>* gate_ders = nullptr,
 	                      std::vector<double>* channel_sums = nullptr,
-	                      std::vector<double>* rho_dr = nullptr);
+	                      std::vector<double>* rho_dr = nullptr,
+	                      double* rho_out = nullptr);
 	bool IsRedundantRadialSpeciesCoeff(int coeff_index) const;
 	void BuildActiveCoeffIndices(std::vector<int>& active_coeff_indices, bool exclude_scal_coeffs = false) const;
 	int ActiveCoeffCount(bool exclude_scal_coeffs = false) const;
