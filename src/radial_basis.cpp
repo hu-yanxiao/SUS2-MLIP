@@ -94,6 +94,7 @@ AnyRadialBasis::AnyRadialBasis(std::ifstream & ifs)
 namespace {
 
 constexpr double kLaguerreMinRho = 1.0e-8;
+constexpr double kLaguerrePositiveParamFloor = 1.0e-6;
 constexpr double kJacobiEndpointEps = 1.0e-12;
 constexpr int kJacobiMaxIndexedBlock = 5;
 
@@ -161,8 +162,27 @@ const JacobiRecurrenceCache& JacobiRecurrenceCacheForBlock(int k, int rb_size)
 	return cache;
 }
 
+double StableSoftplus(double x)
+{
+	if (x > 40.0)
+		return x;
+	if (x < -40.0)
+		return std::exp(x);
+	return std::log1p(std::exp(x));
+}
+
+double StableSigmoid(double x)
+{
+	if (x >= 0.0) {
+		const double z = std::exp(-x);
+		return 1.0 / (1.0 + z);
+	}
+	const double z = std::exp(x);
+	return z / (1.0 + z);
+}
+
 void JacobiWeightTerms(const JacobiBlockSpec& spec,
-			      double x,
+				      double x,
 			      bool apply_sqrt_weight,
 			      double& sqrt_weight,
 			      double& log_weight_x,
@@ -431,6 +451,29 @@ void LaguerreLog1pCalc(AnyRadialBasis& basis,
 		dphi_scal_r_curr = dphi_scal_r_next;
 		dphi_rho_curr = dphi_rho_next;
 		dphi_rho_r_curr = dphi_rho_r_next;
+	}
+}
+
+void LaguerreLog1pPositiveCalc(AnyRadialBasis& basis,
+			       double r,
+			       double scal_raw,
+			       double s_raw,
+			       bool apply_exponential_envelope,
+			       bool include_param_derivatives)
+{
+	const double scal = kLaguerrePositiveParamFloor + StableSoftplus(scal_raw);
+	const double s = kLaguerrePositiveParamFloor + StableSoftplus(s_raw);
+	LaguerreLog1pCalc(basis, r, scal, s, apply_exponential_envelope, include_param_derivatives);
+
+	if (include_param_derivatives) {
+		const double dscal_draw = StableSigmoid(scal_raw);
+		const double ds_draw = StableSigmoid(s_raw);
+		for (int xi = 0; xi < basis.rb_size; ++xi) {
+			basis.rb_ders[xi + basis.rb_size] *= dscal_draw;
+			basis.rb_ders[xi + 2 * basis.rb_size] *= dscal_draw;
+			basis.rb_ders[xi + 3 * basis.rb_size] *= ds_draw;
+			basis.rb_ders[xi + 4 * basis.rb_size] *= ds_draw;
+		}
 	}
 }
 
@@ -1691,6 +1734,16 @@ void RadialBasis_Laguerre_log1p::RB_Calc(double r, double scal, double s, int k)
 void RadialBasis_Laguerre_log1p_lmp::RB_Calc(double r, double scal, double s, int k)
 {
 	LaguerreLog1pCalc(*this, r, scal, s, true, false);
+}
+
+void RadialBasis_Laguerre_log1p_pos::RB_Calc(double r, double scal, double s, int k)
+{
+	LaguerreLog1pPositiveCalc(*this, r, scal, s, true, true);
+}
+
+void RadialBasis_Laguerre_log1p_pos_lmp::RB_Calc(double r, double scal, double s, int k)
+{
+	LaguerreLog1pPositiveCalc(*this, r, scal, s, true, false);
 }
 
 void RadialBasis_Laguerre_log1p_noenv::RB_Calc(double r, double scal, double s, int k)

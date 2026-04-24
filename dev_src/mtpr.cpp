@@ -36,6 +36,8 @@ bool IsLaguerreLog1pBasisType(const std::string& basis_type)
 {
 	return basis_type == "RBLaguerre_log1p"
 	    || basis_type == "RBLaguerre_log1p_lmp"
+	    || basis_type == "RBLaguerre_log1p_pos"
+	    || basis_type == "RBLaguerre_log1p_pos_lmp"
 	    || basis_type == "RBLaguerre_log1p_noenv"
 	    || basis_type == "RBLaguerre_log1p_noenv_lmp";
 }
@@ -62,6 +64,7 @@ bool UsesPrecomputedLmpTable(const std::string& basis_type)
 {
 	return basis_type == "RBChebyshev_sss_lmp"
 	    || basis_type == "RBLaguerre_log1p_lmp"
+	    || basis_type == "RBLaguerre_log1p_pos_lmp"
 	    || basis_type == "RBLaguerre_log1p_noenv_lmp"
 	    || basis_type == "RBJacobi_sss_lmp"
 	    || basis_type == "RBJacobi_sss_noweight_lmp";
@@ -351,6 +354,10 @@ void MLMTPR::Load(const string& filename)
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p(ifs);
 	        else if (rbasis_type == "RBLaguerre_log1p_lmp")
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p_lmp(ifs);
+	        else if (rbasis_type == "RBLaguerre_log1p_pos")
+	                p_RadialBasis = new RadialBasis_Laguerre_log1p_pos(ifs);
+	        else if (rbasis_type == "RBLaguerre_log1p_pos_lmp")
+	                p_RadialBasis = new RadialBasis_Laguerre_log1p_pos_lmp(ifs);
 	        else if (rbasis_type == "RBLaguerre_log1p_noenv")
 	                p_RadialBasis = new RadialBasis_Laguerre_log1p_noenv(ifs);
 	        else if (rbasis_type == "RBLaguerre_log1p_noenv_lmp")
