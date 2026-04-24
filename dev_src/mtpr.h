@@ -159,6 +159,7 @@ public:
 	bool env_gate_enabled = false;
 	bool has_env_gate_coeffs = false;
 	double env_gate_cutoff_ratio = 0.5;
+	double env_gate_activation_on_ratio = 0.5;
 	int env_gate_channel_count = 6;
         bool shift_ = true;
 	double* energy_cmpnts;								// Energy components for SLAE matrix

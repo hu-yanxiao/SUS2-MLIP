@@ -883,6 +883,20 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			ERROR("--env-gate-cutoff-ratio should be a finite double in (0, 1]");
 		custom_env_gate_cutoff_ratio = true;
 	}
+	bool custom_env_gate_activation_on_ratio = false;
+	double env_gate_activation_on_ratio_override = 0.5;
+	if (opts["env-gate-activation-on-ratio"] != "") {
+		try {
+			env_gate_activation_on_ratio_override = std::stod(opts["env-gate-activation-on-ratio"]);
+		} catch (const std::exception&) {
+			ERROR("--env-gate-activation-on-ratio should be a finite double in [0, 1)");
+		}
+		if (!std::isfinite(env_gate_activation_on_ratio_override) ||
+		    env_gate_activation_on_ratio_override < 0.0 ||
+		    env_gate_activation_on_ratio_override >= 1.0)
+			ERROR("--env-gate-activation-on-ratio should be a finite double in [0, 1)");
+		custom_env_gate_activation_on_ratio = true;
+	}
 	bool custom_env_gate_lambda_raw = false;
 	std::vector<double> env_gate_lambda_raw_override;
 	if (opts["env-gate-lambda-raw"] != "") {
@@ -918,10 +932,13 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			end = 10;
 		}
 	}
-	if ((custom_env_gate_cutoff_ratio || custom_env_gate_lambda_raw) && !mtpr.HasEnvGate())
-		ERROR("--env-gate-cutoff-ratio and --env-gate-lambda-raw require a SUS2-2.0 env-gate model or --enable-env-gate");
+	if ((custom_env_gate_cutoff_ratio || custom_env_gate_activation_on_ratio ||
+	     custom_env_gate_lambda_raw) && !mtpr.HasEnvGate())
+		ERROR("--env-gate-cutoff-ratio, --env-gate-activation-on-ratio, and --env-gate-lambda-raw require a SUS2-2.0 env-gate model or --enable-env-gate");
 	if (custom_env_gate_cutoff_ratio)
 		mtpr.env_gate_cutoff_ratio = env_gate_cutoff_ratio_override;
+	if (custom_env_gate_activation_on_ratio)
+		mtpr.env_gate_activation_on_ratio = env_gate_activation_on_ratio_override;
 	if (custom_env_gate_lambda_raw) {
 		if (env_gate_lambda_raw_override.size() == 1) {
 			for (int type = 0; type < mtpr.species_count; ++type)
@@ -968,6 +985,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
 	if (prank == 0 && custom_env_gate_cutoff_ratio)
 		std::cout << "env-gate cutoff ratio override: " << env_gate_cutoff_ratio_override << std::endl;
+	if (prank == 0 && custom_env_gate_activation_on_ratio)
+		std::cout << "env-gate activation-on ratio override: "
+		          << env_gate_activation_on_ratio_override << std::endl;
 	if (prank == 0 && custom_env_gate_lambda_raw)
 		std::cout << "env-gate lambda raw override: " << FormatDoubleList(env_gate_lambda_raw_override)
 		          << (env_gate_lambda_raw_override.size() == 1 ? " (broadcast)" : "") << std::endl;
@@ -976,6 +996,7 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	if (prank == 0 && mtpr.HasEnvGate())
 		std::cout << "SUS2-2.0 env-gate enabled: type=centered_tanh_screen, cutoff_ratio="
 		          << mtpr.env_gate_cutoff_ratio
+		          << ", activation_on_ratio=" << mtpr.env_gate_activation_on_ratio
 		          << ", channels=" << mtpr.env_gate_channel_count << std::endl;
 
 	Configuration cfg;

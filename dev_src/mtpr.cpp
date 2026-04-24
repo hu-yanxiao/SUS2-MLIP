@@ -23,10 +23,10 @@ constexpr double kRandomShiftMin = 1.5;
 constexpr double kRandomShiftMax = 2.5;
 constexpr int kEnvGateDefaultChannels = 6;
 constexpr double kEnvGateDefaultCutoffRatio = 0.5;
+constexpr double kEnvGateDefaultActivationOnRatio = 0.5;
 constexpr double kEnvGateDefaultLambdaRaw = -3.0;
 constexpr double kEnvGateDefaultLogDensityCoeff = 0.0;
 constexpr double kEnvGateMaxLogDensityCoeff = 6.0;
-constexpr double kEnvGateActivationOnRatio = 0.7;
 
 double Clamp01(double value)
 {
@@ -96,9 +96,15 @@ void BernsteinDegree5(double y, double* basis, double* basis_der)
 	basis_der[5] = 5.0 * degree4[4];
 }
 
-void EnvGateActivation(double r, double r_env, double* activation, double* activation_der)
+void EnvGateActivation(double r,
+                       double r_env,
+                       double activation_on_ratio,
+                       double* activation,
+                       double* activation_der)
 {
-	const double r_on = kEnvGateActivationOnRatio * r_env;
+	if (activation_on_ratio < 0.0 || activation_on_ratio >= 1.0)
+		ERROR("env_gate_activation_on_ratio should be in [0, 1).");
+	const double r_on = activation_on_ratio * r_env;
 	if (r <= r_on) {
 		*activation = 0.0;
 		*activation_der = 0.0;
@@ -281,6 +287,7 @@ void MLMTPR::EnableEnvGateDefault()
 	env_gate_enabled = true;
 	has_env_gate_coeffs = true;
 	env_gate_cutoff_ratio = kEnvGateDefaultCutoffRatio;
+	env_gate_activation_on_ratio = kEnvGateDefaultActivationOnRatio;
 	env_gate_channel_count = kEnvGateDefaultChannels;
 
 	const int env_offset = EnvGateCoeffOffset();
@@ -325,6 +332,7 @@ void MLMTPR::DisableEnvGate()
 	env_gate_enabled = false;
 	has_env_gate_coeffs = false;
 	env_gate_cutoff_ratio = kEnvGateDefaultCutoffRatio;
+	env_gate_activation_on_ratio = kEnvGateDefaultActivationOnRatio;
 	env_gate_channel_count = kEnvGateDefaultChannels;
 	regression_coeffs.swap(new_coeffs);
 }
@@ -756,6 +764,7 @@ void MLMTPR::Load(const string& filename)
 	env_gate_enabled = false;
 	has_env_gate_coeffs = false;
 	env_gate_cutoff_ratio = kEnvGateDefaultCutoffRatio;
+	env_gate_activation_on_ratio = kEnvGateDefaultActivationOnRatio;
 	env_gate_channel_count = kEnvGateDefaultChannels;
 
 	ifstream ifs(filename);
@@ -1064,6 +1073,18 @@ void MLMTPR::Load(const string& filename)
 		ifs >> env_gate_cutoff_ratio;
 
 		ifs >> tmpstr;
+		if (tmpstr == "env_gate_activation_on_ratio") {
+			ifs.ignore(2);
+			ifs >> env_gate_activation_on_ratio;
+			ifs >> tmpstr;
+		} else {
+			env_gate_activation_on_ratio = kEnvGateDefaultActivationOnRatio;
+		}
+		if (!std::isfinite(env_gate_activation_on_ratio) ||
+		    env_gate_activation_on_ratio < 0.0 ||
+		    env_gate_activation_on_ratio >= 1.0)
+			ERROR("env_gate_activation_on_ratio should be a finite double in [0, 1)");
+
 		if (tmpstr != "env_gate_channel_count")
 			ERROR("Error reading env_gate_channel_count");
 		ifs.ignore(2);
@@ -1524,6 +1545,7 @@ void MLMTPR::Save(const string& filename)
 	if (HasEnvGate()) {
 		ofs << "env_gate_type = centered_tanh_screen\n";
 		ofs << "env_gate_cutoff_ratio = " << env_gate_cutoff_ratio << '\n';
+		ofs << "env_gate_activation_on_ratio = " << env_gate_activation_on_ratio << '\n';
 		ofs << "env_gate_channel_count = " << env_gate_channel_count << '\n';
 		ofs << "env_gate_lambda_raw = {";
 		for (int type = 0; type < species_count; ++type) {
@@ -1829,7 +1851,8 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 		for (int j = 0; j < Neighborhood.count; ++j) {
 			double activation = 0.0;
 			double activation_der = 0.0;
-			EnvGateActivation(Neighborhood.dists[j], r_env, &activation, &activation_der);
+			EnvGateActivation(Neighborhood.dists[j], r_env, env_gate_activation_on_ratio,
+			                  &activation, &activation_der);
 			env_pair_gates[j] = 1.0 - env_screen_strength * activation;
 		}
 	}
@@ -1959,7 +1982,7 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 		env_pair_gates.assign(Neighborhood.count, 1.0);
 		env_activation_basic_vals.assign(alpha_index_basic_count, 0.0);
 		for (int j = 0; j < Neighborhood.count; ++j) {
-			EnvGateActivation(Neighborhood.dists[j], r_env,
+			EnvGateActivation(Neighborhood.dists[j], r_env, env_gate_activation_on_ratio,
 			                  &env_activation_vals[j], &env_activation_ders[j]);
 			env_pair_gates[j] = 1.0 - env_screen_strength * env_activation_vals[j];
 		}
@@ -2395,7 +2418,7 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 		env_pair_gates.assign(nbh.count, 1.0);
 		env_activation_basic_vals.assign(alpha_index_basic_count, 0.0);
 		for (int j = 0; j < nbh.count; ++j) {
-			EnvGateActivation(nbh.dists[j], r_env,
+			EnvGateActivation(nbh.dists[j], r_env, env_gate_activation_on_ratio,
 			                  &env_activation_vals[j], &env_activation_ders[j]);
 			env_pair_gates[j] = 1.0 - env_screen_strength * env_activation_vals[j];
 		}
@@ -2773,7 +2796,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 					env_activation_ders.assign(nbh.count, 0.0);
 					env_pair_gates.assign(nbh.count, 1.0);
 					for (int j = 0; j < nbh.count; ++j) {
-						EnvGateActivation(nbh.dists[j], r_env,
+						EnvGateActivation(nbh.dists[j], r_env, env_gate_activation_on_ratio,
 						                  &env_activation_vals[j], &env_activation_ders[j]);
 						env_pair_gates[j] = 1.0 - env_screen_strength * env_activation_vals[j];
 					}
