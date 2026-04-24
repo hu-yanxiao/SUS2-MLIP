@@ -136,6 +136,45 @@ int MLMTPR::RadialCoeffBlockSize() const
 	return p_RadialBasis->rb_size + species_count;
 }
 
+bool MLMTPR::IsRedundantRadialSpeciesCoeff(int coeff_index) const
+{
+	const int radial_begin = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int rb_size = p_RadialBasis->rb_size;
+	if (coeff_index < radial_begin)
+		return false;
+	const int radial_end = radial_begin + radial_func_count * block_size;
+	if (coeff_index >= radial_end)
+		return false;
+
+	const int relative_index = coeff_index - radial_begin;
+	const int mu = relative_index / block_size;
+	const int in_block = relative_index % block_size;
+	return mu > 0 && in_block >= rb_size;
+}
+
+void MLMTPR::BuildActiveCoeffIndices(std::vector<int>& active_coeff_indices, bool exclude_scal_coeffs) const
+{
+	active_coeff_indices.clear();
+	active_coeff_indices.reserve(regression_coeffs.size());
+	const int scal_begin = species_count;
+	const int scal_end = RadialCoeffOffset();
+	for (int coeff_index = 0; coeff_index < static_cast<int>(regression_coeffs.size()); ++coeff_index) {
+		if (exclude_scal_coeffs && coeff_index >= scal_begin && coeff_index < scal_end)
+			continue;
+		if (IsRedundantRadialSpeciesCoeff(coeff_index))
+			continue;
+		active_coeff_indices.push_back(coeff_index);
+	}
+}
+
+int MLMTPR::ActiveCoeffCount(bool exclude_scal_coeffs) const
+{
+	std::vector<int> active_coeff_indices;
+	BuildActiveCoeffIndices(active_coeff_indices, exclude_scal_coeffs);
+	return static_cast<int>(active_coeff_indices.size());
+}
+
 int MLMTPR::ScalingSlopeOffset(int scaling_block, int type_central, int type_outer) const
 {
 	const int pair_count = species_count * species_count;

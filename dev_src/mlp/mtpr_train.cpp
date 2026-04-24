@@ -1004,7 +1004,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
                                 std::cout <<"validation structures: " << valid_cfg_total << std::endl;
                                 std::cout <<"validation atoms: " << valid_atom_total << std::endl;
                          }
-                         std::cout <<"num_of_parameters: " <<mtpr.regression_coeffs.size()  <<std::endl;
+                         std::cout <<"num_of_parameters: " <<mtpr.ActiveCoeffCount(fine_tune)  <<std::endl;
+                         std::cout <<"num_of_stored_coefficients: " <<mtpr.regression_coeffs.size()  <<std::endl;
                          std::cout <<"num_of_scalar_basis_functions: " <<mtpr.alpha_scalar_moments  <<std::endl;
 						 std::cout << "num_of_L_channels: " << mtpr.L << std::endl;
 						 std::cout << "num_of_scaling_channels:" << mtpr.K_ << std::endl;

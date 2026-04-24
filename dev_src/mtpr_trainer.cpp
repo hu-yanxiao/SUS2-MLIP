@@ -904,20 +904,15 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 	const int scal_coeff_begin = p_mlmtpr->species_count;
 	const int scal_coeff_end = p_mlmtpr->RadialCoeffOffset();
 	std::vector<int> active_coeff_indices;
-	active_coeff_indices.reserve(n);
+	p_mlmtpr->BuildActiveCoeffIndices(active_coeff_indices, freeze_scal_coeffs);
 	std::vector<int> full_to_active_index(n, -1);
-	for (int full_idx = 0; full_idx < n; ++full_idx) {
-		const bool frozen_scal = freeze_scal_coeffs
-			&& full_idx >= scal_coeff_begin
-			&& full_idx < scal_coeff_end;
-		if (frozen_scal)
-			continue;
-		full_to_active_index[full_idx] = static_cast<int>(active_coeff_indices.size());
-		active_coeff_indices.push_back(full_idx);
-	}
+	for (int active_idx = 0; active_idx < static_cast<int>(active_coeff_indices.size()); ++active_idx)
+		full_to_active_index[active_coeff_indices[active_idx]] = active_idx;
 	const int opt_n = static_cast<int>(active_coeff_indices.size());
 	if (opt_n <= 0)
 		ERROR("MTPR_trainer::Train(): no active BFGS coordinates.");
+	const int redundant_radial_species_count =
+		n - p_mlmtpr->ActiveCoeffCount(false);
 
 	std::vector<double> active_coeffs(opt_n, 0.0);
 	auto pack_active_coeffs = [&]() {
@@ -972,6 +967,14 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		std::cout << "[" << CurrentTimestamp() << "] "
 		          << "scal_coeffs excluded from BFGS Hessian"
 		          << " frozen_count=" << (scal_coeff_end - scal_coeff_begin)
+		          << " active_count=" << opt_n
+		          << " full_count=" << n
+		          << " redundant_radial_species_count=" << redundant_radial_species_count
+		          << std::endl;
+	} else if (prank == 0 && redundant_radial_species_count > 0) {
+		std::cout << "[" << CurrentTimestamp() << "] "
+		          << "unused radial species coefficients excluded from BFGS Hessian"
+		          << " redundant_count=" << redundant_radial_species_count
 		          << " active_count=" << opt_n
 		          << " full_count=" << n << std::endl;
 	}
@@ -1045,9 +1048,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			const bool random_perturb_applied = (max_shift != 0.0);
 			if (prank == 0) {
 				for (int i = 0; i < n - nlin; i++) {
-					if (freeze_scal_coeffs
-					    && i >= p_mlmtpr->species_count
-					    && i < p_mlmtpr->RadialCoeffOffset())
+					if (full_to_active_index[i] < 0)
 						continue;
 					x[i] += distr(eng)*max_shift;
 				}
