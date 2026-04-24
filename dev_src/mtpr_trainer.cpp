@@ -23,9 +23,11 @@
 #endif
 
 #include <ctime>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <array>
+#include <exception>
 #include <limits>
 #include <random>
 #include <sstream>
@@ -126,6 +128,35 @@ bool TryBuildNeighborhoods(const std::vector<Configuration>& configs,
 		neighborhoods_out.shrink_to_fit();
 		return false;
 	}
+}
+
+int FirstNonFinite(const double* values, int count)
+{
+	for (int i = 0; i < count; ++i)
+		if (!std::isfinite(values[i]))
+			return i;
+	return -1;
+}
+
+std::string NonFiniteMessage(const std::string& name, int index)
+{
+	std::ostringstream oss;
+	oss << name << " contains a non-finite value";
+	if (index >= 0)
+		oss << " at index " << index;
+	return oss.str();
+}
+
+bool IsFiniteArray(const double* values, int count)
+{
+	return FirstNonFinite(values, count) < 0;
+}
+
+void RequireFiniteArray(const double* values, int count, const std::string& name)
+{
+	const int bad_index = FirstNonFinite(values, count);
+	if (bad_index >= 0)
+		ERROR(NonFiniteMessage(name, bad_index));
 }
 
 int SuggestedLinearSolveThreads(int n)
@@ -572,6 +603,8 @@ void MTPR_trainer::TrainLinear(int prank,
 	long long local_atom_count = 0;
 	for (const Configuration& cfg : training_set)
 		local_atom_count += cfg.size();
+	const std::string prefix = context.empty() ? "TrainLinear" : "TrainLinear[" + context + "]";
+	int n = p_mlmtpr->alpha_count - 1 + p_mlmtpr->species_count;		// Matrix size
 
 	p_mlmtpr->Orthogonalize();
 
@@ -594,8 +627,8 @@ void MTPR_trainer::TrainLinear(int prank,
 
 #ifdef MLIP_MPI
 
-	int n = p_mlmtpr->alpha_count - 1 + p_mlmtpr->species_count;		// Matrix size
-	const std::string prefix = context.empty() ? "TrainLinear" : "TrainLinear[" + context + "]";
+	int linear_status = 0;
+	std::string linear_error;
 	double reduce_start = MPI_Wtime();
 	if (mpi_rank == 0) {
 		std::cout << "[" << CurrentTimestamp() << "] TrainLinear build done"
@@ -616,11 +649,49 @@ void MTPR_trainer::TrainLinear(int prank,
 		          << " ctx=" << prefix
 		          << " reduce_s=" << reduce_seconds << std::endl;
 		const double solve_start = MPI_Wtime();
-		SolveSLAE();
+		const int bad_matrix = FirstNonFinite(quad_opt_matr, n*n);
+		const int bad_rhs = FirstNonFinite(quad_opt_vec, n);
+		if (bad_matrix >= 0) {
+			linear_status = 1;
+			linear_error = NonFiniteMessage(prefix + " normal matrix", bad_matrix);
+		} else if (bad_rhs >= 0) {
+			linear_status = 1;
+			linear_error = NonFiniteMessage(prefix + " right-hand side", bad_rhs);
+		} else {
+			try {
+				SolveSLAE();
+			}
+			catch (const MlipException& exc) {
+				linear_status = 1;
+				linear_error = exc.What();
+			}
+			catch (const std::exception& exc) {
+				linear_status = 1;
+				linear_error = exc.what();
+			}
+			catch (...) {
+				linear_status = 1;
+				linear_error = prefix + " linear solve failed with an unknown exception";
+			}
+		}
+		if (linear_status == 0) {
+			const int bad_coeff = FirstNonFinite(p_mlmtpr->Coeff(), p_mlmtpr->CoeffCount());
+			if (bad_coeff >= 0) {
+				linear_status = 1;
+				linear_error = NonFiniteMessage(prefix + " solved coefficients", bad_coeff);
+			}
+		}
 		const double solve_seconds = MPI_Wtime() - solve_start;
-		std::cout << "[" << CurrentTimestamp() << "] TrainLinear solve done"
-		          << " ctx=" << prefix
-		          << " solve_s=" << solve_seconds << std::endl;
+		if (linear_status == 0) {
+			std::cout << "[" << CurrentTimestamp() << "] TrainLinear solve done"
+			          << " ctx=" << prefix
+			          << " solve_s=" << solve_seconds << std::endl;
+		} else {
+			std::cerr << "[" << CurrentTimestamp() << "] TrainLinear solve failed"
+			          << " ctx=" << prefix
+			          << " solve_s=" << solve_seconds
+			          << " reason=" << linear_error << std::endl;
+		}
 	} else {
 		MPI_Reduce(quad_opt_matr, quad_opt_matr, n*n, MPI_DOUBLE, MPI_SUM, 0, train_comm);
 		MPI_Reduce(quad_opt_vec, quad_opt_vec, n, MPI_DOUBLE, MPI_SUM, 0, train_comm);
@@ -628,11 +699,18 @@ void MTPR_trainer::TrainLinear(int prank,
 	}
 
 #else
+	RequireFiniteArray(quad_opt_matr, n*n, prefix + " normal matrix");
+	RequireFiniteArray(quad_opt_vec, n, prefix + " right-hand side");
 	SolveSLAE();
+	RequireFiniteArray(p_mlmtpr->Coeff(), p_mlmtpr->CoeffCount(), prefix + " solved coefficients");
 #endif
 #ifdef MLIP_MPI
 	double bcast_start = MPI_Wtime();
+	MPI_Bcast(&linear_status, 1, MPI_INT, 0, train_comm);
+	if (linear_status != 0)
+		ERROR(prefix + " failed; see rank-0 log for the first non-finite linear-solve detail.");
 	MPI_Bcast(&p_mlmtpr->Coeff()[0], p_mlmtpr->CoeffCount(), MPI_DOUBLE, 0, train_comm);
+	RequireFiniteArray(p_mlmtpr->Coeff(), p_mlmtpr->CoeffCount(), prefix + " broadcast coefficients");
 	double bcast_seconds = MPI_Wtime() - bcast_start;
 	if (mpi_rank == 0) {
 		std::cout << "[" << CurrentTimestamp() << "] TrainLinear bcast done"
@@ -871,6 +949,18 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 	double max_shift = 0.1*random_perturb;
 	double cooling_rate = 0.2;
 	bool linesearch = false;
+	auto abort_if_any_rank_reports = [&](int local_status, const std::string& message) {
+		int global_status = local_status;
+#ifdef MLIP_MPI
+		MPI_Allreduce(&local_status, &global_status, 1, MPI_INT, MPI_MAX, train_comm);
+#endif
+		if (global_status != 0)
+			ERROR(message);
+	};
+	auto require_finite_coeffs_all = [&](const std::string& context) {
+		const int local_status = FirstNonFinite(p_mlmtpr->Coeff(), n) >= 0 ? 1 : 0;
+		abort_if_any_rank_reports(local_status, context + ": non-finite MTPR coefficients detected.");
+	};
 
 	std::random_device random_device;
 	std::default_random_engine eng(random_device());
@@ -966,6 +1056,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		}
 
 		std::memcpy(x, bfgs.Data(), n * sizeof(double));
+		require_finite_coeffs_all("BFGS trial step " + std::to_string(num_step));
 
 		CalcObjectiveFunctionGrad(training_set, cache_training_neighborhoods ? &training_neighborhoods : nullptr);
 
@@ -1028,13 +1119,41 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		}
 #endif
 
+		int bfgs_status = 0;
 		if ((distributed_bfgs || prank == 0) && !converge) {
+			try {
 				bfgs.Iterate(bfgs_f, bfgs_g);
 
 				while (abs(bfgs.x(p_mlmtpr->species_count*p_mlmtpr->species_count) - x[p_mlmtpr->species_count*p_mlmtpr->species_count]) > 0.5) {
 					bfgs.ReduceStep(0.25);
 				}
+				RequireFiniteArray(bfgs.Data(), n, "BFGS proposed coefficients");
+			}
+			catch (const MlipException& exc) {
+				bfgs_status = 1;
+				if (prank == 0)
+					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
+					          << " step=" << num_step
+					          << " reason=" << exc.What() << std::endl;
+			}
+			catch (const std::exception& exc) {
+				bfgs_status = 1;
+				if (prank == 0)
+					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
+					          << " step=" << num_step
+					          << " reason=" << exc.what() << std::endl;
+			}
+			catch (...) {
+				bfgs_status = 1;
+				if (prank == 0)
+					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
+					          << " step=" << num_step
+					          << " reason=unknown exception" << std::endl;
+			}
 		}
+		abort_if_any_rank_reports(bfgs_status,
+			"BFGS failed at step " + std::to_string(num_step)
+			+ "; refusing to continue with non-finite optimizer state.");
 
 #ifdef MLIP_MPI
 		if (!distributed_bfgs) {
@@ -1048,6 +1167,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			}
 		}
 #endif
+		require_finite_coeffs_all("BFGS synchronized step " + std::to_string(num_step));
 
 		if (prank == 0)
 			if (!converge) {
@@ -1140,6 +1260,8 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			MPI_Waitall(2, accepted_reduce_requests, MPI_STATUSES_IGNORE);
 #endif
 
+			int accepted_status = 0;
+			double efs_loss = 0.0;
 			if (prank == 0)
 			{
 				std_l = accepted_diag_global[6];
@@ -1171,7 +1293,25 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				last_train_error_summary_.stress_rmse_ev = stress_rmse_ev_l;
 				have_last_train_error_summary_ = true;
 
-				const double efs_loss = bfgs_f - std_l - stdd_l;
+				efs_loss = bfgs_f - std_l - stdd_l;
+				const double accepted_values[] = {
+					bfgs_f, std_l, stdd_l, efs_loss,
+					energy_mae_mev_atom_l, energy_rmse_mev_atom_l,
+					force_mae_mev_a_l, force_rmse_mev_a_l,
+					stress_mae_ev_l, stress_rmse_ev_l,
+					mean_1_l, mean_2_l, mean_3_l
+				};
+				if (!IsFiniteArray(accepted_values, static_cast<int>(sizeof(accepted_values) / sizeof(accepted_values[0]))))
+					accepted_status = 1;
+				else if (FirstNonFinite(p_mlmtpr->Coeff(), p_mlmtpr->CoeffCount()) >= 0)
+					accepted_status = 1;
+			}
+			abort_if_any_rank_reports(accepted_status,
+				"Non-finite accepted BFGS state at step " + std::to_string(num_step)
+				+ "; refusing to write current potential.");
+
+			if (prank == 0)
+			{
 				if (curr_pot_name != "")
 					p_mlmtpr->Save(curr_pot_name);
 				if (bfgs_trace_stream.is_open()) {

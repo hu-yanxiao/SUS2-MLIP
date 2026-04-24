@@ -115,7 +115,7 @@ public:
 
 	Linesearch() { Reset(); }
 
-	double x() { return curr_x; }
+	double x() const { return curr_x; }
 	bool stagnated() const { return stagnated_; }
 
 	void ReduceStep(double ratio = 0.25) {
@@ -220,12 +220,19 @@ public:
 			// with left_f, left_g, curr_f
 
 			double slope = -left_g * (curr_x - left_x);
-			double f0 = std::log(slope);
-			double g0 = left_g / slope;
-			double f1 = std::log(curr_f - left_f + slope);
-
-			double next_x = left_x - 0.5 * g0 * (curr_x - left_x) * (curr_x - left_x)
-				/ (f1 - f0 - g0 * (curr_x - left_x));
+			double next_x = left_x + 0.5 * (curr_x - left_x);
+			const double log_arg = curr_f - left_f + slope;
+			if (slope > 0.0 && log_arg > 0.0
+				&& std::isfinite(slope) && std::isfinite(log_arg)) {
+				double f0 = std::log(slope);
+				double g0 = left_g / slope;
+				double f1 = std::log(log_arg);
+				const double denom = f1 - f0 - g0 * (curr_x - left_x);
+				if (std::isfinite(denom) && denom != 0.0) {
+					next_x = left_x - 0.5 * g0 * (curr_x - left_x) * (curr_x - left_x)
+						/ denom;
+				}
+			}
 
 			if (next_x > right_x && right_g > 0) {
 				// super robust here: dihotomy
@@ -243,6 +250,8 @@ public:
 			std::cerr << std::endl;
 #endif // MLIP_LINESEARCH_DEBUG
 
+			if (!std::isfinite(next_x))
+				next_x = left_x + 0.5 * (curr_x - left_x);
 			prev_x = curr_x; prev_f = curr_f; prev_g = curr_g;
 			curr_x = next_x;
 			return;
@@ -263,6 +272,8 @@ public:
 
 		// we can now do a secant method
 		double new_x = curr_x - curr_g * (curr_x - prev_x) / (curr_g - prev_g);
+		if (!std::isfinite(new_x))
+			new_x = left_x + 0.5 * (right_x - left_x);
 		prev_x = curr_x; prev_f = curr_f; prev_g = curr_g;
 		curr_x = new_x;
 		if (curr_x > right_x) {

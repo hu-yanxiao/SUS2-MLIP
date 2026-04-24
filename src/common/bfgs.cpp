@@ -21,6 +21,30 @@
 #include <cblas.h>
 #endif
 
+namespace {
+
+int FirstNonFinite(const Array1D& values, int size)
+{
+	for (int i = 0; i < size; ++i)
+		if (!std::isfinite(values[i]))
+			return i;
+	return -1;
+}
+
+void CheckFiniteArray(const Array1D& values, int size, const std::string& name)
+{
+	const int bad_index = FirstNonFinite(values, size);
+	if (bad_index >= 0)
+		ERROR(name + " contains a non-finite value at index " + std::to_string(bad_index));
+}
+
+bool BFGSShouldBacktrackNonFinite(bool is_in_linesearch, const Linesearch& linesearch)
+{
+	return is_in_linesearch && linesearch.x() != 0.0;
+}
+
+} // namespace
+
 void BFGS::UseDistributedDense(int rank, int size
 #ifdef MLIP_MPI
 	, MPI_Comm comm
@@ -224,7 +248,26 @@ void BFGS::MaskCoordinates(const std::vector<int>& indices)
 //! Internally, it changes the protected members
 //! alpha and if outside linesearch then it changes p.
 const Array1D& BFGS::Iterate(double f, const Array1D& g) {
+	const int bad_grad_index = FirstNonFinite(g, size);
+	if (!std::isfinite(f) || bad_grad_index >= 0) {
+		if (BFGSShouldBacktrackNonFinite(is_in_linesearch_, linesearch)) {
+			is_in_linesearch_ = true;
+			iter_step += 1;
+			linesearch.ReduceStep(0.25);
+			for (int i = 0; i < size; i++)
+				x_[i] = x_start[i] + linesearch.x() * p[i];
+			CheckFiniteArray(x_, size, "BFGS backtracked x");
+			return x_;
+		}
+		if (!std::isfinite(f))
+			ERROR("BFGS received a non-finite function value outside line search.");
+		ERROR("BFGS received a non-finite gradient outside line search at index "
+		      + std::to_string(bad_grad_index));
+	}
+
 	p_dot_g = ScalarProd(&g[0], &p[0]);
+	if (!std::isfinite(p_dot_g))
+		ERROR("BFGS produced a non-finite directional derivative.");
 
 	// checking Wolfe conditions for the function
 	if (f > f_start + wolfe_c1*linesearch.x()*p_dot_g_start
@@ -237,6 +280,7 @@ const Array1D& BFGS::Iterate(double f, const Array1D& g) {
 		if (linesearch.stagnated())
 			iter_step = 31;
 		for (int i = 0; i < size; i++) x_[i] = x_start[i] + linesearch.x() * p[i];
+		CheckFiniteArray(x_, size, "BFGS line-search x");
 	} else {
 		// if we were in linesearch, we say we are no longer in linesearch
 		// else, we should say we ARE in linesearch
@@ -248,7 +292,10 @@ const Array1D& BFGS::Iterate(double f, const Array1D& g) {
 		// Doing a proper (non-linesearch iteration)
 		// forming a descent (hopefully) direction p
 		FormDenseDirection(g);
+		CheckFiniteArray(p, size, "BFGS search direction");
 		p_dot_g = ScalarProd(&g[0], &p[0]);
+		if (!std::isfinite(p_dot_g))
+			ERROR("BFGS produced a non-finite directional derivative after Hessian update.");
 		linesearch.Reset();
 		// setting initial point for linearsearch
 		SetStart(f, g);
@@ -269,6 +316,7 @@ const Array1D& BFGS::Iterate(double f, const Array1D& g) {
 		linesearch.Iterate(f, p_dot_g);
 		for (int i = 0; i < size; i++)
 			x_[i] = x_start[i] + linesearch.x() * p[i];
+		CheckFiniteArray(x_, size, "BFGS next x");
 	}
 
 	return x_;
@@ -306,13 +354,20 @@ void BFGS::UpdateInvHess(const Array1D& g)
 		py += alpha * p[i] * delta_grad[i];
 
 	// if py==0 then this is the very first iteration and no updating inv_hess needed
-	if (py == 0) return;
+	if (!std::isfinite(py))
+		ERROR("BFGS Hessian update produced non-finite curvature.");
+	const double curvature_floor = 64.0 * std::numeric_limits<double>::epsilon();
+	if (py <= curvature_floor) return;
 
 	DenseMatVec(delta_grad, yC);
 	for (int i = 0; i < size; i++)
 		yCy += yC[i] * delta_grad[i];
+	if (!std::isfinite(yCy))
+		ERROR("BFGS Hessian update produced non-finite yHy.");
 
 	double foo = (py + yCy) / (py*py);
+	if (!std::isfinite(foo))
+		return;
 
 	if (!use_distributed_dense_) {
 #ifdef MLIP_INTEL_MKL
