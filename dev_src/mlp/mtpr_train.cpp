@@ -782,6 +782,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	bool fine_tune = false;
 	if (opts["fine-tune"] != "")
 		fine_tune = true;
+	bool enable_env_gate = false;
+	if (opts["enable-env-gate"] != "")
+		enable_env_gate = true;
 	int do_lin_step_limit = 1000;
 	if (opts["do-lin-steps"] != "")
 		do_lin_step_limit = stoi(opts["do-lin-steps"]);
@@ -852,6 +855,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	for (int i = 0; i < end; i++) {
 		try {
 			mtpr.Load(args[0]);
+			if (enable_env_gate)
+				mtpr.EnableEnvGateDefault();
 			end = 1;
 		}
 		catch (MlipException& exp) {
@@ -894,6 +899,10 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
 	if (prank == 0 && fine_tune)
 		std::cout << "fine-tune mode enabled: scal_coeffs frozen; initial rescale+linear solve will run before BFGS" << std::endl;
+	if (prank == 0 && mtpr.HasEnvGate())
+		std::cout << "SUS2-2.0 env-gate enabled: type=centered_tanh_screen, cutoff_ratio="
+		          << mtpr.env_gate_cutoff_ratio
+		          << ", channels=" << mtpr.env_gate_channel_count << std::endl;
 
 	Configuration cfg;
 	DatasetStats train_stats_local;

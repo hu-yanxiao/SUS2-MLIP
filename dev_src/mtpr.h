@@ -98,6 +98,10 @@ protected:
 	std::vector<double> grad_neighbor_mu_contract_ders_ss_cache_;
 	std::vector<double> grad_neighbor_mu_contract_coord_ders_s_cache_;
 	std::vector<double> grad_neighbor_mu_contract_coord_ders_ss_cache_;
+	std::vector<double> env_gate_density_coeffs_;
+	std::vector<double> env_gate_channel_sums_;
+	std::vector<double> env_gate_rho_dr_;
+	std::vector<Vector3> env_gate_ders_;
 	std::vector<int> basic_total_degree_cache_;
 	std::vector<int> basic_scaling_block_cache_;
 	std::vector<int> basic_radial_eval_block_cache_;
@@ -126,6 +130,8 @@ public:
     BasicIndices alpha_index_times_;
     Array3D radial_list;
     Array3D radial_der_list;
+    Array3D env_gate_radial_list;
+    Array3D env_gate_radial_der_list;
     //const Array3D& get_radial_list() const { return radial_list; }
     //const Array3D& get_radial_der_list() const { return radial_der_list; }
     double inv_dr;
@@ -144,6 +150,10 @@ public:
 	bool has_scal_coeffs = false;
 	bool has_radial_coeffs = false;
 	bool has_linear_coeffs = false;
+	bool env_gate_enabled = false;
+	bool has_env_gate_coeffs = false;
+	double env_gate_cutoff_ratio = 0.5;
+	int env_gate_channel_count = 6;
         bool shift_ = true;
 	double* energy_cmpnts;								// Energy components for SLAE matrix
 	Array3D forces_cmpnts;								// Force components for SLAE matrix
@@ -188,6 +198,19 @@ public:
 	int ScalingCoeffCount() const;
 	int RadialCoeffOffset() const;
 	int RadialCoeffBlockSize() const;
+	int EnvGateCoeffCount() const;
+	int EnvGateCoeffOffset() const;
+	int EnvGateLambdaRawOffset() const;
+	int EnvGateLogDensityCoeffOffset(int type_central, int channel) const;
+	int LinearCoeffOffset() const;
+	void EnableEnvGateDefault();
+	void DisableEnvGate();
+	bool HasEnvGate() const;
+	double EnvGateLambda() const;
+	double ComputeEnvGate(const Neighborhood& nbh,
+	                      std::vector<Vector3>* gate_ders = nullptr,
+	                      std::vector<double>* channel_sums = nullptr,
+	                      std::vector<double>* rho_dr = nullptr);
 	bool IsRedundantRadialSpeciesCoeff(int coeff_index) const;
 	void BuildActiveCoeffIndices(std::vector<int>& active_coeff_indices, bool exclude_scal_coeffs = false) const;
 	int ActiveCoeffCount(bool exclude_scal_coeffs = false) const;
@@ -212,7 +235,7 @@ public:
 	}
 	const std::vector<double>& LinCoeff()								//returns linear coefficients
 	{
-		int Rsize = species_count+2*species_count*species_count* K_ +(p_RadialBasis->rb_size + species_count)*radial_func_count;
+		int Rsize = LinearCoeffOffset();
 
 		for (int i = Rsize; i < Rsize + alpha_count + species_count - 1;i++)
 			linear_coeffs[i-Rsize]=regression_coeffs[i];

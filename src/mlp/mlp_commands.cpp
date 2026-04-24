@@ -525,6 +525,8 @@ bool Commands(const string& command, vector<string>& args, map<string, string>& 
 		"                         do-lin is active. Default=50\n"
 		"    --fine-tune: require a complete trained model, freeze scal_coeffs, and\n"
 		"                 run one initial rescale+linear solve before BFGS.\n"
+		"    --enable-env-gate: initialize an old 1.1.0 model as SUS2-2.0 with\n"
+		"                       centered exponential environment screening.\n"
 		"    --do-samp: disable random sampling used in pre-training.\n"
 		"    --scal-range=<a,b>: override the pair-strength interpolation bounds used for\n"
 		"                        the first nonlinear scaling parameter. The first value is\n"

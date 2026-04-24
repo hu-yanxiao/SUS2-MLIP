@@ -21,6 +21,11 @@ constexpr double kRandomScalMax = 4.0;
 constexpr double kLaguerreRandomScalMax = 3.0;
 constexpr double kRandomShiftMin = 1.5;
 constexpr double kRandomShiftMax = 2.5;
+constexpr int kEnvGateDefaultChannels = 6;
+constexpr double kEnvGateDefaultCutoffRatio = 0.5;
+constexpr double kEnvGateDefaultLambdaRaw = -2.0;
+constexpr double kEnvGateDefaultLogDensityCoeff = 0.0;
+constexpr double kEnvGateMaxLogDensityCoeff = 6.0;
 
 double Clamp01(double value)
 {
@@ -30,6 +35,64 @@ double Clamp01(double value)
 double Lerp(double start, double end, double t)
 {
 	return start + (end - start) * t;
+}
+
+double StableSigmoid(double value)
+{
+	if (value >= 0.0) {
+		const double z = std::exp(-value);
+		return 1.0 / (1.0 + z);
+	}
+	const double z = std::exp(value);
+	return z / (1.0 + z);
+}
+
+double EnvGateDensityCoeff(double raw_log_density)
+{
+	return std::exp(std::min(raw_log_density, kEnvGateMaxLogDensityCoeff));
+}
+
+double EnvGateDensityCoeffDer(double raw_log_density)
+{
+	if (raw_log_density >= kEnvGateMaxLogDensityCoeff)
+		return 0.0;
+	return std::exp(raw_log_density);
+}
+
+void BernsteinDegree5(double y, double* basis, double* basis_der)
+{
+	y = Clamp01(y);
+	const double u = 1.0 - y;
+	const double y2 = y * y;
+	const double y3 = y2 * y;
+	const double y4 = y3 * y;
+	const double y5 = y4 * y;
+	const double u2 = u * u;
+	const double u3 = u2 * u;
+	const double u4 = u3 * u;
+	const double u5 = u4 * u;
+
+	basis[0] = u5;
+	basis[1] = 5.0 * y * u4;
+	basis[2] = 10.0 * y2 * u3;
+	basis[3] = 10.0 * y3 * u2;
+	basis[4] = 5.0 * y4 * u;
+	basis[5] = y5;
+
+	if (basis_der == nullptr)
+		return;
+
+	const double degree4[5] = {
+		u4,
+		4.0 * y * u3,
+		6.0 * y2 * u2,
+		4.0 * y3 * u,
+		y4
+	};
+	basis_der[0] = -5.0 * degree4[0];
+	for (int q = 1; q < 5; ++q)
+		basis_der[q] = 5.0 * (degree4[q - 1] - degree4[q]);
+	basis_der[5] = 5.0 * degree4[4];
 }
 
 bool IsLaguerreLog1pBasisType(const std::string& basis_type)
@@ -123,7 +186,8 @@ bool MLMTPR::HasCompleteParameters() const
 	    && has_shift_coeffs
 	    && has_scal_coeffs
 	    && has_radial_coeffs
-	    && has_linear_coeffs;
+	    && has_linear_coeffs
+	    && (!env_gate_enabled || has_env_gate_coeffs);
 }
 
 int MLMTPR::RadialCoeffOffset() const
@@ -134,6 +198,233 @@ int MLMTPR::RadialCoeffOffset() const
 int MLMTPR::RadialCoeffBlockSize() const
 {
 	return p_RadialBasis->rb_size + species_count;
+}
+
+int MLMTPR::EnvGateCoeffCount() const
+{
+	if (!env_gate_enabled)
+		return 0;
+	return 1 + species_count * env_gate_channel_count;
+}
+
+int MLMTPR::EnvGateCoeffOffset() const
+{
+	return RadialCoeffOffset() + radial_func_count * RadialCoeffBlockSize();
+}
+
+int MLMTPR::EnvGateLambdaRawOffset() const
+{
+	return EnvGateCoeffOffset();
+}
+
+int MLMTPR::EnvGateLogDensityCoeffOffset(int type_central, int channel) const
+{
+	return EnvGateCoeffOffset() + 1 + type_central * env_gate_channel_count + channel;
+}
+
+int MLMTPR::LinearCoeffOffset() const
+{
+	return EnvGateCoeffOffset() + EnvGateCoeffCount();
+}
+
+bool MLMTPR::HasEnvGate() const
+{
+	return env_gate_enabled && has_env_gate_coeffs;
+}
+
+double MLMTPR::EnvGateLambda() const
+{
+	if (!HasEnvGate())
+		return 0.0;
+	return StableSigmoid(regression_coeffs[EnvGateLambdaRawOffset()]);
+}
+
+void MLMTPR::EnableEnvGateDefault()
+{
+	if (env_gate_enabled && has_env_gate_coeffs)
+		return;
+
+	const int old_linear_offset = LinearCoeffOffset();
+	const int expected_linear_count = alpha_count + species_count - 1;
+	const int old_linear_count =
+		static_cast<int>(regression_coeffs.size()) >= old_linear_offset + expected_linear_count
+		? expected_linear_count
+		: 0;
+	std::vector<double> old_linear;
+	if (old_linear_count > 0 && static_cast<int>(regression_coeffs.size()) >= old_linear_offset + old_linear_count)
+		old_linear.assign(regression_coeffs.begin() + old_linear_offset,
+		                  regression_coeffs.begin() + old_linear_offset + old_linear_count);
+
+	env_gate_enabled = true;
+	has_env_gate_coeffs = true;
+	env_gate_cutoff_ratio = kEnvGateDefaultCutoffRatio;
+	env_gate_channel_count = kEnvGateDefaultChannels;
+
+	const int env_offset = EnvGateCoeffOffset();
+	const int env_count = EnvGateCoeffCount();
+	const int new_linear_offset = LinearCoeffOffset();
+	std::vector<double> new_coeffs(new_linear_offset + old_linear_count, 0.0);
+	for (int i = 0; i < env_offset && i < static_cast<int>(regression_coeffs.size()); ++i)
+		new_coeffs[i] = regression_coeffs[i];
+
+	new_coeffs[EnvGateLambdaRawOffset()] = kEnvGateDefaultLambdaRaw;
+	for (int i = 1; i < env_count; ++i)
+		new_coeffs[env_offset + i] = kEnvGateDefaultLogDensityCoeff;
+	for (int i = 0; i < old_linear_count; ++i)
+		new_coeffs[new_linear_offset + i] = old_linear[i];
+
+	regression_coeffs.swap(new_coeffs);
+	if (old_linear_count > 0) {
+		linear_coeffs.assign(old_linear_count, 0.0);
+		for (int i = 0; i < old_linear_count; ++i)
+			linear_coeffs[i] = regression_coeffs[new_linear_offset + i];
+	}
+}
+
+void MLMTPR::DisableEnvGate()
+{
+	if (!env_gate_enabled)
+		return;
+
+	const int old_env_offset = EnvGateCoeffOffset();
+	const int old_linear_offset = LinearCoeffOffset();
+	const int old_linear_count = has_linear_coeffs
+		? alpha_count + species_count - 1
+		: 0;
+
+	std::vector<double> new_coeffs(old_env_offset + old_linear_count, 0.0);
+	for (int i = 0; i < old_env_offset && i < static_cast<int>(regression_coeffs.size()); ++i)
+		new_coeffs[i] = regression_coeffs[i];
+	for (int i = 0; i < old_linear_count; ++i)
+		new_coeffs[old_env_offset + i] = regression_coeffs[old_linear_offset + i];
+
+	env_gate_enabled = false;
+	has_env_gate_coeffs = false;
+	env_gate_cutoff_ratio = kEnvGateDefaultCutoffRatio;
+	env_gate_channel_count = kEnvGateDefaultChannels;
+	regression_coeffs.swap(new_coeffs);
+}
+
+double MLMTPR::ComputeEnvGate(const Neighborhood& nbh,
+                              std::vector<Vector3>* gate_ders,
+                              std::vector<double>* channel_sums,
+                              std::vector<double>* rho_dr)
+{
+	if (!HasEnvGate()) {
+		if (gate_ders != nullptr)
+			gate_ders->assign(nbh.count, Vector3(0.0, 0.0, 0.0));
+		if (channel_sums != nullptr)
+			channel_sums->assign(kEnvGateDefaultChannels, 0.0);
+		if (rho_dr != nullptr)
+			rho_dr->assign(nbh.count, 0.0);
+		return 1.0;
+	}
+
+	if (env_gate_channel_count != kEnvGateDefaultChannels)
+		ERROR("centered_tanh_screen env-gate currently requires 6 Bernstein channels.");
+
+	const int type_central = nbh.my_type;
+	if (type_central >= species_count)
+		throw MlipException("Too few species count in the MTP potential!");
+
+	const double r_env = env_gate_cutoff_ratio * p_RadialBasis->max_dist;
+	if (r_env <= 0.0)
+		ERROR("env_gate_cutoff_ratio should be positive.");
+
+	env_gate_density_coeffs_.assign(env_gate_channel_count, 0.0);
+	env_gate_channel_sums_.assign(env_gate_channel_count, 0.0);
+	env_gate_rho_dr_.assign(nbh.count, 0.0);
+	if (gate_ders != nullptr)
+		gate_ders->assign(nbh.count, Vector3(0.0, 0.0, 0.0));
+	const bool use_env_gate_table =
+		env_gate_radial_list.size1 == species_count * species_count
+		&& env_gate_radial_list.size2 >= 2
+		&& env_gate_radial_list.size3 == env_gate_channel_count;
+
+	for (int q = 0; q < env_gate_channel_count; ++q)
+		env_gate_density_coeffs_[q] =
+			EnvGateDensityCoeff(regression_coeffs[EnvGateLogDensityCoeffOffset(type_central, q)]);
+
+	double rho = 0.0;
+	for (int j = 0; j < nbh.count; ++j) {
+		const double r = nbh.dists[j];
+		if (r <= 0.0 || r >= r_env)
+			continue;
+		const int type_outer = nbh.types[j];
+		if (type_outer >= species_count)
+			throw MlipException("Too few species count in the MTP potential!");
+
+		double weighted_basis_values[6];
+		double weighted_basis_ders[6];
+		if (use_env_gate_table) {
+			int r_list = static_cast<int>(std::floor(r * inv_dr));
+			const int last_interval = env_gate_radial_list.size2 - 2;
+			if (r_list < 0)
+				r_list = 0;
+			if (r_list > last_interval)
+				r_list = last_interval;
+			const int r_next = r_list + 1;
+			double ddr = r * inv_dr - r_list;
+			if (ddr < 0.0)
+				ddr = 0.0;
+			if (ddr > 1.0)
+				ddr = 1.0;
+			const int pair_index = type_central * species_count + type_outer;
+			for (int q = 0; q < env_gate_channel_count; ++q) {
+				const double v1 = env_gate_radial_list(pair_index, r_list, q);
+				const double v2 = env_gate_radial_list(pair_index, r_next, q);
+				const double d1 = env_gate_radial_der_list(pair_index, r_list, q);
+				const double d2 = env_gate_radial_der_list(pair_index, r_next, q);
+				weighted_basis_values[q] = v1 + ddr * (v2 - v1);
+				weighted_basis_ders[q] = d1 + ddr * (d2 - d1);
+			}
+		} else {
+			const double y = r / r_env;
+			const double dy_dr = 1.0 / r_env;
+			const double cutoff = 1.0 - r / r_env;
+			const double f_env = cutoff * cutoff;
+			const double df_dr = -2.0 * cutoff / r_env;
+			double bernstein[6];
+			double bernstein_der[6];
+			BernsteinDegree5(y, bernstein, bernstein_der);
+			for (int q = 0; q < env_gate_channel_count; ++q) {
+				weighted_basis_values[q] = f_env * bernstein[q];
+				weighted_basis_ders[q] = df_dr * bernstein[q] + f_env * bernstein_der[q] * dy_dr;
+			}
+		}
+
+		double local_rho_dr = 0.0;
+		for (int q = 0; q < env_gate_channel_count; ++q) {
+			const double weighted_basis = weighted_basis_values[q];
+			env_gate_channel_sums_[q] += weighted_basis;
+			rho += env_gate_density_coeffs_[q] * weighted_basis;
+			local_rho_dr += env_gate_density_coeffs_[q]
+				* weighted_basis_ders[q];
+		}
+		env_gate_rho_dr_[j] = local_rho_dr;
+	}
+
+	const double lambda = EnvGateLambda();
+	const double tanh_rho = std::tanh(rho);
+	const double sech2_rho = 1.0 - tanh_rho * tanh_rho;
+	const double gate = 1.0 - lambda * tanh_rho;
+
+	if (gate_ders != nullptr) {
+		for (int j = 0; j < nbh.count; ++j) {
+			const double r = nbh.dists[j];
+			if (r <= 0.0 || env_gate_rho_dr_[j] == 0.0)
+				continue;
+			const double dgate_dr = -lambda * sech2_rho * env_gate_rho_dr_[j];
+			for (int a = 0; a < 3; ++a)
+				(*gate_ders)[j][a] = dgate_dr * nbh.vecs[j][a] / r;
+		}
+	}
+	if (channel_sums != nullptr)
+		*channel_sums = env_gate_channel_sums_;
+	if (rho_dr != nullptr)
+		*rho_dr = env_gate_rho_dr_;
+
+	return gate;
 }
 
 bool MLMTPR::IsRedundantRadialSpeciesCoeff(int coeff_index) const
@@ -313,8 +604,12 @@ void MLMTPR::PruneSpecies(const std::vector<int>& old_species_indices)
 	const int new_radial_offset = new_species_count + 2 * new_pair_count * K_;
 	const int old_radial_block_size = rb_size + old_species_count;
 	const int new_radial_block_size = rb_size + new_species_count;
-	const int old_linear_offset = old_radial_offset + radial_func_count * old_radial_block_size;
-	const int new_linear_offset = new_radial_offset + radial_func_count * new_radial_block_size;
+	const int old_env_offset = old_radial_offset + radial_func_count * old_radial_block_size;
+	const int new_env_offset = new_radial_offset + radial_func_count * new_radial_block_size;
+	const int old_env_count = env_gate_enabled ? 1 + old_species_count * env_gate_channel_count : 0;
+	const int new_env_count = env_gate_enabled ? 1 + new_species_count * env_gate_channel_count : 0;
+	const int old_linear_offset = old_env_offset + old_env_count;
+	const int new_linear_offset = new_env_offset + new_env_count;
 	const int old_linear_count = alpha_count + old_species_count - 1;
 	const int new_linear_count = alpha_count + new_species_count - 1;
 
@@ -362,6 +657,17 @@ void MLMTPR::PruneSpecies(const std::vector<int>& old_species_indices)
 		}
 	}
 
+	if (env_gate_enabled) {
+		new_coeffs[new_env_offset] = old_coeffs[old_env_offset];
+		for (int new_type = 0; new_type < new_species_count; ++new_type) {
+			const int old_type = old_species_indices[new_type];
+			for (int q = 0; q < env_gate_channel_count; ++q) {
+				new_coeffs[new_env_offset + 1 + new_type * env_gate_channel_count + q] =
+					old_coeffs[old_env_offset + 1 + old_type * env_gate_channel_count + q];
+			}
+		}
+	}
+
 	for (int new_type = 0; new_type < new_species_count; ++new_type) {
 		const int old_type = old_species_indices[new_type];
 		new_coeffs[new_linear_offset + new_type] = old_coeffs[old_linear_offset + old_type];
@@ -379,12 +685,15 @@ void MLMTPR::PruneSpecies(const std::vector<int>& old_species_indices)
 
 	radial_list.resize(0, 0, 0);
 	radial_der_list.resize(0, 0, 0);
+	env_gate_radial_list.resize(0, 0, 0);
+	env_gate_radial_der_list.resize(0, 0, 0);
 	max_radial.clear();
 	inited = true;
 	has_shift_coeffs = true;
 	has_scal_coeffs = true;
 	has_radial_coeffs = true;
 	has_linear_coeffs = true;
+	has_env_gate_coeffs = env_gate_enabled;
 }
 
 
@@ -397,6 +706,10 @@ void MLMTPR::Load(const string& filename)
 	has_scal_coeffs = false;
 	has_radial_coeffs = false;
 	has_linear_coeffs = false;
+	env_gate_enabled = false;
+	has_env_gate_coeffs = false;
+	env_gate_cutoff_ratio = kEnvGateDefaultCutoffRatio;
+	env_gate_channel_count = kEnvGateDefaultChannels;
 
 	ifstream ifs(filename);
 	if (!ifs.is_open())
@@ -422,6 +735,7 @@ void MLMTPR::Load(const string& filename)
 	}
 	if (((string)tmpline).compare(0, 10, "version = ") != 0)
 		ERROR("MTP file must contain a version header");
+	const string mtp_file_version = ((string)tmpline).substr(10);
 
 		// name/description reading block
 		ifs >> tmpstr;
@@ -679,13 +993,78 @@ void MLMTPR::Load(const string& filename)
 				{	regression_coeffs[species_count+2*species_count*species_count* K_ +pairs_count*radial_func_count*(p_RadialBasis->rb_size + species_count) +
 					i*(p_RadialBasis->rb_size + species_count) + j] = 1e-2;
                                         if (j >= p_RadialBasis->rb_size) {regression_coeffs[species_count+2*species_count*species_count* K_ +pairs_count*radial_func_count*(p_RadialBasis->rb_size + species_count) +
-                                        i*(p_RadialBasis->rb_size + species_count) + j] = 1.1; }
+			                                        i*(p_RadialBasis->rb_size + species_count) + j] = 1.1; }
                                 }             
 			//	regression_coeffs[pairs_count*radial_func_count*(p_RadialBasis->rb_size) +
 			//		i*(p_RadialBasis->rb_size) + min(i, p_RadialBasis->rb_size)] = 1e-3;
 
 
 			}
+	}
+
+	if (tmpstr == "env_gate_type")
+	{
+		ifs.ignore(2);
+		string env_gate_type;
+		ifs >> env_gate_type;
+		if (env_gate_type != "centered_tanh_screen" && env_gate_type != "centered_exp_screen")
+			ERROR("Unsupported env_gate_type in .mtp file");
+
+		ifs >> tmpstr;
+		if (tmpstr != "env_gate_cutoff_ratio")
+			ERROR("Error reading env_gate_cutoff_ratio");
+		ifs.ignore(2);
+		ifs >> env_gate_cutoff_ratio;
+
+		ifs >> tmpstr;
+		if (tmpstr != "env_gate_channel_count")
+			ERROR("Error reading env_gate_channel_count");
+		ifs.ignore(2);
+		ifs >> env_gate_channel_count;
+		if (env_gate_channel_count != kEnvGateDefaultChannels)
+			ERROR("centered_tanh_screen env-gate requires env_gate_channel_count = 6");
+
+		env_gate_enabled = true;
+		has_env_gate_coeffs = true;
+		const int env_offset = EnvGateCoeffOffset();
+		const int env_count = EnvGateCoeffCount();
+		regression_coeffs.resize(env_offset + env_count);
+
+		ifs >> tmpstr;
+		if (tmpstr == "env_gate_scal_coeffs") {
+			ifs.ignore(4);
+			double ignored_env_scaling_coeff = 0.0;
+			for (int i = 0; i < 2 * species_count * species_count; ++i) {
+				ifs >> ignored_env_scaling_coeff >> foo;
+				if (ifs.fail())
+					ERROR("Error reading env_gate_scal_coeffs");
+			}
+			ifs >> tmpstr;
+		}
+
+		if (tmpstr != "env_gate_lambda_raw")
+			ERROR("Error reading env_gate_lambda_raw");
+		ifs.ignore(2);
+		ifs >> regression_coeffs[EnvGateLambdaRawOffset()];
+
+		ifs >> tmpstr;
+		if (tmpstr != "env_gate_log_density_coeffs")
+			ERROR("Error reading env_gate_log_density_coeffs");
+		ifs.ignore(1000, '{');
+		for (int type = 0; type < species_count; ++type) {
+			ifs.ignore(1000, '{');
+			for (int q = 0; q < env_gate_channel_count; ++q) {
+				ifs >> regression_coeffs[EnvGateLogDensityCoeffOffset(type, q)] >> foo;
+				if (ifs.fail())
+					ERROR("Error reading env_gate_log_density_coeffs");
+			}
+		}
+		ifs.ignore(1000, '\n');
+		ifs >> tmpstr;
+	}
+	else if (mtp_file_version.compare(0, 3, "2.0") == 0)
+	{
+		ERROR("version = 2.0.0 model must contain an env-gate section");
 	}
 
 	if (tmpstr != "alpha_moments_count")
@@ -883,11 +1262,54 @@ void MLMTPR::Load(const string& filename)
 				}
 			}
 		}
+		if (HasEnvGate())
+		{
+			env_gate_radial_list.resize(species_count * species_count, 200002, env_gate_channel_count);
+			env_gate_radial_der_list.resize(species_count * species_count, 200002, env_gate_channel_count);
+			env_gate_radial_list.set(0);
+			env_gate_radial_der_list.set(0);
+			const double r_env = env_gate_cutoff_ratio * p_RadialBasis->max_dist;
+			if (r_env <= 0.0)
+				ERROR("env_gate_cutoff_ratio should be positive.");
+			for (int i = 0; i < C; i++)
+			{
+				for (int j = 0; j < C; j++)
+				{
+					for (int n = 0; n < 200002; n++)
+					{
+					const double r = dr * n;
+					if (r <= 0.0 || r >= r_env)
+						continue;
+					const double y = r / r_env;
+					const double dy_dr = 1.0 / r_env;
+					const double cutoff = 1.0 - r / r_env;
+					const double f_env = cutoff * cutoff;
+						const double df_dr = -2.0 * cutoff / r_env;
+						double bernstein[6];
+						double bernstein_der[6];
+						BernsteinDegree5(y, bernstein, bernstein_der);
+						for (int q = 0; q < env_gate_channel_count; ++q)
+						{
+							env_gate_radial_list(i * C + j, n, q) = f_env * bernstein[q];
+							env_gate_radial_der_list(i * C + j, n, q) =
+								df_dr * bernstein[q] + f_env * bernstein_der[q] * dy_dr;
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			env_gate_radial_list.resize(0, 0, 0);
+			env_gate_radial_der_list.resize(0, 0, 0);
+		}
 	}
 	else
 	{
 		radial_list.resize(0, 0, 0);
 		radial_der_list.resize(0, 0, 0);
+		env_gate_radial_list.resize(0, 0, 0);
+		env_gate_radial_der_list.resize(0, 0, 0);
 	}
 		MemAlloc();
 		DistributeCoeffs();
@@ -981,7 +1403,7 @@ void MLMTPR::Save(const string& filename)
 	ofs.precision(15);
 
 	ofs << "MTP\n";
-	ofs << "version = 1.1.0\n";
+	ofs << "version = " << (HasEnvGate() ? "2.0.0" : "1.1.0") << "\n";
 	ofs << "potential_name = " << pot_desc << endl;
 	if(scaling != 1.0)
 		ofs << "scaling = " << scaling << endl;
@@ -1017,7 +1439,7 @@ void MLMTPR::Save(const string& filename)
 
 	ofs << "\tradial_coeffs" << '\n';
 
-	int q = species_count+2*species_count*species_count* K_;
+	int q = RadialCoeffOffset();
 	for (int i = 0; i < 1; i++)
 		for (int j = 0; j < 1; j++)
 		{
@@ -1036,6 +1458,26 @@ void MLMTPR::Save(const string& filename)
 				}
 			}
 		}
+
+	if (HasEnvGate()) {
+		ofs << "env_gate_type = centered_tanh_screen\n";
+		ofs << "env_gate_cutoff_ratio = " << env_gate_cutoff_ratio << '\n';
+		ofs << "env_gate_channel_count = " << env_gate_channel_count << '\n';
+		ofs << "env_gate_lambda_raw = " << regression_coeffs[EnvGateLambdaRawOffset()] << '\n';
+		ofs << "env_gate_log_density_coeffs = {";
+		for (int type = 0; type < species_count; ++type) {
+			if (type != 0)
+				ofs << ", ";
+			ofs << "{";
+			for (int channel = 0; channel < env_gate_channel_count; ++channel) {
+				if (channel != 0)
+					ofs << ", ";
+				ofs << regression_coeffs[EnvGateLogDensityCoeffOffset(type, channel)];
+			}
+			ofs << "}";
+		}
+		ofs << "}\n";
+	}
 
 	ofs << "alpha_moments_count = " << alpha_moments_count << '\n';
 	ofs << "alpha_index_basic_count = " << alpha_index_basic_count << '\n';
@@ -1099,6 +1541,8 @@ void MLMTPR::Save(const string& filename)
 
 void MLMTPR::Save_2(const string& filename)
 {
+        if (HasEnvGate())
+                ERROR("Save_2 pair-expanded export does not support SUS2-2.0 env-gate models.");
         ofstream ofs(filename);
         ofs.setf(ios::scientific);
         ofs.precision(15);
@@ -1305,6 +1749,8 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 	if (type_central>=species_count)
 				throw MlipException("Too few species count in the MTP potential!");
 
+	const double env_gate = ComputeEnvGate(Neighborhood, nullptr, nullptr, nullptr);
+
 	for (int j = 0; j < Neighborhood.count; j++) {
 		const Vector3& NeighbVect_j = Neighborhood.vecs[j];
                 int type_outer = Neighborhood.types[j];
@@ -1365,6 +1811,10 @@ void MLMTPR::CalcBasisFuncs(Neighborhood& Neighborhood, double* bf_vals)
 		}
 	}
 
+	if (HasEnvGate())
+		for (int i = 0; i < alpha_index_basic_count; ++i)
+			moment_vals[i] *= env_gate;
+
 	// Next: calculating non-elementary b_i
 	for (int i = 0; i < alpha_index_times_count; i++) {
 		double val0 = moment_vals[alpha_index_times_.comp0[i]];
@@ -1408,6 +1858,8 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 	if (type_central>=species_count)
 				throw MlipException("Too few species count in the MTP potential!");
 
+	std::vector<Vector3> env_gate_ders;
+	const double env_gate = ComputeEnvGate(Neighborhood, &env_gate_ders, nullptr, nullptr);
 
 	for (int j = 0; j < Neighborhood.count; j++) {
 		const Vector3& NeighbVect_j = Neighborhood.vecs[j];
@@ -1507,6 +1959,18 @@ void MLMTPR::CalcBasisFuncsDers(const Neighborhood& Neighborhood)
 					* pow1
 					* coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 			}
+		}
+	}
+
+	if (HasEnvGate()) {
+		for (int i = 0; i < alpha_index_basic_count; ++i) {
+			const double raw_moment = moment_vals[i];
+			for (int j = 0; j < Neighborhood.count; ++j) {
+				for (int a = 0; a < 3; ++a)
+					moment_ders(i, j, a) =
+						env_gate * moment_ders(i, j, a) + raw_moment * env_gate_ders[j][a];
+			}
+			moment_vals[i] = env_gate * raw_moment;
 		}
 	}
 
@@ -1792,6 +2256,8 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 	if (type_central>=species_count)
 			throw MlipException("Too few species count in the MTP potential!");
 
+	std::vector<Vector3> env_gate_ders;
+	const double env_gate = ComputeEnvGate(nbh, &env_gate_ders, nullptr, nullptr);
 
 	for (int j = 0; j < nbh.count; j++) {
 		const Vector3& NeighbVect_j = nbh.vecs[j];
@@ -1979,6 +2445,18 @@ void MLMTPR::CalcSiteEnergyDers(const Neighborhood& nbh)
 		}
 	}
 
+	if (HasEnvGate()) {
+		for (int i = 0; i < alpha_index_basic_count; ++i) {
+			const double raw_moment = moment_vals[i];
+			for (int j = 0; j < nbh.count; ++j) {
+				for (int a = 0; a < 3; ++a)
+					moment_jacobian_(i, j, a) =
+						env_gate * moment_jacobian_(i, j, a) + raw_moment * env_gate_ders[j][a];
+			}
+			moment_vals[i] = env_gate * raw_moment;
+		}
+	}
+
 	// Next: calculating non-elementary b_i
 	for (int i = 0; i < alpha_index_times_count; i++) {
 		double val0 = moment_vals[alpha_index_times_.comp0[i]];
@@ -2052,7 +2530,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 	int K = radial_func_count;						//number of radial functions in current potential
 	int R = p_RadialBasis->rb_size;  //number of Chebyshev polynomials constituting one radial function
 
-	int coeff_count = C+2*C*C * K_ +(R+C)*K;
+	int coeff_count = LinearCoeffOffset();
 
 	buff_site_energy_ders_.resize(nbh.count);
 	out_grad_accumulator.resize(CoeffCount());
@@ -2074,6 +2552,9 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 			std::vector<double>& mu_contract_coord_ders_ss = grad_mu_contract_coord_ders_ss_;
 			const double* linear_scalar_coeffs = linear_coeffs.data() + species_count;
 			const double* linear_mults_data = linear_mults.data();
+			std::vector<double> env_raw_basic_vals;
+			if (HasEnvGate())
+				env_raw_basic_vals.assign(alpha_index_basic_count, 0.0);
 			FillWithZero(mom_val);
 			FillWithZero(site_energy_ders_wrt_moments_);
 			FillWithZero(dloss_dsenders);
@@ -2083,6 +2564,10 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 		if (type_central>=species_count)
 			throw MlipException("Too few species count in the MTP potential!");
 
+			std::vector<Vector3> env_gate_ders;
+			std::vector<double> env_gate_channel_sums;
+			std::vector<double> env_gate_rho_dr;
+			const double env_gate = ComputeEnvGate(nbh, &env_gate_ders, &env_gate_channel_sums, &env_gate_rho_dr);
 			const int radial_coeff_base = C + 2 * C * C * K_;
 			const int shared_type_offset = radial_coeff_base + R;
 			const double site_linear_coeff = linear_coeffs[nbh.my_type];
@@ -2223,7 +2708,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 					mom_val[i] += val * mult0;
 
-					if (se_ders_weights != nullptr) {
+					if (se_ders_weights != nullptr && !HasEnvGate()) {
 					double local_der = der * powk - k * val / r;
 					double jac_x = mult0 * local_der * neighb_vec[0] / r;
 					double jac_y = mult0 * local_der * neighb_vec[1] / r;
@@ -2253,6 +2738,63 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 				const double multiplier = 10000.0;
 				buff_site_energy_ += multiplier * (exp(-10 * (r - 1)) - exp(-10 * (p_RadialBasis->min_dist - 1)));
 			}
+		}
+
+		if (HasEnvGate()) {
+			for (int i = 0; i < alpha_index_basic_count; ++i)
+				env_raw_basic_vals[i] = mom_val[i];
+
+			if (se_ders_weights != nullptr) {
+				for (int j = 0; j < nbh.count; ++j) {
+					const Vector3& neighb_vec = nbh.vecs[j];
+					const double r = nbh.dists[j];
+					const double inv_r = 1.0 / r;
+					const int type_outer = nbh.types[j];
+					const double center_type_coeff = regression_coeffs[shared_type_offset + type_central];
+					const double outer_type_coeff = regression_coeffs[shared_type_offset + type_outer];
+					const double type_scale = center_type_coeff * outer_type_coeff;
+					const NeighborGradCache cache = neighbor_cache(j);
+					for (int i = 0; i < alpha_index_basic_count; ++i) {
+						const int mu = alpha_index_basic_.comp0[i];
+						const int k = basic_total_degree_cache_[i];
+						const double powk = 1.0 / cache.dist_powers[k];
+						const double pow0 = cache.coords_powers_x[alpha_index_basic_.comp1[i]];
+						const double pow1 = cache.coords_powers_y[alpha_index_basic_.comp2[i]];
+						const double pow2 = cache.coords_powers_z[alpha_index_basic_.comp3[i]];
+						const double mult0 = pow0 * pow1 * pow2;
+						const double val = type_scale * cache.mu_contract_vals[mu] * powk;
+						const double der = type_scale * cache.mu_contract_ders[mu];
+						double local_der = der * powk - k * val / r;
+						double jac_x = mult0 * local_der * neighb_vec[0] * inv_r;
+						double jac_y = mult0 * local_der * neighb_vec[1] * inv_r;
+						double jac_z = mult0 * local_der * neighb_vec[2] * inv_r;
+
+						if (alpha_index_basic_.comp1[i] != 0)
+							jac_x += val * alpha_index_basic_.comp1[i]
+								* cache.coords_powers_x[alpha_index_basic_.comp1[i] - 1]
+								* pow1 * pow2;
+						if (alpha_index_basic_.comp2[i] != 0)
+							jac_y += val * alpha_index_basic_.comp2[i]
+								* pow0
+								* cache.coords_powers_y[alpha_index_basic_.comp2[i] - 1]
+								* pow2;
+						if (alpha_index_basic_.comp3[i] != 0)
+							jac_z += val * alpha_index_basic_.comp3[i]
+								* pow0 * pow1
+								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+
+						jac_x = env_gate * jac_x + env_raw_basic_vals[i] * env_gate_ders[j][0];
+						jac_y = env_gate * jac_y + env_raw_basic_vals[i] * env_gate_ders[j][1];
+						jac_z = env_gate * jac_z + env_raw_basic_vals[i] * env_gate_ders[j][2];
+						dloss_dsenders[i] += se_ders_weights[j][0] * jac_x
+							+ se_ders_weights[j][1] * jac_y
+							+ se_ders_weights[j][2] * jac_z;
+					}
+				}
+			}
+
+			for (int i = 0; i < alpha_index_basic_count; ++i)
+				mom_val[i] *= env_gate;
 		}
 
 		// Next: calculating non-elementary b_i
@@ -2333,6 +2875,32 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 
 				}
 
+			if (HasEnvGate()) {
+				double gate_prefactor = 0.0;
+				for (int i = 0; i < alpha_index_basic_count; ++i)
+					gate_prefactor += site_linear_coeff * dloss_dmom[i] * env_raw_basic_vals[i];
+
+				double rho = 0.0;
+				for (int q = 0; q < env_gate_channel_count; ++q) {
+					const double density_coeff =
+						EnvGateDensityCoeff(regression_coeffs[EnvGateLogDensityCoeffOffset(type_central, q)]);
+					rho += density_coeff * env_gate_channel_sums[q];
+				}
+				const double lambda = EnvGateLambda();
+				const double tanh_rho = std::tanh(rho);
+				const double sech2_rho = 1.0 - tanh_rho * tanh_rho;
+				const double dgate_dlambda_raw = -lambda * (1.0 - lambda) * tanh_rho;
+				grad_out[EnvGateLambdaRawOffset()] += gate_prefactor * dgate_dlambda_raw;
+				for (int q = 0; q < env_gate_channel_count; ++q) {
+					const double density_coeff_der =
+						EnvGateDensityCoeffDer(regression_coeffs[EnvGateLogDensityCoeffOffset(type_central, q)]);
+					const double dgate_dlog_density =
+						-lambda * sech2_rho * density_coeff_der * env_gate_channel_sums[q];
+					grad_out[EnvGateLogDensityCoeffOffset(type_central, q)] +=
+						gate_prefactor * dgate_dlog_density;
+				}
+			}
+
 			FillWithZero(buff_site_energy_ders_);
 			if (se_ders_weights == nullptr) {
 				for (int j = 0; j < nbh.count; j++) {
@@ -2362,6 +2930,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						const double mu_dot_der_s = cache.mu_contract_ders_s[mu];
 						const double mu_dot_der_ss = cache.mu_contract_ders_ss[mu];
 						const double radial_basis_scale = powk * mult0;
+						const double gate_scale = HasEnvGate() ? env_gate : 1.0;
 						const double val = type_scale * mu_dot_val * powk;
 						const double der = type_scale * mu_dot_der;
 						const double center_grad = outer_type_coeff * mu_dot_val * radial_basis_scale;
@@ -2372,7 +2941,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						for (int xi = 0; xi < R; xi++) {
 							const double rb_val = cache.radial_vals[radial_base + xi];
 							const double basic_grad = rb_val * radial_basis_scale;
-							grad_out[radial_offset + xi] += dloss_weight * basic_grad * type_scale;
+							grad_out[radial_offset + xi] += dloss_weight * gate_scale * basic_grad * type_scale;
 						}
 
 						double local_der = der * powk - k * val / r;
@@ -2394,15 +2963,21 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 								* pow0 * pow1
 								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
 
+						if (HasEnvGate()) {
+							jac_x = env_gate * jac_x + env_raw_basic_vals[i] * env_gate_ders[j][0];
+							jac_y = env_gate * jac_y + env_raw_basic_vals[i] * env_gate_ders[j][1];
+							jac_z = env_gate * jac_z + env_raw_basic_vals[i] * env_gate_ders[j][2];
+						}
+
 						buff_site_energy_ders_[j][0] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_x;
 						buff_site_energy_ders_[j][1] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_y;
 						buff_site_energy_ders_[j][2] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_z;
 
 						const int sigma_coeff_offset = C + 2 * C * C * scaling_block + type_central * C + type_outer;
-						grad_out[shared_type_offset + type_central] += dloss_weight * center_grad;
-						grad_out[shared_type_offset + type_outer] += dloss_weight * outer_grad;
-						grad_out[sigma_coeff_offset] += dloss_weight * sigma_grad;
-						grad_out[sigma_coeff_offset + C * C] += dloss_weight * sigma_ss_grad;
+						grad_out[shared_type_offset + type_central] += dloss_weight * gate_scale * center_grad;
+						grad_out[shared_type_offset + type_outer] += dloss_weight * gate_scale * outer_grad;
+						grad_out[sigma_coeff_offset] += dloss_weight * gate_scale * sigma_grad;
+						grad_out[sigma_coeff_offset + C * C] += dloss_weight * gate_scale * sigma_ss_grad;
 					}
 
 					if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls" && r < p_RadialBasis->min_dist) {
@@ -2455,6 +3030,7 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 						const double mu_dot_coord_der_s = cache.mu_contract_coord_ders_s[mu];
 						const double mu_dot_coord_der_ss = cache.mu_contract_coord_ders_ss[mu];
 						const double radial_basis_scale = powk * mult0;
+						const double gate_scale = HasEnvGate() ? env_gate : 1.0;
 						const double val = type_scale * mu_dot_val * powk;
 						const double der = type_scale * mu_dot_der;
 						double center_grad = outer_type_coeff * mu_dot_val * radial_basis_scale;
@@ -2521,12 +3097,13 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 								+ se_weight_vec[1] * dery_ss
 								+ se_weight_vec[2] * derz_ss;
 
-							radial_grad += coord_weight * coord_grad;
+							radial_grad = dloss_weight * gate_scale * basic_grad;
+							radial_grad += coord_weight * gate_scale * coord_grad;
 							grad_out[radial_offset + xi] += radial_grad * type_scale;
-							coord_center_grad += outer_type_coeff * coord_grad;
-							coord_outer_grad += center_type_coeff * coord_grad;
-							coord_sigma_grad += type_scale * coord_grad_s;
-							coord_sigma_ss_grad += type_scale * coord_grad_ss;
+							coord_center_grad += gate_scale * outer_type_coeff * coord_grad;
+							coord_outer_grad += gate_scale * center_type_coeff * coord_grad;
+							coord_sigma_grad += gate_scale * type_scale * coord_grad_s;
+							coord_sigma_ss_grad += gate_scale * type_scale * coord_grad_ss;
 						}
 
 						double local_der = der * powk - k * val / r;
@@ -2547,6 +3124,12 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 							jac_z += val * alpha_index_basic_.comp3[i]
 								* pow0 * pow1
 								* cache.coords_powers_z[alpha_index_basic_.comp3[i] - 1];
+
+						if (HasEnvGate()) {
+							jac_x = env_gate * jac_x + env_raw_basic_vals[i] * env_gate_ders[j][0];
+							jac_y = env_gate * jac_y + env_raw_basic_vals[i] * env_gate_ders[j][1];
+							jac_z = env_gate * jac_z + env_raw_basic_vals[i] * env_gate_ders[j][2];
+						}
 
 						buff_site_energy_ders_[j][0] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_x;
 						buff_site_energy_ders_[j][1] += site_linear_coeff * site_energy_ders_wrt_moments_[i] * jac_y;
@@ -2599,10 +3182,10 @@ void MLMTPR::AccumulateCombinationGrad(	const Neighborhood& nbh,
 							+ se_weight_vec[2] * derz_ss;
 
 						const int sigma_coeff_offset = C + 2 * C * C * scaling_block + type_central * C + type_outer;
-						grad_out[shared_type_offset + type_central] += dloss_weight * center_grad + coord_weight * outer_type_coeff * coord_grad;
-						grad_out[shared_type_offset + type_outer] += dloss_weight * outer_grad + coord_weight * center_type_coeff * coord_grad;
-						grad_out[sigma_coeff_offset] += dloss_weight * sigma_grad + coord_weight * type_scale * coord_grad_s;
-						grad_out[sigma_coeff_offset + C * C] += dloss_weight * sigma_ss_grad + coord_weight * type_scale * coord_grad_ss;
+						grad_out[shared_type_offset + type_central] += dloss_weight * gate_scale * center_grad + coord_weight * gate_scale * outer_type_coeff * coord_grad;
+						grad_out[shared_type_offset + type_outer] += dloss_weight * gate_scale * outer_grad + coord_weight * gate_scale * center_type_coeff * coord_grad;
+						grad_out[sigma_coeff_offset] += dloss_weight * gate_scale * sigma_grad + coord_weight * gate_scale * type_scale * coord_grad_s;
+						grad_out[sigma_coeff_offset + C * C] += dloss_weight * gate_scale * sigma_ss_grad + coord_weight * gate_scale * type_scale * coord_grad_ss;
 					}
 
 					if (p_RadialBasis->GetRBTypeString() == "RBChebyshev_repuls" && r < p_RadialBasis->min_dist) {
@@ -2740,6 +3323,7 @@ void MLMTPR::Perform_scaling()
 	int C = species_count;
 	int K = radial_func_count;
 	int R = p_RadialBasis->rb_size;
+	const int linear_offset = LinearCoeffOffset();
 
 	std::vector<double> total_max(alpha_scalar_moments);
 	total_max.clear();
@@ -2752,7 +3336,7 @@ void MLMTPR::Perform_scaling()
 		MPI_Bcast(&total_max[j], 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 		max_linear[j] = total_max[j];
 #endif
-		regression_coeffs[(R+C)*K + j + species_count] *= linear_mults[j];
+		regression_coeffs[linear_offset + species_count + j] *= linear_mults[j];
 
 		if (max_linear[j] > 0)
 			linear_mults[j] = 1e10 / max_linear[j];
@@ -2764,7 +3348,7 @@ void MLMTPR::Perform_scaling()
 
 		//cout << "mult=" << linear_mults[j] << endl;
 
-		regression_coeffs[R*K + j + species_count] /= linear_mults[j];
+		regression_coeffs[linear_offset + species_count + j] /= linear_mults[j];
 		max_linear[j] = 1e-10;
 	}
 }
