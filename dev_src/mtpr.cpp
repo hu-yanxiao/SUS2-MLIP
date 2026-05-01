@@ -229,6 +229,34 @@ int MLMTPR::RadialCoeffBlockSize() const
 	return p_RadialBasis->rb_size + species_count;
 }
 
+int MLMTPR::EnforcePositiveRadialFirstCoeffs(double min_value)
+{
+	const double positive_floor = min_value > 0.0 ? min_value : 1.0e-12;
+	if (p_RadialBasis == nullptr)
+		return 0;
+	const int radial_begin = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int radial_end = radial_begin + radial_func_count * block_size;
+	if (block_size <= 0 ||
+	    radial_func_count <= 0 ||
+	    radial_begin < 0 ||
+	    radial_end > static_cast<int>(regression_coeffs.size()))
+		return 0;
+
+	int changed_count = 0;
+	for (int mu = 0; mu < radial_func_count; ++mu) {
+		double& first_coeff = regression_coeffs[radial_begin + mu * block_size];
+		const double old_value = first_coeff;
+		if (first_coeff < 0.0)
+			first_coeff = -first_coeff;
+		if (first_coeff <= positive_floor)
+			first_coeff = positive_floor;
+		if (first_coeff != old_value)
+			++changed_count;
+	}
+	return changed_count;
+}
+
 int MLMTPR::EnvGateCoeffCount() const
 {
 	if (!env_gate_enabled)
@@ -621,6 +649,7 @@ void MLMTPR::RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_sca
 		for (int type = 0; type < species_count; ++type)
 			regression_coeffs[block_offset + rb_size + type] = 1.0;
 	}
+	EnforcePositiveRadialFirstCoeffs();
 }
 
 void MLMTPR::RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter)

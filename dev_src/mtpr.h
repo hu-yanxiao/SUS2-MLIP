@@ -205,6 +205,7 @@ public:
 	int ScalingCoeffCount() const;
 	int RadialCoeffOffset() const;
 	int RadialCoeffBlockSize() const;
+	int EnforcePositiveRadialFirstCoeffs(double min_value = 1.0e-12);
 	int EnvGateCoeffCount() const;
 	int EnvGateCoeffOffset() const;
 	int EnvGateLambdaRawOffset(int type_central) const;

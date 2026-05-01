@@ -1101,6 +1101,29 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		          << std::endl;
 	}
 
+	int radial_first_coeff_repairs = 0;
+	if (maxits > 0 && mtpr.has_radial_coeffs) {
+		if (prank == 0)
+			radial_first_coeff_repairs = mtpr.EnforcePositiveRadialFirstCoeffs();
+#ifdef MLIP_MPI
+		MPI_Bcast(&radial_first_coeff_repairs, 1, MPI_INT, 0, MPI_COMM_WORLD);
+		MPI_Bcast(&mtpr.Coeff()[0], mtpr.CoeffCount(), MPI_DOUBLE, 0, MPI_COMM_WORLD);
+#endif
+		if (radial_first_coeff_repairs > 0) {
+			if (prank == 0)
+				std::cout << "[" << CurrentTimestamp() << "] "
+				          << "Repaired " << radial_first_coeff_repairs
+				          << " negative/zero radial first coefficients; running one linear solve"
+				          << std::endl;
+			if (trainer.TrainRankActive())
+				trainer.TrainLinear(prank,
+				                    training_set,
+				                    linear_training_neighborhoods_ptr,
+				                    "radial first-coeff sign repair");
+			trainer.BroadcastCoeffsWorld();
+		}
+	}
+
         if (prank == 0) {std::cout <<"num_of_species: " <<mtpr.species_count  <<std::endl;
                          std::cout <<"training structures: " << train_cfg_total << std::endl;
                          std::cout <<"training atoms: " << train_atom_total << std::endl;

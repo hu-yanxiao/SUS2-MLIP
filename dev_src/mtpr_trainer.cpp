@@ -1118,6 +1118,19 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		}
 
 		copy_bfgs_x_to_full_coeffs();
+		const int radial_first_coeff_repairs = p_mlmtpr->EnforcePositiveRadialFirstCoeffs();
+		if (radial_first_coeff_repairs > 0) {
+			if (distributed_bfgs || prank == 0) {
+				reset_bfgs_state();
+				mask_frozen_coordinates(freeze_species_coeffs);
+			}
+			if (prank == 0) {
+				std::cout << "[" << CurrentTimestamp() << "] "
+				          << "Projected " << radial_first_coeff_repairs
+				          << " radial first coefficients back to the positive domain"
+				          << " at BFGS step=" << num_step << std::endl;
+			}
+		}
 		require_finite_coeffs_all("BFGS trial step " + std::to_string(num_step));
 
 		CalcObjectiveFunctionGrad(training_set, cache_training_neighborhoods ? &training_neighborhoods : nullptr);
