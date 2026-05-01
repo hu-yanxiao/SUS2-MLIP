@@ -27,6 +27,7 @@ constexpr double kEnvGateDefaultActivationOnRatio = 0.5;
 constexpr double kEnvGateDefaultLambdaRaw = -3.0;
 constexpr double kEnvGateDefaultLogDensityCoeff = 0.0;
 constexpr double kEnvGateMaxLogDensityCoeff = 6.0;
+constexpr double kRadialFirstCoeffPositiveFloor = 1.0e-12;
 
 double Clamp01(double value)
 {
@@ -38,6 +39,15 @@ double Lerp(double start, double end, double t)
 	return start + (end - start) * t;
 }
 
+double StableSoftplus(double x)
+{
+	if (x > 40.0)
+		return x;
+	if (x < -40.0)
+		return std::exp(x);
+	return std::log1p(std::exp(x));
+}
+
 double StableSigmoid(double value)
 {
 	if (value >= 0.0) {
@@ -46,6 +56,13 @@ double StableSigmoid(double value)
 	}
 	const double z = std::exp(value);
 	return z / (1.0 + z);
+}
+
+double StableInvSoftplus(double y)
+{
+	if (y > 40.0)
+		return y;
+	return std::log(std::expm1(y));
 }
 
 double EnvGateDensityCoeff(double raw_log_density)
@@ -231,7 +248,7 @@ int MLMTPR::RadialCoeffBlockSize() const
 
 int MLMTPR::EnforcePositiveRadialFirstCoeffs(double min_value)
 {
-	const double positive_floor = min_value > 0.0 ? min_value : 1.0e-12;
+	const double positive_floor = min_value > 0.0 ? min_value : kRadialFirstCoeffPositiveFloor;
 	if (p_RadialBasis == nullptr)
 		return 0;
 	const int radial_begin = RadialCoeffOffset();
@@ -255,6 +272,37 @@ int MLMTPR::EnforcePositiveRadialFirstCoeffs(double min_value)
 			++changed_count;
 	}
 	return changed_count;
+}
+
+bool MLMTPR::IsRadialFirstCoeff(int coeff_index) const
+{
+	if (p_RadialBasis == nullptr)
+		return false;
+	const int radial_begin = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int radial_end = radial_begin + radial_func_count * block_size;
+	if (block_size <= 0 || coeff_index < radial_begin || coeff_index >= radial_end)
+		return false;
+	return (coeff_index - radial_begin) % block_size == 0;
+}
+
+double MLMTPR::RadialFirstCoeffRawToValue(double raw_value) const
+{
+	return kRadialFirstCoeffPositiveFloor + StableSoftplus(raw_value);
+}
+
+double MLMTPR::RadialFirstCoeffValueToRaw(double coeff_value) const
+{
+	const double softplus_value =
+		std::max(kRadialFirstCoeffPositiveFloor, coeff_value - kRadialFirstCoeffPositiveFloor);
+	return StableInvSoftplus(softplus_value);
+}
+
+double MLMTPR::RadialFirstCoeffDerivativeFromValue(double coeff_value) const
+{
+	const double softplus_value =
+		std::max(kRadialFirstCoeffPositiveFloor, coeff_value - kRadialFirstCoeffPositiveFloor);
+	return 1.0 - std::exp(-softplus_value);
 }
 
 int MLMTPR::EnvGateCoeffCount() const

@@ -206,6 +206,10 @@ public:
 	int RadialCoeffOffset() const;
 	int RadialCoeffBlockSize() const;
 	int EnforcePositiveRadialFirstCoeffs(double min_value = 1.0e-12);
+	bool IsRadialFirstCoeff(int coeff_index) const;
+	double RadialFirstCoeffRawToValue(double raw_value) const;
+	double RadialFirstCoeffValueToRaw(double coeff_value) const;
+	double RadialFirstCoeffDerivativeFromValue(double coeff_value) const;
 	int EnvGateCoeffCount() const;
 	int EnvGateCoeffOffset() const;
 	int EnvGateLambdaRawOffset(int type_central) const;
