@@ -188,6 +188,7 @@ public:
 	int ScalingCoeffCount() const;
 	int RadialCoeffOffset() const;
 	int RadialCoeffBlockSize() const;
+	int EnforcePositiveRadialFirstCoeffs(double min_value = 1.0e-12);
 	bool IsRedundantRadialSpeciesCoeff(int coeff_index) const;
 	void BuildActiveCoeffIndices(std::vector<int>& active_coeff_indices, bool exclude_scal_coeffs = false) const;
 	int ActiveCoeffCount(bool exclude_scal_coeffs = false) const;
