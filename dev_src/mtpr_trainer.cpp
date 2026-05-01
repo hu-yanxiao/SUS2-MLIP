@@ -915,9 +915,25 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		n - p_mlmtpr->ActiveCoeffCount(false);
 
 	std::vector<double> active_coeffs(opt_n, 0.0);
+	auto full_to_optimizer_value = [&](int full_idx) {
+		if (p_mlmtpr->IsRadialFirstCoeff(full_idx))
+			return p_mlmtpr->RadialFirstCoeffValueToRaw(x[full_idx]);
+		return x[full_idx];
+	};
+	auto optimizer_to_full_value = [&](int full_idx, double opt_value) {
+		if (p_mlmtpr->IsRadialFirstCoeff(full_idx))
+			return p_mlmtpr->RadialFirstCoeffRawToValue(opt_value);
+		return opt_value;
+	};
+	auto optimizer_gradient_value = [&](int full_idx) {
+		double grad = loss_grad_[full_idx];
+		if (p_mlmtpr->IsRadialFirstCoeff(full_idx))
+			grad *= p_mlmtpr->RadialFirstCoeffDerivativeFromValue(x[full_idx]);
+		return grad;
+	};
 	auto pack_active_coeffs = [&]() {
 		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
-			active_coeffs[active_idx] = x[active_coeff_indices[active_idx]];
+			active_coeffs[active_idx] = full_to_optimizer_value(active_coeff_indices[active_idx]);
 	};
 	auto set_bfgs_x_from_full_coeffs = [&]() {
 		pack_active_coeffs();
@@ -926,7 +942,8 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 	auto copy_bfgs_x_to_full_coeffs = [&]() {
 		const double* opt_x = bfgs.Data();
 		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
-			x[active_coeff_indices[active_idx]] = opt_x[active_idx];
+			x[active_coeff_indices[active_idx]] =
+				optimizer_to_full_value(active_coeff_indices[active_idx], opt_x[active_idx]);
 	};
 	auto full_inv_hess_diag_value = [&](int full_idx) {
 		double value = 1.0;
@@ -1050,7 +1067,13 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				for (int i = 0; i < n - nlin; i++) {
 					if (full_to_active_index[i] < 0)
 						continue;
-					x[i] += distr(eng)*max_shift;
+					if (p_mlmtpr->IsRadialFirstCoeff(i)) {
+						const double raw_value = p_mlmtpr->RadialFirstCoeffValueToRaw(x[i])
+							+ distr(eng) * max_shift;
+						x[i] = p_mlmtpr->RadialFirstCoeffRawToValue(raw_value);
+					} else {
+						x[i] += distr(eng)*max_shift;
+					}
 				}
 			}
 			external_x_modified = random_perturb_applied;
@@ -1118,19 +1141,6 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		}
 
 		copy_bfgs_x_to_full_coeffs();
-		const int radial_first_coeff_repairs = p_mlmtpr->EnforcePositiveRadialFirstCoeffs();
-		if (radial_first_coeff_repairs > 0) {
-			if (distributed_bfgs || prank == 0) {
-				reset_bfgs_state();
-				mask_frozen_coordinates(freeze_species_coeffs);
-			}
-			if (prank == 0) {
-				std::cout << "[" << CurrentTimestamp() << "] "
-				          << "Projected " << radial_first_coeff_repairs
-				          << " radial first coefficients back to the positive domain"
-				          << " at BFGS step=" << num_step << std::endl;
-			}
-		}
 		require_finite_coeffs_all("BFGS trial step " + std::to_string(num_step));
 
 		CalcObjectiveFunctionGrad(training_set, cache_training_neighborhoods ? &training_neighborhoods : nullptr);
@@ -1148,7 +1158,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		optimizer_reduce_local[0] = loss_;
 		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
 			optimizer_reduce_local[kOptimizerReducePrefix + active_idx] =
-				loss_grad_[active_coeff_indices[active_idx]];
+				optimizer_gradient_value(active_coeff_indices[active_idx]);
 		MPI_Reduce(optimizer_reduce_local.data(),
 		           prank == 0 ? optimizer_reduce_global.data() : optimizer_reduce_local.data(),
 		           opt_n + kOptimizerReducePrefix,
@@ -1166,7 +1176,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #else
 		bfgs_f = loss_;
 		for (int active_idx = 0; active_idx < opt_n; ++active_idx)
-			bfgs_g[active_idx] = loss_grad_[active_coeff_indices[active_idx]];
+			bfgs_g[active_idx] = optimizer_gradient_value(active_coeff_indices[active_idx]);
 #endif	
 		if (freeze_species_coeffs) {
 			for (int idx : species_coeff_active_indices)
