@@ -118,9 +118,35 @@ mlp-sus2 calc-errors trained_sus2mlip target.cfg
 ```
 # External Tools
 ## LAMMPS
-The current LAMMPS interface is provided in the `sus2-interface-20260410.tar.gz` archive included in this release snapshot.  
-The interface package name is `ML-SUS2`, and the LAMMPS runtime syntax remains `pair_style sus2mtp` / `pair_style sus2mtp/kk`.  
-**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp`, `RBLaguerre_log1p_lmp`, or `RBLaguerre_log1p_pos_lmp` enables the list-based treatment of radial functions in the LAMMPS interface. The optional `tabstep` keyword controls the table spacing, with a default of `1.0e-4` Angstrom. The preinterpolation table is built only for species pairs that actually appear in the current simulation atom types.
+The maintained LAMMPS interface is provided in `interfaces/lammps/` and as the
+historical `sus2-interface-20260410.tar.gz` archive included in this snapshot.
+The interface package name is `ML-SUS2`, and the LAMMPS runtime syntax remains
+`pair_style sus2mtp` / `pair_style sus2mtp/kk`.
+
+Quick install into a clean LAMMPS tree:
+
+```bash
+cd interfaces/lammps
+scripts/install_into_lammps.sh /path/to/lammps
+```
+
+The interface package contains the CPU source layer, the Kokkos/GPU override
+layer, and the Intel CPU make targets used by the maintained server build. See
+`interfaces/lammps/README.md` for the full CPU/GPU build workflow.
+
+**Note**: Setting `radial_basis_type = RBChebyshev_sss_lmp`,
+`RBLaguerre_log1p_lmp`, `RBLaguerre_log1p_pos_lmp`, or `RBJacobi_sss_lmp`
+enables the list-based treatment of radial functions in the LAMMPS interface.
+The optional `tabstep` keyword controls the table spacing, with a default of
+`1.0e-4` Angstrom. The preinterpolation table is built only for species pairs
+that actually appear in the current simulation atom types.
+## GPUMD-SUS2
+The maintained GPUMD interface is hosted separately at
+[GPUMD-SUS2](https://github.com/hu-yanxiao/GPUMD-SUS2). It provides SUS2 v1.1
+GPU inference support for GPUMD, including the current table path, optional
+direct radial evaluation, product-assign optimization, and model-topology
+code-generation utilities. Use the GPUMD-SUS2 repository for GPUMD builds; this
+SUS2-MLIP repository remains the training/model-core source.
 ## PySUS2
 PySUS2 is a comprehensive suite of tools and Python modules developed based on the SUS2-MLIP model, designed for atomistic simulations. It supports a range of functionalities including structure relaxation, phonon dispersion analysis, and lattice thermal conductivity calculations.  
 (in progress)
