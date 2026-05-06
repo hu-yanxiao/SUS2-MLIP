@@ -984,6 +984,10 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 			&& IsFiniteArray(&bfgs_g[0], opt_n)
 			&& FirstNonFinite(p_mlmtpr->Coeff(), n) < 0;
 	};
+	auto is_ascent_direction_failure = [](const std::string& reason) {
+		return reason.find("stepping in accend direction") != std::string::npos
+			|| reason.find("stepping in ascend direction") != std::string::npos;
+	};
 	bool freeze_species_coeffs = do_lin && do_lin_step_limit > 0;
 	auto recover_bfgs_state_from_current_coeffs = [&](const std::string& reason, int step) {
 		reset_bfgs_state();
@@ -1151,7 +1155,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #endif
 			if (external_x_modified) {
 				if (distributed_bfgs || prank == 0)
-					recover_bfgs_state_from_current_coeffs("external coefficient update", num_step);
+					set_bfgs_x_from_full_coeffs();
 				mask_frozen_coordinates(freeze_species_coeffs);
 			}
 		}
@@ -1239,19 +1243,8 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 				}
 				RequireFiniteArray(bfgs.Data(), opt_n, "BFGS proposed coefficients");
 			};
-			auto finish_with_last_finite_state = [&](const std::string& reason) {
-				recover_bfgs_state_from_current_coeffs("final finite-state stop", num_step);
-				converge = true;
-				if (prank == 0) {
-					logstrm1 << "[" << CurrentTimestamp() << "] "
-					         << "BFGS ended after recovery failed; keeping last finite coefficients"
-					         << " step=" << num_step
-					         << " reason=" << reason << endl;
-					MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
-				}
-			};
-			auto try_recover_bfgs = [&](const std::string& first_reason) {
-				if (!optimizer_state_is_finite())
+			auto try_recover_bfgs_from_ascent_direction = [&](const std::string& first_reason) {
+				if (!is_ascent_direction_failure(first_reason) || !optimizer_state_is_finite())
 					return false;
 				try {
 					recover_bfgs_state_from_current_coeffs(first_reason, num_step);
@@ -1263,24 +1256,27 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					return true;
 				}
 				catch (const MlipException& retry_exc) {
-					if (optimizer_state_is_finite()) {
-						finish_with_last_finite_state(retry_exc.What());
-						return true;
-					}
+					if (prank == 0)
+						std::cerr << "[" << CurrentTimestamp() << "] "
+						          << "BFGS recovery failed"
+						          << " step=" << num_step
+						          << " reason=" << retry_exc.What() << std::endl;
 					return false;
 				}
 				catch (const std::exception& retry_exc) {
-					if (optimizer_state_is_finite()) {
-						finish_with_last_finite_state(retry_exc.what());
-						return true;
-					}
+					if (prank == 0)
+						std::cerr << "[" << CurrentTimestamp() << "] "
+						          << "BFGS recovery failed"
+						          << " step=" << num_step
+						          << " reason=" << retry_exc.what() << std::endl;
 					return false;
 				}
 				catch (...) {
-					if (optimizer_state_is_finite()) {
-						finish_with_last_finite_state("unknown exception");
-						return true;
-					}
+					if (prank == 0)
+						std::cerr << "[" << CurrentTimestamp() << "] "
+						          << "BFGS recovery failed"
+						          << " step=" << num_step
+						          << " reason=unknown exception" << std::endl;
 					return false;
 				}
 			};
@@ -1293,7 +1289,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
 					          << " step=" << num_step
 					          << " reason=" << reason << std::endl;
-				if (!try_recover_bfgs(reason))
+				if (!try_recover_bfgs_from_ascent_direction(reason))
 					bfgs_status = 1;
 			}
 			catch (const std::exception& exc) {
@@ -1302,7 +1298,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
 					          << " step=" << num_step
 					          << " reason=" << reason << std::endl;
-				if (!try_recover_bfgs(reason))
+				if (!try_recover_bfgs_from_ascent_direction(reason))
 					bfgs_status = 1;
 			}
 			catch (...) {
@@ -1310,7 +1306,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
 					          << " step=" << num_step
 					          << " reason=unknown exception" << std::endl;
-				if (!try_recover_bfgs("unknown exception"))
+				if (!try_recover_bfgs_from_ascent_direction("unknown exception"))
 					bfgs_status = 1;
 			}
 		}
