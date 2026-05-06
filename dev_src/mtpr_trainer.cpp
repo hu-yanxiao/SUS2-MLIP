@@ -31,6 +31,7 @@
 #include <limits>
 #include <random>
 #include <sstream>
+#include <string>
 
 using namespace std;
 
@@ -978,7 +979,22 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 		set_bfgs_x_from_full_coeffs();
 		bfgs.SetInvHessDiagonal(inv_hess_diag);
 	};
+	auto optimizer_state_is_finite = [&]() {
+		return std::isfinite(bfgs_f)
+			&& IsFiniteArray(&bfgs_g[0], opt_n)
+			&& FirstNonFinite(p_mlmtpr->Coeff(), n) < 0;
+	};
 	bool freeze_species_coeffs = do_lin && do_lin_step_limit > 0;
+	auto recover_bfgs_state_from_current_coeffs = [&](const std::string& reason, int step) {
+		reset_bfgs_state();
+		mask_frozen_coordinates(freeze_species_coeffs);
+		if (prank == 0) {
+			std::cerr << "[" << CurrentTimestamp() << "] "
+			          << "BFGS Hessian reset"
+			          << " step=" << step
+			          << " reason=" << reason << std::endl;
+		}
+	};
 	mask_frozen_coordinates(freeze_species_coeffs);
 	if (prank == 0 && freeze_scal_coeffs) {
 		std::cout << "[" << CurrentTimestamp() << "] "
@@ -1135,7 +1151,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 #endif
 			if (external_x_modified) {
 				if (distributed_bfgs || prank == 0)
-					set_bfgs_x_from_full_coeffs();
+					recover_bfgs_state_from_current_coeffs("external coefficient update", num_step);
 				mask_frozen_coordinates(freeze_species_coeffs);
 			}
 		}
@@ -1207,7 +1223,7 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 
 		int bfgs_status = 0;
 		if ((distributed_bfgs || prank == 0) && !converge) {
-			try {
+			auto run_bfgs_iterate = [&]() {
 				mask_frozen_coordinates(freeze_species_coeffs);
 				bfgs.Iterate(bfgs_f, bfgs_g);
 				mask_frozen_coordinates(freeze_species_coeffs);
@@ -1222,27 +1238,80 @@ void MTPR_trainer::Train(std::vector<Configuration>& training_set) //with Shapee
 					}
 				}
 				RequireFiniteArray(bfgs.Data(), opt_n, "BFGS proposed coefficients");
+			};
+			auto finish_with_last_finite_state = [&](const std::string& reason) {
+				recover_bfgs_state_from_current_coeffs("final finite-state stop", num_step);
+				converge = true;
+				if (prank == 0) {
+					logstrm1 << "[" << CurrentTimestamp() << "] "
+					         << "BFGS ended after recovery failed; keeping last finite coefficients"
+					         << " step=" << num_step
+					         << " reason=" << reason << endl;
+					MLP_LOG("dev", logstrm1.str()); logstrm1.str("");
+				}
+			};
+			auto try_recover_bfgs = [&](const std::string& first_reason) {
+				if (!optimizer_state_is_finite())
+					return false;
+				try {
+					recover_bfgs_state_from_current_coeffs(first_reason, num_step);
+					run_bfgs_iterate();
+					if (prank == 0)
+						std::cerr << "[" << CurrentTimestamp() << "] "
+						          << "BFGS recovered after Hessian reset"
+						          << " step=" << num_step << std::endl;
+					return true;
+				}
+				catch (const MlipException& retry_exc) {
+					if (optimizer_state_is_finite()) {
+						finish_with_last_finite_state(retry_exc.What());
+						return true;
+					}
+					return false;
+				}
+				catch (const std::exception& retry_exc) {
+					if (optimizer_state_is_finite()) {
+						finish_with_last_finite_state(retry_exc.what());
+						return true;
+					}
+					return false;
+				}
+				catch (...) {
+					if (optimizer_state_is_finite()) {
+						finish_with_last_finite_state("unknown exception");
+						return true;
+					}
+					return false;
+				}
+			};
+			try {
+				run_bfgs_iterate();
 			}
 			catch (const MlipException& exc) {
-				bfgs_status = 1;
+				const std::string reason = exc.What();
 				if (prank == 0)
 					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
 					          << " step=" << num_step
-					          << " reason=" << exc.What() << std::endl;
+					          << " reason=" << reason << std::endl;
+				if (!try_recover_bfgs(reason))
+					bfgs_status = 1;
 			}
 			catch (const std::exception& exc) {
-				bfgs_status = 1;
+				const std::string reason = exc.what();
 				if (prank == 0)
 					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
 					          << " step=" << num_step
-					          << " reason=" << exc.what() << std::endl;
+					          << " reason=" << reason << std::endl;
+				if (!try_recover_bfgs(reason))
+					bfgs_status = 1;
 			}
 			catch (...) {
-				bfgs_status = 1;
 				if (prank == 0)
 					std::cerr << "[" << CurrentTimestamp() << "] BFGS failed"
 					          << " step=" << num_step
 					          << " reason=unknown exception" << std::endl;
+				if (!try_recover_bfgs("unknown exception"))
+					bfgs_status = 1;
 			}
 		}
 		abort_if_any_rank_reports(bfgs_status,
