@@ -5,6 +5,7 @@
  */
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -13,6 +14,7 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <sstream>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -116,6 +118,45 @@ std::pair<double, double> ParseRangeOption(const std::string& value, const std::
 	} catch (const std::exception&) {
 		ERROR(opt_name + " should contain exactly two comma-separated doubles");
 	}
+}
+
+std::string TrimOptionToken(const std::string& value)
+{
+	std::size_t begin = 0;
+	while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])))
+		++begin;
+	std::size_t end = value.size();
+	while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])))
+		--end;
+	return value.substr(begin, end - begin);
+}
+
+std::vector<double> ParseDoubleListOption(const std::string& value, const std::string& opt_name)
+{
+	if (value.empty())
+		ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+
+	std::vector<double> result;
+	std::stringstream stream(value);
+	std::string token;
+	while (std::getline(stream, token, ',')) {
+		token = TrimOptionToken(token);
+		if (token.empty())
+			ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+		std::size_t parsed = 0;
+		double parsed_value = 0.0;
+		try {
+			parsed_value = std::stod(token, &parsed);
+		} catch (const std::exception&) {
+			ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+		}
+		if (parsed != token.size() || !std::isfinite(parsed_value) || parsed_value < 0.0)
+			ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+		result.push_back(parsed_value);
+	}
+	if (result.empty())
+		ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+	return result;
 }
 
 MomentCoeffStats ComputeMomentCoeffStats(const MLMTPR& mtpr)
@@ -758,6 +799,17 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	if (opts["scale-by-force"] != "")
 		scale_by_force = stod(opts["scale-by-force"]);
 
+	std::vector<double> type_force_weights;
+	if (opts["type-force-weights"] != "")
+		type_force_weights = ParseDoubleListOption(opts["type-force-weights"], "--type-force-weights");
+
+	double nonlinear_l2 = 0.0;
+	if (opts["nonlinear-l2"] != "") {
+		nonlinear_l2 = stod(opts["nonlinear-l2"]);
+		if (!std::isfinite(nonlinear_l2) || nonlinear_l2 < 0.0)
+			ERROR("--nonlinear-l2 should be a finite non-negative double");
+	}
+
 	string validfnm = "";
 	if (opts["valid-cfgs"] != "")
 		validfnm = opts["valid-cfgs"];
@@ -861,6 +913,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	}
 	if (fine_tune && !mtpr.HasCompleteParameters())
 		ERROR("--fine-tune requires a complete trained model with shift/scal/radial/linear coefficients.");
+	if (!type_force_weights.empty() && static_cast<int>(type_force_weights.size()) != mtpr.species_count)
+		ERROR("--type-force-weights count should match the number of species in the potential.");
 #ifdef MLIP_MPI
 	MPI_Comm_rank(MPI_COMM_WORLD, &prank);
 	MPI_Comm_size(MPI_COMM_WORLD, &psize);
@@ -880,6 +934,8 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	trainer.freeze_scal_coeffs = fine_tune;
 	trainer.std_scaling = weight_std;
         trainer.stdd_scaling = weight_stdd;
+	trainer.nonlinear_l2_regularization = nonlinear_l2;
+	trainer.type_force_weights = type_force_weights;
 	trainer.linstop = bfgs_conv_tol;	//if in 100 iterations loss decreases less than this, BFGS is finished
 	trainer.curr_pot_name = curr_fnm;
 	trainer.bfgs_trace_file = bfgs_trace_fnm;
@@ -892,6 +948,14 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "scal-range override: " << scal_range.first << ", " << scal_range.second << std::endl;
 	if (prank == 0 && custom_s_range)
 		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
+	if (prank == 0 && nonlinear_l2 != 0.0)
+		std::cout << "grouped nonlinear L2 ridge: " << nonlinear_l2 << std::endl;
+	if (prank == 0 && !type_force_weights.empty()) {
+		std::cout << "type force weights:";
+		for (double value : type_force_weights)
+			std::cout << " " << value;
+		std::cout << std::endl;
+	}
 	if (prank == 0 && fine_tune)
 		std::cout << "fine-tune mode enabled: scal_coeffs frozen; initial rescale+linear solve will run before BFGS" << std::endl;
 

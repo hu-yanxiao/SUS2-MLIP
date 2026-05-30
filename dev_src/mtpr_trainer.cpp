@@ -449,25 +449,27 @@ void MTPR_trainer::AddToSLAE(Configuration& cfg, double weight, const Neighborho
 
 	if ((wgt_eqtn_forces > 0) && (cfg.has_forces()))
 	{
-		const double alpha = weight * wgt_forces * d / (d + fn*avef);
+		const double base_alpha = weight * wgt_forces * d / (d + fn*avef);
 		const int force_rows = 3 * cfg.size();
 		const bool use_force_block = (n >= 1000 && n <= 5000 && force_rows > 0);
 		if (use_force_block) {
 			lin_force_block_.assign(static_cast<size_t>(force_rows) * n, 0.0);
 			lin_force_rhs_.assign(force_rows, 0.0);
 			for (int ind = 0; ind < cfg.size(); ind++) {
+				const double type_weight = ForceTypeWeight(cfg, ind);
 				for (int a = 0; a < 3; a++) {
 					const int row = 3 * ind + a;
-					lin_force_rhs_[row] = cfg.force(ind, a);
+					lin_force_rhs_[row] = type_weight * cfg.force(ind, a);
 					for (int i = 0; i < n; i++)
-						lin_force_block_[static_cast<size_t>(row) * n + i] = p_mlmtpr->forces_cmpnts(ind, i, a);
+						lin_force_block_[static_cast<size_t>(row) * n + i] =
+							type_weight * p_mlmtpr->forces_cmpnts(ind, i, a);
 				}
 			}
 			cblas_dgemm(CBLAS_ORDER::CblasRowMajor,
 				CBLAS_TRANSPOSE::CblasTrans,
 				CBLAS_TRANSPOSE::CblasNoTrans,
 				n, n, force_rows,
-				alpha,
+				base_alpha,
 				lin_force_block_.data(), n,
 				lin_force_block_.data(), n,
 				1.0,
@@ -475,17 +477,18 @@ void MTPR_trainer::AddToSLAE(Configuration& cfg, double weight, const Neighborho
 			cblas_dgemv(CBLAS_ORDER::CblasRowMajor,
 				CBLAS_TRANSPOSE::CblasTrans,
 				force_rows, n,
-				alpha,
+				base_alpha,
 				lin_force_block_.data(), n,
 				lin_force_rhs_.data(), 1,
 				1.0,
 				quad_opt_vec, 1);
 			for (double force_value : lin_force_rhs_)
-				quad_opt_scalar += alpha * force_value * force_value;
+				quad_opt_scalar += base_alpha * force_value * force_value;
 			quad_opt_eqn_count += force_rows * ((weight > 0) ? 1 : ((weight < 0) ? -1 : 0));
 		} else {
 			for (int ind = 0; ind < cfg.size(); ind++)
 			{
+				const double alpha = base_alpha * ForceTypeWeightSquared(cfg, ind);
 				for (int a = 0; a < 3; a++) {
 					double* force_cmp = &p_mlmtpr->forces_cmpnts(ind, 0, a);
 					cblas_dger(CBLAS_ORDER::CblasRowMajor, n, n,

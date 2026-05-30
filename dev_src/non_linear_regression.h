@@ -36,6 +36,8 @@ protected:
 	void AddLossGrad(const Configuration &orig);
 	void AddLossGrad(const Configuration &orig, const Neighborhoods* neighborhoods);
 	bool NeedStdTerms() const { return std_scaling != 0.0 || stdd_scaling != 0.0; }
+	double ForceTypeWeight(const Configuration& cfg, int atom_index) const;
+	double ForceTypeWeightSquared(const Configuration& cfg, int atom_index) const;
 	void PrepareTypeScratch(const Configuration& cfg);
 	void ResetObjectiveAccumulators();
 	double loss_;											// result of AddLoss and AddLossGrad
@@ -50,6 +52,8 @@ public:
 	int norm_by_forces = 0;									// whether to scale weight of E&F in configurations depending on the abs(F)
         double std_scaling = 0.2;
         double stdd_scaling = 0.00001;	
+	double nonlinear_l2_regularization = 0.0;
+	std::vector<double> type_force_weights;
 
 	NonLinearRegression(AnyLocalMLIP* _p_mlip,				// Constructor requires MTP basis
 						double _wgt_energy = 1.0,			// Optional parameters are the weights coeficients of energy, forces and stresses equations in minimization problem

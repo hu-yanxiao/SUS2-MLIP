@@ -266,6 +266,9 @@ public:
 	void AddPenaltyGrad(const double coeff, 
 						double& out_penalty_accumulator, 
 						Array1D* out_penalty_grad_accumulator) override;
+	void AddGroupedNonlinearL2Penalty(const double coeff,
+						double& out_penalty_accumulator,
+						Array1D* out_penalty_grad_accumulator = nullptr) override;
 
 
 	int alpha_count;								//!< Basis functions count 

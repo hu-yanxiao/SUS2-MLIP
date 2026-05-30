@@ -2763,6 +2763,62 @@ void MLMTPR::AddPenaltyGrad(const double coeff,													// Must calculate ad
 		}
 }
 
+void MLMTPR::AddGroupedNonlinearL2Penalty(const double coeff,
+							double& out_penalty_accumulator,
+							Array1D* out_penalty_grad_accumulator)
+{
+	if (coeff == 0.0)
+		return;
+
+	const int C = species_count;
+	const int K = radial_func_count;
+	const int S = K_;
+	const int R = p_RadialBasis->rb_size;
+	const int pair_count = C * C;
+	const int radial_begin = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int radial_end = radial_begin + K * block_size;
+	if (C <= 0 || K <= 0 || S <= 0 || R <= 0)
+		return;
+	if (radial_end > CoeffCount())
+		ERROR("Invalid MTPR coefficient layout while applying grouped nonlinear L2 ridge.");
+
+	if (out_penalty_grad_accumulator != nullptr &&
+	    out_penalty_grad_accumulator->size() != CoeffCount())
+		out_penalty_grad_accumulator->resize(CoeffCount());
+
+	const int group_count = 2 + 2 * S + K;
+	auto add_contiguous_group = [&](int begin, int count) {
+		if (count <= 0)
+			return;
+		if (begin < 0 || begin + count > CoeffCount())
+			ERROR("Invalid MTPR coefficient group while applying grouped nonlinear L2 ridge.");
+
+		double mean_square = 0.0;
+		for (int i = 0; i < count; ++i) {
+			const double value = regression_coeffs[begin + i];
+			mean_square += value * value;
+		}
+		mean_square /= count;
+		out_penalty_accumulator += coeff * mean_square / group_count;
+
+		if (out_penalty_grad_accumulator != nullptr) {
+			const double grad_scale = coeff * 2.0 / (group_count * count);
+			for (int i = 0; i < count; ++i)
+				(*out_penalty_grad_accumulator)[begin + i] += grad_scale * regression_coeffs[begin + i];
+		}
+	};
+
+	add_contiguous_group(0, C);
+	for (int block = 0; block < S; ++block) {
+		add_contiguous_group(ScalingSlopeOffset(block, 0, 0), pair_count);
+		add_contiguous_group(ScalingShiftOffset(block, 0, 0), pair_count);
+	}
+	for (int block = 0; block < K; ++block)
+		add_contiguous_group(radial_begin + block * block_size, R);
+	add_contiguous_group(radial_begin + R, C);
+}
+
 void MLMTPR::Orthogonalize()
 {
 	const int C = species_count;

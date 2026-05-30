@@ -45,6 +45,16 @@
 
 using namespace std;
 
+static string FirstExistingPath(const vector<string>& candidates)
+{
+	for (const string& candidate : candidates) {
+		ifstream ifs(candidate, ios::binary);
+		if (ifs.good())
+			return candidate;
+	}
+	return candidates.front();
+}
+
 
 #define TEST(name) \
 test_count++; \
@@ -624,6 +634,108 @@ TEST("MTPR CalcEFS (check forces correctness by using of central differences)") 
 	if (!pot.CheckEFSConsistency_debug(cfg, diffstep))
 		FAIL();
 
+} END_TEST;
+
+TEST("MTPR grouped nonlinear L2 ridge uses balanced parameter groups") {
+	MLMTPR mtpr(FirstExistingPath({"example/untrained.mtp",
+	                                "../example/untrained.mtp",
+	                                "../../example/untrained.mtp"}));
+	const int C = mtpr.species_count;
+	const int K = mtpr.radial_func_count;
+	const int S = mtpr.K_;
+	const int R = mtpr.Get_RB_size();
+	const int radial_begin = mtpr.RadialCoeffOffset();
+	const int block_size = mtpr.RadialCoeffBlockSize();
+	const int linear_begin = radial_begin + K * block_size;
+
+	for (int i = 0; i < mtpr.CoeffCount(); ++i)
+		mtpr.Coeff()[i] = 0.0;
+
+	for (int type = 0; type < C; ++type)
+		mtpr.Coeff()[type] = 2.0;
+	for (int block = 0; block < S; ++block)
+		for (int type_central = 0; type_central < C; ++type_central)
+			for (int type_outer = 0; type_outer < C; ++type_outer) {
+				mtpr.Coeff()[mtpr.ScalingSlopeOffset(block, type_central, type_outer)] = 3.0;
+				mtpr.Coeff()[mtpr.ScalingShiftOffset(block, type_central, type_outer)] = 4.0;
+			}
+	for (int mu = 0; mu < K; ++mu) {
+		for (int r = 0; r < R; ++r)
+			mtpr.Coeff()[radial_begin + mu * block_size + r] = 5.0;
+		for (int type = 0; type < C; ++type)
+			mtpr.Coeff()[radial_begin + mu * block_size + R + type] = (mu == 0) ? 6.0 : 1000.0;
+	}
+	for (int i = linear_begin; i < mtpr.CoeffCount(); ++i)
+		mtpr.Coeff()[i] = 1000.0;
+
+	const double coeff = 2.0;
+	double loss = 0.0;
+	Array1D grad(mtpr.CoeffCount());
+	FillWithZero(grad);
+	mtpr.AddGroupedNonlinearL2Penalty(coeff, loss, &grad);
+
+	const int group_count = 2 + 2 * S + K;
+	const double expected_loss = coeff * (
+		4.0 + S * 9.0 + S * 16.0 + K * 25.0 + 36.0) / group_count;
+	if (fabs(loss - expected_loss) > 1.0e-12) {
+		cout << "loss " << loss << " expected " << expected_loss << endl;
+		FAIL()
+	}
+
+	const double shift_grad = coeff * 2.0 * 2.0 / (group_count * C);
+	const double slope_grad = coeff * 2.0 * 3.0 / (group_count * C * C);
+	const double basis_grad = coeff * 2.0 * 5.0 / (group_count * R);
+	const double species_grad = coeff * 2.0 * 6.0 / (group_count * C);
+	if (fabs(grad[0] - shift_grad) > 1.0e-12)
+		FAIL("shift gradient mismatch")
+	if (fabs(grad[mtpr.ScalingSlopeOffset(0, 0, 0)] - slope_grad) > 1.0e-12)
+		FAIL("scaling slope gradient mismatch")
+	if (fabs(grad[radial_begin] - basis_grad) > 1.0e-12)
+		FAIL("radial basis gradient mismatch")
+	if (fabs(grad[radial_begin + R] - species_grad) > 1.0e-12)
+		FAIL("radial species gradient mismatch")
+	if (K > 1 && fabs(grad[radial_begin + block_size + R]) > 1.0e-12)
+		FAIL("redundant radial species coefficient should not be regularized")
+	if (linear_begin < mtpr.CoeffCount() && fabs(grad[linear_begin]) > 1.0e-12)
+		FAIL("linear coefficients should not be regularized by nonlinear L2")
+} END_TEST;
+
+TEST("MTPR type force weights scale nonlinear force loss by atom type") {
+	Configuration cfg;
+	ifstream ifs(FirstExistingPath({"example/train.cfg",
+	                                "../example/train.cfg",
+	                                "../../example/train.cfg"}), ios::binary);
+	cfg.Load(ifs);
+	ifs.close();
+
+	MLMTPR mtpr(FirstExistingPath({"example/untrained.mtp",
+	                                "../example/untrained.mtp",
+	                                "../../example/untrained.mtp"}));
+	Configuration predicted = cfg;
+	mtpr.CalcEFS(predicted);
+
+	std::vector<double> type_weights(mtpr.species_count, 1.0);
+	if (type_weights.empty())
+		FAIL("test potential should have at least one species")
+	type_weights[0] = 2.0;
+
+	double expected_loss = 0.0;
+	for (int i = 0; i < cfg.size(); ++i) {
+		const double type_weight = type_weights[cfg.type(i)];
+		expected_loss += type_weight * type_weight * (cfg.force(i) - predicted.force(i)).NormSq();
+	}
+
+	MTPR_trainer trainer(&mtpr, 0.0, 1.0, 0.0, 0.0, 0.0);
+	trainer.std_scaling = 0.0;
+	trainer.stdd_scaling = 0.0;
+	trainer.type_force_weights = type_weights;
+	vector<Configuration> train_set(1, cfg);
+	const double actual_loss = trainer.ObjectiveFunction(train_set);
+	const double tol = 1.0e-10 * std::max(1.0, fabs(expected_loss));
+	if (fabs(actual_loss - expected_loss) > tol) {
+		cout << "loss " << actual_loss << " expected " << expected_loss << endl;
+		FAIL()
+	}
 } END_TEST;
 
 /*TEST("MTPR2 CalcEFS (check forces correctness by using of central differences)") {

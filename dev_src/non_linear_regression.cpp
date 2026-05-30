@@ -18,6 +18,7 @@
 #include <set>
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 
 #include "non_linear_regression.h"
 #include "../src/common/bfgs.h"
@@ -42,6 +43,25 @@ inline void AccumulateStressErrorMetrics(const Matrix3& lhs,
 	sq_sum += d0 * d0 + d1 * d1 + d2 * d2
 		   + d3 * d3 + d4 * d4 + d5 * d5;
 }
+}
+
+double NonLinearRegression::ForceTypeWeight(const Configuration& cfg, int atom_index) const
+{
+	if (type_force_weights.empty())
+		return 1.0;
+	const int type = cfg.type(atom_index);
+	if (type < 0 || type >= static_cast<int>(type_force_weights.size()))
+		ERROR("Configuration atom type is outside --type-force-weights.");
+	const double weight = type_force_weights[type];
+	if (!std::isfinite(weight) || weight < 0.0)
+		ERROR("--type-force-weights should contain finite non-negative values.");
+	return weight;
+}
+
+double NonLinearRegression::ForceTypeWeightSquared(const Configuration& cfg, int atom_index) const
+{
+	const double weight = ForceTypeWeight(cfg, atom_index);
+	return weight * weight;
 }
 
 void NonLinearRegression::PrepareTypeScratch(const Configuration& cfg)
@@ -172,6 +192,7 @@ void NonLinearRegression::AddLoss(const Configuration & orig, const Neighborhood
 			if (weighting == "structures")
 				wgt /= cfg.size();
 
+			wgt *= ForceTypeWeightSquared(orig, i);
 			loss_ += wgt * (orig.force(i) - cfg.force(i)).NormSq() * d/ (d + fn*avef);
 		}
 
@@ -194,6 +215,7 @@ void NonLinearRegression::AddLoss(const Configuration & orig, const Neighborhood
 				 * (1.0/cfg.size());
 
 	p_mlip->AddPenaltyGrad(wgt_eqtn_constr, loss_);
+	p_mlip->AddGroupedNonlinearL2Penalty(nonlinear_l2_regularization, loss_);
 
 	// it is important to add energy latest - less round-off errors this way
 	if (wgt_energy!=0 && orig.has_energy())
@@ -308,6 +330,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 			if (weighting == "structures")
 				wgt /= cfg.size();
 
+			wgt *= ForceTypeWeightSquared(orig, i);
 			loss_ += wgt * (cfg.force(i) - orig.force(i)).NormSq() * d / (d + fn*avef);
 			dLdF[i] = 2.0 * wgt * (cfg.force(i) - orig.force(i)) * d / (d + fn*avef);
 		}
@@ -357,6 +380,7 @@ void NonLinearRegression::AddLossGrad(const Configuration & orig, const Neighbor
 	if (need_std_terms)
 		loss_ += std_scaling * _std_ + stdd_scaling * _stdd_;
 	p_mlip->AddPenaltyGrad(wgt_eqtn_constr, loss_, &loss_grad_);
+	p_mlip->AddGroupedNonlinearL2Penalty(nonlinear_l2_regularization, loss_, &loss_grad_);
 
 	// Now we compute gradients, this adds to loss_grad_
 	if (neighborhoods != nullptr)

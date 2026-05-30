@@ -77,7 +77,10 @@ public:
 
 	//! Function implementing soft constraints on coefficients (e.g., so that the norm of the radial function is 1) or regularization implementing as penalty to training procedure
 	virtual void AddPenaltyGrad(const double coeff,													// Must calculate penalty and optionally (if out_penalty_grad_accumulator != nullptr) its gradient w.r.t. coefficients multiplied by coeff to out_penalty
-								double& out_penalty_accumulator, 
+								double& out_penalty_accumulator,
+								Array1D* out_penalty_grad_accumulator = nullptr);
+	virtual void AddGroupedNonlinearL2Penalty(const double coeff,
+								double& out_penalty_accumulator,
 								Array1D* out_penalty_grad_accumulator = nullptr);
 
 	// CalcEFS
