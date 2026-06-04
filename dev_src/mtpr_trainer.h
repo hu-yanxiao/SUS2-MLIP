@@ -40,6 +40,7 @@ private:
 	std::vector<double> lin_force_rhs_;
 	std::vector<double> lin_stress_block_;
 	std::vector<double> lin_stress_rhs_;
+	std::vector<double> lin_energy_cmpnts_;
 
 	Array2D inv_hessian;
 	bool have_hess = false;								//is hessian currently approximated
@@ -50,6 +51,9 @@ private:
 	Array1D bfgs_g;
 	TrainErrorSummary last_train_error_summary_;
 	bool have_last_train_error_summary_ = false;
+	bool HasFixedAtomicEnergies() const;
+	double FixedAtomicEnergyOffset(const Configuration& cfg) const;
+	void ApplyFixedAtomicEnergyLinearGauge(int n);
 #ifdef MLIP_MPI
 	MPI_Comm train_comm_ = MPI_COMM_WORLD;
 	bool train_comm_owned_ = false;

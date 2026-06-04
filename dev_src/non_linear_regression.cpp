@@ -112,6 +112,21 @@ void NonLinearRegression::ResetObjectiveAccumulators()
 	metric_stress_component_count_ = 0;
 }
 
+void NonLinearRegression::AddGlobalParameterPenalties(double repeat_count,
+													  Array1D* out_penalty_grad_accumulator)
+{
+	if (repeat_count <= 0.0)
+		return;
+	p_mlip->AddRadialSmoothnessPenalty(radial_smooth_regularization * repeat_count,
+									   radial_smooth_grid,
+									   loss_,
+									   out_penalty_grad_accumulator);
+	p_mlip->AddFixedAtomicEnergyPenalty(fixed_atomic_energies,
+										fixed_atomic_energy_weight * repeat_count,
+										loss_,
+										out_penalty_grad_accumulator);
+}
+
 void NonLinearRegression::AddLoss(const Configuration & orig)
 {
 	AddLoss(orig, nullptr);
@@ -401,6 +416,7 @@ double NonLinearRegression::ObjectiveFunction(vector<Configuration>& training_se
 	ResetObjectiveAccumulators();
 	for (size_t i = 0; i < training_set.size(); ++i)
 		AddLoss(training_set[i], neighborhoods == nullptr ? nullptr : &(*neighborhoods)[i]);
+	AddGlobalParameterPenalties(static_cast<double>(training_set.size()), nullptr);
 	return loss_;
 }
 
@@ -418,6 +434,7 @@ void NonLinearRegression::CalcObjectiveFunctionGrad(vector<Configuration>& train
 
 	for (size_t i = 0; i < training_set.size(); ++i) 
 		AddLossGrad(training_set[i], neighborhoods == nullptr ? nullptr : &(*neighborhoods)[i]);
+	AddGlobalParameterPenalties(static_cast<double>(training_set.size()), &loss_grad_);
 }
 
 double NonLinearRegression::EnergyMAE_meVPerAtom() const

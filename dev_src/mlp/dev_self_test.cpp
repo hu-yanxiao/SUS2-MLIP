@@ -728,6 +728,7 @@ TEST("MTPR type force weights scale nonlinear force loss by atom type") {
 	MTPR_trainer trainer(&mtpr, 0.0, 1.0, 0.0, 0.0, 0.0);
 	trainer.std_scaling = 0.0;
 	trainer.stdd_scaling = 0.0;
+	trainer.radial_smooth_regularization = 0.0;
 	trainer.type_force_weights = type_weights;
 	vector<Configuration> train_set(1, cfg);
 	const double actual_loss = trainer.ObjectiveFunction(train_set);
@@ -735,6 +736,136 @@ TEST("MTPR type force weights scale nonlinear force loss by atom type") {
 	if (fabs(actual_loss - expected_loss) > tol) {
 		cout << "loss " << actual_loss << " expected " << expected_loss << endl;
 		FAIL()
+	}
+} END_TEST;
+
+TEST("MTPR radial H1 smoothness penalty gradient matches finite differences") {
+	MLMTPR mtpr(FirstExistingPath({"example/untrained.mtp",
+	                                "../example/untrained.mtp",
+	                                "../../example/untrained.mtp"}));
+	const int C = mtpr.species_count;
+	const int R = mtpr.Get_RB_size();
+	const int radial_begin = mtpr.RadialCoeffOffset();
+	const int block_size = mtpr.RadialCoeffBlockSize();
+	if (C <= 0 || R <= 1 || mtpr.radial_func_count <= 0)
+		FAIL("test potential should have radial coefficients")
+
+	for (int mu = 0; mu < mtpr.radial_func_count; ++mu)
+		for (int xi = 0; xi < R; ++xi)
+			mtpr.Coeff()[radial_begin + mu * block_size + xi] = 0.05 * (1 + mu + xi);
+	mtpr.Coeff()[mtpr.ScalingSlopeOffset(0, 0, 0)] = 0.35;
+	mtpr.Coeff()[mtpr.ScalingShiftOffset(0, 0, 0)] = 0.25;
+
+	const double coeff = 3.0e-4;
+	const int grid = 24;
+	double loss = 0.0;
+	Array1D grad(mtpr.CoeffCount());
+	FillWithZero(grad);
+	mtpr.AddRadialSmoothnessPenalty(coeff, grid, loss, &grad);
+
+	std::vector<int> check_indices;
+	check_indices.push_back(radial_begin + 1);
+	check_indices.push_back(mtpr.ScalingSlopeOffset(0, 0, 0));
+	check_indices.push_back(mtpr.ScalingShiftOffset(0, 0, 0));
+
+	const double step = 1.0e-6;
+	for (int idx : check_indices) {
+		const double old_value = mtpr.Coeff()[idx];
+		mtpr.Coeff()[idx] = old_value + step;
+		double loss_plus = 0.0;
+		mtpr.AddRadialSmoothnessPenalty(coeff, grid, loss_plus, nullptr);
+		mtpr.Coeff()[idx] = old_value - step;
+		double loss_minus = 0.0;
+		mtpr.AddRadialSmoothnessPenalty(coeff, grid, loss_minus, nullptr);
+		mtpr.Coeff()[idx] = old_value;
+
+		const double fd = (loss_plus - loss_minus) / (2.0 * step);
+		const double tol = 2.0e-5 * std::max(1.0, std::max(fabs(fd), fabs(grad[idx])));
+		if (fabs(fd - grad[idx]) > tol) {
+			cout << "idx " << idx << " analytic " << grad[idx] << " fd " << fd << endl;
+			FAIL("radial smoothness gradient mismatch")
+		}
+	}
+} END_TEST;
+
+TEST("MTPR fixed atomic energy penalty gradient matches finite differences") {
+	MLMTPR mtpr(FirstExistingPath({"example/untrained.mtp",
+	                                "../example/untrained.mtp",
+	                                "../../example/untrained.mtp"}));
+	const int C = mtpr.species_count;
+	if (C <= 0)
+		FAIL("test potential should have at least one species")
+	const int radial_begin = mtpr.RadialCoeffOffset();
+	const int block_size = mtpr.RadialCoeffBlockSize();
+	const int linear_begin = radial_begin + mtpr.radial_func_count * block_size;
+
+	std::vector<double> atomic_energies(C, 0.0);
+	for (int type = 0; type < C; ++type) {
+		atomic_energies[type] = -1.5 - 0.25 * type;
+		mtpr.Coeff()[type] = 0.4 + 0.1 * type;
+		mtpr.Coeff()[linear_begin + type] = -0.2 + 0.05 * type;
+	}
+
+	const double coeff = 7.0;
+	double loss = 0.0;
+	Array1D grad(mtpr.CoeffCount());
+	FillWithZero(grad);
+	mtpr.AddFixedAtomicEnergyPenalty(atomic_energies, coeff, loss, &grad);
+
+	std::vector<int> check_indices;
+	check_indices.push_back(0);
+	check_indices.push_back(linear_begin);
+	const double step = 1.0e-6;
+	for (int idx : check_indices) {
+		const double old_value = mtpr.Coeff()[idx];
+		mtpr.Coeff()[idx] = old_value + step;
+		double loss_plus = 0.0;
+		mtpr.AddFixedAtomicEnergyPenalty(atomic_energies, coeff, loss_plus, nullptr);
+		mtpr.Coeff()[idx] = old_value - step;
+		double loss_minus = 0.0;
+		mtpr.AddFixedAtomicEnergyPenalty(atomic_energies, coeff, loss_minus, nullptr);
+		mtpr.Coeff()[idx] = old_value;
+
+		const double fd = (loss_plus - loss_minus) / (2.0 * step);
+		const double tol = 1.0e-7 * std::max(1.0, std::max(fabs(fd), fabs(grad[idx])));
+		if (fabs(fd - grad[idx]) > tol) {
+			cout << "idx " << idx << " analytic " << grad[idx] << " fd " << fd << endl;
+			FAIL("fixed atomic energy gradient mismatch")
+		}
+	}
+} END_TEST;
+
+TEST("MTPR TrainLinear enforces fixed atomic energies") {
+	Configuration cfg;
+	ifstream ifs(FirstExistingPath({"example/train.cfg",
+	                                "../example/train.cfg",
+	                                "../../example/train.cfg"}), ios::binary);
+	cfg.Load(ifs);
+	ifs.close();
+
+	MLMTPR mtpr(FirstExistingPath({"example/untrained.mtp",
+	                                "../example/untrained.mtp",
+	                                "../../example/untrained.mtp"}));
+	const int C = mtpr.species_count;
+	if (C <= 0)
+		FAIL("test potential should have at least one species")
+	std::vector<double> atomic_energies(C, -2.75);
+
+	MTPR_trainer trainer(&mtpr, 1.0, 0.0, 0.0, 0.0, 0.0);
+	trainer.fixed_atomic_energies = atomic_energies;
+	vector<Configuration> train_set(1, cfg);
+	trainer.TrainLinear(0, train_set, nullptr, "fixed atomic energy self-test");
+
+	const int radial_begin = mtpr.RadialCoeffOffset();
+	const int block_size = mtpr.RadialCoeffBlockSize();
+	const int linear_begin = radial_begin + mtpr.radial_func_count * block_size;
+	for (int type = 0; type < C; ++type) {
+		const double isolated_energy = mtpr.Coeff()[type] + mtpr.Coeff()[linear_begin + type];
+		if (fabs(isolated_energy - atomic_energies[type]) > 1.0e-10) {
+			cout << "type " << type << " isolated " << isolated_energy
+			     << " expected " << atomic_energies[type] << endl;
+			FAIL("fixed atomic energy was not enforced")
+		}
 	}
 } END_TEST;
 

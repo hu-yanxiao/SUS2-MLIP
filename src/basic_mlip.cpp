@@ -189,6 +189,20 @@ void AnyLocalMLIP::AddGroupedNonlinearL2Penalty(const double coeff,
 {
 }
 
+void AnyLocalMLIP::AddRadialSmoothnessPenalty(const double coeff,
+									const int grid_size,
+									double& out_penalty_accumulator,
+									Array1D* out_penalty_grad_accumulator)
+{
+}
+
+void AnyLocalMLIP::AddFixedAtomicEnergyPenalty(const std::vector<double>& atomic_energies,
+									const double coeff,
+									double& out_penalty_accumulator,
+									Array1D* out_penalty_grad_accumulator)
+{
+}
+
 AnyLocalMLIP::AnyLocalMLIP(double _min_dist, double _max_dist, int _radial_basis_size)
 {
 	p_RadialBasis = new RadialBasis_Shapeev(_min_dist, _max_dist, _radial_basis_size);

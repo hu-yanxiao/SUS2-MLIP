@@ -2819,6 +2819,145 @@ void MLMTPR::AddGroupedNonlinearL2Penalty(const double coeff,
 	add_contiguous_group(radial_begin + R, C);
 }
 
+void MLMTPR::AddRadialSmoothnessPenalty(const double coeff,
+							const int grid_size,
+							double& out_penalty_accumulator,
+							Array1D* out_penalty_grad_accumulator)
+{
+	if (coeff == 0.0)
+		return;
+	if (!std::isfinite(coeff) || coeff < 0.0)
+		ERROR("Radial smoothness coefficient should be a finite non-negative value.");
+	if (grid_size <= 0)
+		ERROR("Radial smoothness grid size should be positive.");
+
+	const int C = species_count;
+	const int K = radial_func_count;
+	const int S = K_;
+	const int R = p_RadialBasis->rb_size;
+	const int pair_count = C * C;
+	const int radial_begin = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int radial_end = radial_begin + K * block_size;
+	const int shared_type_begin = radial_begin + R;
+	if (C <= 0 || K <= 0 || S <= 0 || R <= 0)
+		return;
+	if (radial_end > CoeffCount() || shared_type_begin + C > CoeffCount())
+		ERROR("Invalid MTPR coefficient layout while applying radial smoothness penalty.");
+	if (out_penalty_grad_accumulator != nullptr &&
+	    out_penalty_grad_accumulator->size() != CoeffCount())
+		out_penalty_grad_accumulator->resize(CoeffCount());
+
+	const double cutoff = p_RadialBasis->max_dist;
+	if (!std::isfinite(cutoff) || cutoff <= 0.0)
+		ERROR("Radial smoothness requires a finite positive cutoff.");
+	const double weight = coeff * cutoff * cutoff /
+		(static_cast<double>(grid_size) * K * pair_count);
+
+	for (int q = 0; q < grid_size; ++q) {
+		const double r = cutoff * (static_cast<double>(q) + 0.5) / grid_size;
+		for (int type_central = 0; type_central < C; ++type_central) {
+			const double center_scale = regression_coeffs[shared_type_begin + type_central];
+			for (int type_outer = 0; type_outer < C; ++type_outer) {
+				const double outer_scale = regression_coeffs[shared_type_begin + type_outer];
+				const double species_scale = center_scale * outer_scale;
+
+				for (int mu = 0; mu < K; ++mu) {
+					if (mu >= static_cast<int>(mu_to_K.size()))
+						ERROR("Invalid MTPR mu_to_K map while applying radial smoothness penalty.");
+					const int scaling_block = mu_to_K[mu];
+					if (scaling_block < 0 || scaling_block >= K_)
+						ERROR("Invalid MTPR scaling block while applying radial smoothness penalty.");
+					if (!UsesJacobiIndexedBasis() &&
+					    scaling_block >= static_cast<int>(mu_to_sigma.size()))
+						ERROR("Invalid MTPR mu_to_sigma map while applying radial smoothness penalty.");
+					const int basis_k = UsesJacobiIndexedBasis()
+						? JacobiIndexedBlockForMu(mu)
+						: mu_to_sigma[scaling_block];
+
+					const int radial_offset = radial_begin + mu * block_size;
+					const int slope_offset = ScalingSlopeOffset(scaling_block, type_central, type_outer);
+					const int shift_offset = ScalingShiftOffset(scaling_block, type_central, type_outer);
+					const double slope = regression_coeffs[slope_offset];
+					const double shift = regression_coeffs[shift_offset];
+					FillWithZero(p_RadialBasis->rb_vals);
+					FillWithZero(p_RadialBasis->rb_ders);
+					p_RadialBasis->RB_Calc(r, slope, shift, basis_k);
+
+					double dot_der = 0.0;
+					double dot_der_d_slope = 0.0;
+					double dot_der_d_shift = 0.0;
+					for (int xi = 0; xi < R; ++xi) {
+						const double radial_coeff = regression_coeffs[radial_offset + xi];
+						dot_der += radial_coeff * p_RadialBasis->rb_ders[xi];
+						dot_der_d_slope += radial_coeff * p_RadialBasis->rb_ders[2 * R + xi];
+						dot_der_d_shift += radial_coeff * p_RadialBasis->rb_ders[4 * R + xi];
+					}
+
+					const double radial_der = scaling * species_scale * dot_der;
+					out_penalty_accumulator += weight * radial_der * radial_der;
+					if (out_penalty_grad_accumulator == nullptr)
+						continue;
+
+					const double common_grad = 2.0 * weight * radial_der;
+					for (int xi = 0; xi < R; ++xi) {
+						(*out_penalty_grad_accumulator)[radial_offset + xi] +=
+							common_grad * scaling * species_scale * p_RadialBasis->rb_ders[xi];
+					}
+					(*out_penalty_grad_accumulator)[slope_offset] +=
+						common_grad * scaling * species_scale * dot_der_d_slope;
+					(*out_penalty_grad_accumulator)[shift_offset] +=
+						common_grad * scaling * species_scale * dot_der_d_shift;
+					(*out_penalty_grad_accumulator)[shared_type_begin + type_central] +=
+						common_grad * scaling * outer_scale * dot_der;
+					(*out_penalty_grad_accumulator)[shared_type_begin + type_outer] +=
+						common_grad * scaling * center_scale * dot_der;
+				}
+			}
+		}
+	}
+}
+
+void MLMTPR::AddFixedAtomicEnergyPenalty(const std::vector<double>& atomic_energies,
+							const double coeff,
+							double& out_penalty_accumulator,
+							Array1D* out_penalty_grad_accumulator)
+{
+	if (atomic_energies.empty() || coeff == 0.0)
+		return;
+	if (!std::isfinite(coeff) || coeff < 0.0)
+		ERROR("Fixed atomic energy penalty weight should be a finite non-negative value.");
+	if (static_cast<int>(atomic_energies.size()) != species_count)
+		ERROR("Fixed atomic energy count should match the number of species in the potential.");
+	for (double value : atomic_energies)
+		if (!std::isfinite(value))
+			ERROR("Fixed atomic energies should be finite values.");
+
+	const int C = species_count;
+	const int radial_begin = RadialCoeffOffset();
+	const int block_size = RadialCoeffBlockSize();
+	const int linear_begin = radial_begin + radial_func_count * block_size;
+	if (linear_begin < 0 || linear_begin + C > CoeffCount())
+		ERROR("Invalid MTPR coefficient layout while applying fixed atomic energy penalty.");
+	if (out_penalty_grad_accumulator != nullptr &&
+	    out_penalty_grad_accumulator->size() != CoeffCount())
+		out_penalty_grad_accumulator->resize(CoeffCount());
+
+	const double weight = coeff / C;
+	for (int type = 0; type < C; ++type) {
+		const int shift_index = type;
+		const int species_index = linear_begin + type;
+		const double delta =
+			regression_coeffs[shift_index] + regression_coeffs[species_index] - atomic_energies[type];
+		out_penalty_accumulator += weight * delta * delta;
+		if (out_penalty_grad_accumulator != nullptr) {
+			const double grad = 2.0 * weight * delta;
+			(*out_penalty_grad_accumulator)[shift_index] += grad;
+			(*out_penalty_grad_accumulator)[species_index] += grad;
+		}
+	}
+}
+
 void MLMTPR::Orthogonalize()
 {
 	const int C = species_count;

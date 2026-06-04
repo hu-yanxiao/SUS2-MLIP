@@ -131,10 +131,12 @@ std::string TrimOptionToken(const std::string& value)
 	return value.substr(begin, end - begin);
 }
 
-std::vector<double> ParseDoubleListOption(const std::string& value, const std::string& opt_name)
+std::vector<double> ParseDoubleListOption(const std::string& value,
+										  const std::string& opt_name,
+										  bool allow_negative = false)
 {
 	if (value.empty())
-		ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+		ERROR(opt_name + " should contain comma-separated finite doubles");
 
 	std::vector<double> result;
 	std::stringstream stream(value);
@@ -142,20 +144,23 @@ std::vector<double> ParseDoubleListOption(const std::string& value, const std::s
 	while (std::getline(stream, token, ',')) {
 		token = TrimOptionToken(token);
 		if (token.empty())
-			ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+			ERROR(opt_name + " should contain comma-separated finite doubles");
 		std::size_t parsed = 0;
 		double parsed_value = 0.0;
 		try {
 			parsed_value = std::stod(token, &parsed);
 		} catch (const std::exception&) {
-			ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+			ERROR(opt_name + " should contain comma-separated finite doubles");
 		}
-		if (parsed != token.size() || !std::isfinite(parsed_value) || parsed_value < 0.0)
-			ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+		if (parsed != token.size() || !std::isfinite(parsed_value) ||
+		    (!allow_negative && parsed_value < 0.0))
+			ERROR(opt_name + (allow_negative
+				? " should contain comma-separated finite doubles"
+				: " should contain comma-separated finite non-negative doubles"));
 		result.push_back(parsed_value);
 	}
 	if (result.empty())
-		ERROR(opt_name + " should contain comma-separated finite non-negative doubles");
+		ERROR(opt_name + " should contain comma-separated finite doubles");
 	return result;
 }
 
@@ -810,6 +815,32 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 			ERROR("--nonlinear-l2 should be a finite non-negative double");
 	}
 
+	double radial_smooth = 1.0e-6;
+	if (opts["radial-smooth"] != "") {
+		radial_smooth = stod(opts["radial-smooth"]);
+		if (!std::isfinite(radial_smooth) || radial_smooth < 0.0)
+			ERROR("--radial-smooth should be a finite non-negative double");
+	}
+
+	int radial_smooth_grid = 128;
+	if (opts["radial-smooth-grid"] != "") {
+		radial_smooth_grid = stoi(opts["radial-smooth-grid"]);
+		if (radial_smooth_grid <= 0)
+			ERROR("--radial-smooth-grid should be > 0");
+	}
+
+	std::vector<double> fixed_atomic_energies;
+	if (opts["atomic-energies"] != "")
+		fixed_atomic_energies =
+			ParseDoubleListOption(opts["atomic-energies"], "--atomic-energies", true);
+
+	double fixed_atomic_energy_weight = 1.0e8;
+	if (opts["atomic-energy-weight"] != "") {
+		fixed_atomic_energy_weight = stod(opts["atomic-energy-weight"]);
+		if (!std::isfinite(fixed_atomic_energy_weight) || fixed_atomic_energy_weight < 0.0)
+			ERROR("--atomic-energy-weight should be a finite non-negative double");
+	}
+
 	string validfnm = "";
 	if (opts["valid-cfgs"] != "")
 		validfnm = opts["valid-cfgs"];
@@ -915,6 +946,9 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		ERROR("--fine-tune requires a complete trained model with shift/scal/radial/linear coefficients.");
 	if (!type_force_weights.empty() && static_cast<int>(type_force_weights.size()) != mtpr.species_count)
 		ERROR("--type-force-weights count should match the number of species in the potential.");
+	if (!fixed_atomic_energies.empty() &&
+	    static_cast<int>(fixed_atomic_energies.size()) != mtpr.species_count)
+		ERROR("--atomic-energies count should match the number of species in the potential.");
 #ifdef MLIP_MPI
 	MPI_Comm_rank(MPI_COMM_WORLD, &prank);
 	MPI_Comm_size(MPI_COMM_WORLD, &psize);
@@ -933,8 +967,12 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 	trainer.do_lin_frequency = do_lin_frequency;
 	trainer.freeze_scal_coeffs = fine_tune;
 	trainer.std_scaling = weight_std;
-        trainer.stdd_scaling = weight_stdd;
+	trainer.stdd_scaling = weight_stdd;
 	trainer.nonlinear_l2_regularization = nonlinear_l2;
+	trainer.radial_smooth_regularization = radial_smooth;
+	trainer.radial_smooth_grid = radial_smooth_grid;
+	trainer.fixed_atomic_energies = fixed_atomic_energies;
+	trainer.fixed_atomic_energy_weight = fixed_atomic_energy_weight;
 	trainer.type_force_weights = type_force_weights;
 	trainer.linstop = bfgs_conv_tol;	//if in 100 iterations loss decreases less than this, BFGS is finished
 	trainer.curr_pot_name = curr_fnm;
@@ -950,6 +988,16 @@ void Train_MTPR(std::vector<std::string>& args, std::map<std::string, std::strin
 		std::cout << "s-range override: " << s_range.first << ", " << s_range.second << std::endl;
 	if (prank == 0 && nonlinear_l2 != 0.0)
 		std::cout << "grouped nonlinear L2 ridge: " << nonlinear_l2 << std::endl;
+	if (prank == 0 && radial_smooth != 0.0)
+		std::cout << "radial H1 smoothness: " << radial_smooth
+		          << " grid=" << radial_smooth_grid
+		          << " interval=(0, cutoff)" << std::endl;
+	if (prank == 0 && !fixed_atomic_energies.empty()) {
+		std::cout << "fixed atomic energies:";
+		for (double value : fixed_atomic_energies)
+			std::cout << " " << value;
+		std::cout << " | BFGS penalty weight=" << fixed_atomic_energy_weight << std::endl;
+	}
 	if (prank == 0 && !type_force_weights.empty()) {
 		std::cout << "type force weights:";
 		for (double value : type_force_weights)

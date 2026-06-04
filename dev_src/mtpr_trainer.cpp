@@ -204,6 +204,45 @@ p_mlmtpr->shift_ = shift_;
 
 }
 
+bool MTPR_trainer::HasFixedAtomicEnergies() const
+{
+	return !fixed_atomic_energies.empty();
+}
+
+double MTPR_trainer::FixedAtomicEnergyOffset(const Configuration& cfg) const
+{
+	if (!HasFixedAtomicEnergies())
+		return 0.0;
+	if (static_cast<int>(fixed_atomic_energies.size()) != p_mlmtpr->species_count)
+		ERROR("--atomic-energies count should match the number of species in the potential.");
+
+	double offset = 0.0;
+	for (int i = 0; i < cfg.size(); ++i) {
+		const int type = cfg.type(i);
+		if (type < 0 || type >= static_cast<int>(fixed_atomic_energies.size()))
+			ERROR("Configuration atom type is outside --atomic-energies.");
+		offset += fixed_atomic_energies[type];
+	}
+	return offset;
+}
+
+void MTPR_trainer::ApplyFixedAtomicEnergyLinearGauge(int n)
+{
+	if (!HasFixedAtomicEnergies())
+		return;
+	if (static_cast<int>(fixed_atomic_energies.size()) != p_mlmtpr->species_count)
+		ERROR("--atomic-energies count should match the number of species in the potential.");
+
+	for (int type = 0; type < p_mlmtpr->species_count; ++type) {
+		for (int j = 0; j < n; ++j) {
+			quad_opt_matr[type * n + j] = 0.0;
+			quad_opt_matr[j * n + type] = 0.0;
+		}
+		quad_opt_matr[type * n + type] = 1.0;
+		quad_opt_vec[type] = 1.0;
+	}
+}
+
 #ifdef MLIP_MPI
 void MTPR_trainer::ConfigureTrainComm(bool has_local_work, int world_rank, int world_size)
 {
@@ -274,6 +313,10 @@ void MTPR_trainer::LoadWeights(ifstream& ifs)
 void MTPR_trainer::ClearSLAE()
 {
 
+	if (p_mlmtpr == nullptr)
+		p_mlmtpr = dynamic_cast<MLMTPR*>(p_mlip);
+	if (p_mlmtpr == nullptr)
+		ERROR("MTPR_trainer::ClearSLAE() requires an MLMTPR potential.");
 	int n = p_mlmtpr->alpha_count - 1 + p_mlmtpr->species_count;	// Matrix size
 
 	if (quad_opt_allocated_n != n || quad_opt_vec == nullptr || quad_opt_matr == nullptr) {
@@ -324,6 +367,7 @@ void MTPR_trainer::SolveSLAE()
 
 	for (int i = 0; i < n; i++)
 		quad_opt_matr[i*n + i] += gammareg*(1 + quad_opt_matr[i*n + i]);
+	ApplyFixedAtomicEnergyLinearGauge(n);
 
 	p_mlmtpr->LinCoeff();	/// TO MOVE TO MLMTPR
 
@@ -378,7 +422,10 @@ void MTPR_trainer::SolveSLAE()
 //	std::default_random_engine generator(rand_device());
 //	std::uniform_real_distribution<> uniform(-0.05, 0.05);
 	for (int i = 0; i < p_mlmtpr->species_count; i++) {
-		p_mlmtpr->regression_coeffs[i] = p_mlmtpr->linear_coeffs[i] - 1.0;
+		if (HasFixedAtomicEnergies())
+			p_mlmtpr->regression_coeffs[i] = fixed_atomic_energies[i] - 1.0;
+		else
+			p_mlmtpr->regression_coeffs[i] = p_mlmtpr->linear_coeffs[i] - 1.0;
 		p_mlmtpr->linear_coeffs[i] = 1.0;
 	}
 	for (int i = 0; i < n; i++) {
@@ -436,13 +483,21 @@ void MTPR_trainer::AddToSLAE(Configuration& cfg, double weight, const Neighborho
 	if (cfg.has_energy())
 	{
 		const double alpha = weight * wgt_energy * d / (d + fn*avef);
+		const double target_energy = cfg.energy - FixedAtomicEnergyOffset(cfg);
+		const double* energy_cmpnts = p_mlmtpr->energy_cmpnts;
+		if (HasFixedAtomicEnergies()) {
+			lin_energy_cmpnts_.assign(n, 0.0);
+			for (int i = p_mlmtpr->species_count; i < n; ++i)
+				lin_energy_cmpnts_[i] = p_mlmtpr->energy_cmpnts[i];
+			energy_cmpnts = lin_energy_cmpnts_.data();
+		}
 		cblas_dger(CBLAS_ORDER::CblasRowMajor, n, n,
 			alpha,
-			p_mlmtpr->energy_cmpnts, 1,
-			p_mlmtpr->energy_cmpnts, 1,
+			energy_cmpnts, 1,
+			energy_cmpnts, 1,
 			quad_opt_matr, n);
-		cblas_daxpy(n, alpha * cfg.energy, p_mlmtpr->energy_cmpnts, 1, quad_opt_vec, 1);
-		quad_opt_scalar += alpha * cfg.energy * cfg.energy;
+		cblas_daxpy(n, alpha * target_energy, energy_cmpnts, 1, quad_opt_vec, 1);
+		quad_opt_scalar += alpha * target_energy * target_energy;
 
 		quad_opt_eqn_count += (weight > 0) ? 1 : ((weight < 0) ? -1 : 0);
 	}

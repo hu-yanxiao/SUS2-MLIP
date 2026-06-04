@@ -201,11 +201,19 @@ public:
 		double OrderedPairStrength(int type_central, int type_outer) const;
 		double NormalizedOrderedPairStrength(int type_central, int type_outer) const;
 		void SetScalingSlopeRange(double start, double end);
-		void SetScalingShiftRange(double start, double end);
-		void InitializeDefaultScalingCoeffs();
-		void RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter);
-		void RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_scale);
-		void RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter);
+	void SetScalingShiftRange(double start, double end);
+	void InitializeDefaultScalingCoeffs();
+	void RandomizeScalingCoeffs(std::mt19937_64& generator, double strength_jitter);
+	void RandomizeRadialCoeffs(std::mt19937_64& generator, double radial_scale);
+	void RandomizeNonlinearCoeffs(std::mt19937_64& generator, double radial_scale, bool include_scaling, double scaling_strength_jitter);
+	void AddRadialSmoothnessPenalty(const double coeff,
+									const int grid_size,
+									double& out_penalty_accumulator,
+									Array1D* out_penalty_grad_accumulator = nullptr) override;
+	void AddFixedAtomicEnergyPenalty(const std::vector<double>& atomic_energies,
+									const double coeff,
+									double& out_penalty_accumulator,
+									Array1D* out_penalty_grad_accumulator = nullptr) override;
 
 	int CoeffCount() //!< number of coefficients
 	{

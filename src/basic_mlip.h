@@ -82,6 +82,14 @@ public:
 	virtual void AddGroupedNonlinearL2Penalty(const double coeff,
 								double& out_penalty_accumulator,
 								Array1D* out_penalty_grad_accumulator = nullptr);
+	virtual void AddRadialSmoothnessPenalty(const double coeff,
+								const int grid_size,
+								double& out_penalty_accumulator,
+								Array1D* out_penalty_grad_accumulator = nullptr);
+	virtual void AddFixedAtomicEnergyPenalty(const std::vector<double>& atomic_energies,
+								const double coeff,
+								double& out_penalty_accumulator,
+								Array1D* out_penalty_grad_accumulator = nullptr);
 
 	// CalcEFS
 	virtual void CalcE(Configuration& cfg);

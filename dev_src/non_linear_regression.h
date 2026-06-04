@@ -35,6 +35,7 @@ protected:
 	void AddLoss(const Configuration &orig, const Neighborhoods* neighborhoods);
 	void AddLossGrad(const Configuration &orig);
 	void AddLossGrad(const Configuration &orig, const Neighborhoods* neighborhoods);
+	void AddGlobalParameterPenalties(double repeat_count, Array1D* out_penalty_grad_accumulator);
 	bool NeedStdTerms() const { return std_scaling != 0.0 || stdd_scaling != 0.0; }
 	double ForceTypeWeight(const Configuration& cfg, int atom_index) const;
 	double ForceTypeWeightSquared(const Configuration& cfg, int atom_index) const;
@@ -53,6 +54,10 @@ public:
         double std_scaling = 0.2;
         double stdd_scaling = 0.00001;	
 	double nonlinear_l2_regularization = 0.0;
+	double radial_smooth_regularization = 1.0e-6;
+	int radial_smooth_grid = 128;
+	std::vector<double> fixed_atomic_energies;
+	double fixed_atomic_energy_weight = 1.0e8;
 	std::vector<double> type_force_weights;
 
 	NonLinearRegression(AnyLocalMLIP* _p_mlip,				// Constructor requires MTP basis
