@@ -44,6 +44,7 @@ namespace {
 constexpr int kEnvGateChannels = 6;
 constexpr double kEnvGateMaxLogDensityCoeff = 6.0;
 constexpr double kEnvGateDefaultActivationOnRatio = 0.5;
+constexpr double kGateAdditiveOuterCoeffRatioEps = 1.0e-12;
 
 double stable_sigmoid(double value)
 {
@@ -489,17 +490,56 @@ void PairSUS2MTP::calc_pair_radial_values(int itype,
                                           bool use_gate_additive)
 {
   bool used_precomputed_table = false;
-  if (do_list && !use_gate_additive) {
+  if (do_list) {
     const int shift = species_count * itype + jtype;
     const int table_index = pair_to_table_index[shift];
     if (table_index >= 0) {
-      double ***value_table =
-          (use_gate_radial && two_layer_gate_radial_list) ? two_layer_gate_radial_list : radial_list;
-      double ***der_table =
-          (use_gate_radial && two_layer_gate_radial_der_list) ? two_layer_gate_radial_der_list : radial_der_list;
-      interpolate_table(value_table, der_table, table_index, list_grid_size, inv_dr,
-                        dist, radial_func_count, radial_vals, radial_ders);
-      used_precomputed_table = true;
+      if (use_gate_additive) {
+        const double outer_type_coeff =
+            regression_coeffs[radial_coeffs_offset + radial_basis_size + jtype];
+        if (std::fabs(outer_type_coeff) > kGateAdditiveOuterCoeffRatioEps) {
+          if (static_cast<int>(two_layer_gate_additive_coeffs.size()) !=
+              species_count * radial_func_count)
+            error->one(FLERR, "SUS2-SH two-layer gate additive coefficient storage is inconsistent.");
+          int r_list = static_cast<int>(std::floor(dist * inv_dr));
+          const int last_interval = list_grid_size - 2;
+          if (r_list < 0) r_list = 0;
+          if (r_list > last_interval) r_list = last_interval;
+          const int r_next = r_list + 1;
+          double ddr = dist * inv_dr - r_list;
+          if (ddr < 0.0) ddr = 0.0;
+          if (ddr > 1.0) ddr = 1.0;
+          double *base_row = radial_list[table_index][r_list];
+          double *base_next_row = radial_list[table_index][r_next];
+          double *base_der_row = radial_der_list[table_index][r_list];
+          double *base_der_next_row = radial_der_list[table_index][r_next];
+          for (int mu = 0; mu < radial_func_count; mu++) {
+            const double base_val =
+                base_row[mu] + ddr * (base_next_row[mu] - base_row[mu]);
+            const double base_der =
+                base_der_row[mu] + ddr * (base_der_next_row[mu] - base_der_row[mu]);
+            const double additive_ratio =
+                two_layer_gate_additive_coeff(jtype, mu) / outer_type_coeff;
+            const double add_val = base_val * additive_ratio;
+            const double add_der = base_der * additive_ratio;
+            two_layer_gate_residual_radial_vals[mu] = add_val;
+            radial_vals[mu] = base_val + gate_residual * add_val;
+            radial_ders[mu] = base_der + gate_residual * add_der;
+          }
+          used_precomputed_table = true;
+        }
+        // two_layer_gate_additive_table_fallback: if v_j is too small for the
+        // exact main-table ratio, leave the table path and use the analytic
+        // additive calculation below.
+      } else if (!use_gate_additive) {
+        double ***value_table =
+            (use_gate_radial && two_layer_gate_radial_list) ? two_layer_gate_radial_list : radial_list;
+        double ***der_table =
+            (use_gate_radial && two_layer_gate_radial_der_list) ? two_layer_gate_radial_der_list : radial_der_list;
+        interpolate_table(value_table, der_table, table_index, list_grid_size, inv_dr,
+                          dist, radial_func_count, radial_vals, radial_ders);
+        used_precomputed_table = true;
+      }
     }
   }
   if (used_precomputed_table) return;
@@ -2931,6 +2971,10 @@ access to the buffer size that is not provided in PFR.
       for (int j = 0; j < C; j++) {
         const int table_index = pair_to_table_index[i * C + j];
         if (table_index < 0) continue;
+        const double center_type_coeff =
+            regression_coeffs[C + 2 * C * C * K_scaling + R + i];
+        const double outer_type_coeff =
+            regression_coeffs[C + 2 * C * C * K_scaling + R + j];
         for (int n = 0; n < list_grid_size; n++) {
           const double dist = dr * n;
           for (int mu = 0; mu < radial_func_count; mu++) {
@@ -2943,8 +2987,7 @@ access to the buffer size that is not provided in PFR.
 
             for (int xi = 0; xi < R; xi++) {
               factor = regression_coeffs[C + 2 * C * C * K_scaling + mu * (R + C) + xi] *
-                       regression_coeffs[C + 2 * C * C * K_scaling + R + i] *
-                       regression_coeffs[C + 2 * C * C * K_scaling + R + j];
+                       center_type_coeff * outer_type_coeff;
               radial_list[table_index][n][mu] += radial_basis->radial_basis_vals[xi] * factor;
               radial_der_list[table_index][n][mu] += radial_basis->radial_basis_ders[xi] * factor;
             }
