@@ -156,6 +156,12 @@ class PairSUS2MTP : public Pair {
   std::vector<double> two_layer_gate_additive_ratios;
   std::vector<unsigned char> two_layer_gate_additive_ratio_valid;
   std::vector<size_t> two_layer_gate_edge_offsets;
+  std::vector<int> two_layer_gate_edge_neighbors;
+  std::vector<int> two_layer_gate_edge_types;
+  std::vector<double> two_layer_gate_edge_dx;
+  std::vector<double> two_layer_gate_edge_dy;
+  std::vector<double> two_layer_gate_edge_dz;
+  std::vector<double> two_layer_gate_edge_dist;
   std::vector<double> two_layer_gate_edge_deriv_x;
   std::vector<double> two_layer_gate_edge_deriv_y;
   std::vector<double> two_layer_gate_edge_deriv_z;
