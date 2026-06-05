@@ -153,6 +153,12 @@ class PairSUS2MTP : public Pair {
   std::vector<double> two_layer_gate_weights;
   std::vector<double> two_layer_gate_radial_coeffs;
   std::vector<double> two_layer_gate_additive_coeffs;
+  std::vector<double> two_layer_gate_additive_ratios;
+  std::vector<unsigned char> two_layer_gate_additive_ratio_valid;
+  std::vector<size_t> two_layer_gate_edge_offsets;
+  std::vector<double> two_layer_gate_edge_deriv_x;
+  std::vector<double> two_layer_gate_edge_deriv_y;
+  std::vector<double> two_layer_gate_edge_deriv_z;
   int alpha_moment_count, alpha_index_basic_count, alpha_index_times_count, alpha_scalar_count,
       max_alpha_index_basic;    // Counts of various alpha indicies
   int **alpha_index_basic;      // Indicies how to construct elementary moments from coords and dist
@@ -210,6 +216,7 @@ class PairSUS2MTP : public Pair {
 
   bool has_nonzero_two_layer_gate_weights() const;
   bool requires_two_layer_gate_sh() const;
+  void prepare_two_layer_gate_additive_ratios();
   void compute_two_layer_gate_sh(int, int);
   int two_layer_gate_additive_coeff_index(int, int) const;
   double two_layer_gate_additive_coeff(int, int) const;

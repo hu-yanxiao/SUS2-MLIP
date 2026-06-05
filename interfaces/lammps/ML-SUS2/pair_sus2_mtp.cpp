@@ -452,6 +452,30 @@ double PairSUS2MTP::two_layer_gate_additive_coeff(int type_outer, int mu) const
   return two_layer_gate_additive_coeffs[idx];
 }
 
+void PairSUS2MTP::prepare_two_layer_gate_additive_ratios()
+{
+  two_layer_gate_additive_ratios.clear();
+  two_layer_gate_additive_ratio_valid.clear();
+  if (!two_layer_gate_enabled) return;
+  if (static_cast<int>(two_layer_gate_additive_coeffs.size()) !=
+      species_count * radial_func_count)
+    return;
+
+  two_layer_gate_additive_ratios.assign(
+      static_cast<size_t>(species_count) * radial_func_count, 0.0);
+  two_layer_gate_additive_ratio_valid.assign(species_count, 0);
+  for (int jtype = 0; jtype < species_count; jtype++) {
+    const double outer_type_coeff =
+        regression_coeffs[radial_coeffs_offset + radial_basis_size + jtype];
+    if (std::fabs(outer_type_coeff) <= kGateAdditiveOuterCoeffRatioEps) continue;
+    two_layer_gate_additive_ratio_valid[jtype] = 1;
+    const size_t ratio_offset = static_cast<size_t>(jtype) * radial_func_count;
+    for (int mu = 0; mu < radial_func_count; mu++)
+      two_layer_gate_additive_ratios[ratio_offset + mu] =
+          two_layer_gate_additive_coeffs[ratio_offset + mu] / outer_type_coeff;
+  }
+}
+
 void PairSUS2MTP::ensure_two_layer_atom_buffers()
 {
   const int nmax = atom->nmax;
@@ -495,12 +519,15 @@ void PairSUS2MTP::calc_pair_radial_values(int itype,
     const int table_index = pair_to_table_index[shift];
     if (table_index >= 0) {
       if (use_gate_additive) {
-        const double outer_type_coeff =
-            regression_coeffs[radial_coeffs_offset + radial_basis_size + jtype];
-        if (std::fabs(outer_type_coeff) > kGateAdditiveOuterCoeffRatioEps) {
+        if (jtype >= 0 &&
+            jtype < static_cast<int>(two_layer_gate_additive_ratio_valid.size()) &&
+            two_layer_gate_additive_ratio_valid[jtype]) {
           if (static_cast<int>(two_layer_gate_additive_coeffs.size()) !=
               species_count * radial_func_count)
             error->one(FLERR, "SUS2-SH two-layer gate additive coefficient storage is inconsistent.");
+          if (static_cast<int>(two_layer_gate_additive_ratios.size()) !=
+              species_count * radial_func_count)
+            error->one(FLERR, "SUS2-SH two-layer gate additive ratio storage is inconsistent.");
           int r_list = static_cast<int>(std::floor(dist * inv_dr));
           const int last_interval = list_grid_size - 2;
           if (r_list < 0) r_list = 0;
@@ -513,13 +540,13 @@ void PairSUS2MTP::calc_pair_radial_values(int itype,
           double *base_next_row = radial_list[table_index][r_next];
           double *base_der_row = radial_der_list[table_index][r_list];
           double *base_der_next_row = radial_der_list[table_index][r_next];
+          const size_t ratio_offset = static_cast<size_t>(jtype) * radial_func_count;
           for (int mu = 0; mu < radial_func_count; mu++) {
             const double base_val =
                 base_row[mu] + ddr * (base_next_row[mu] - base_row[mu]);
             const double base_der =
                 base_der_row[mu] + ddr * (base_der_next_row[mu] - base_der_row[mu]);
-            const double additive_ratio =
-                two_layer_gate_additive_coeff(jtype, mu) / outer_type_coeff;
+            const double additive_ratio = two_layer_gate_additive_ratios[ratio_offset + mu];
             const double add_val = base_val * additive_ratio;
             const double add_der = base_der * additive_ratio;
             two_layer_gate_residual_radial_vals[mu] = add_val;
@@ -528,8 +555,8 @@ void PairSUS2MTP::calc_pair_radial_values(int itype,
           }
           used_precomputed_table = true;
         }
-        // two_layer_gate_additive_table_fallback: if v_j is too small for the
-        // exact main-table ratio, leave the table path and use the analytic
+        // two_layer_gate_additive_table_fallback: if the exact main-table
+        // ratio is unavailable, leave the table path and use the analytic
         // additive calculation below.
       } else if (!use_gate_additive) {
         double ***value_table =
@@ -741,6 +768,18 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
   std::fill(two_layer_gate_values, two_layer_gate_values + atom->nmax, default_gate);
   std::fill(two_layer_gate_adjoints, two_layer_gate_adjoints + atom->nmax, 0.0);
 
+  two_layer_gate_edge_offsets.resize(static_cast<size_t>(inum) + 1);
+  size_t two_layer_gate_edge_count = 0;
+  for (int ii = 0; ii < inum; ii++) {
+    const int i = ilist[ii];
+    two_layer_gate_edge_offsets[ii] = two_layer_gate_edge_count;
+    two_layer_gate_edge_count += static_cast<size_t>(numneigh[i]);
+  }
+  two_layer_gate_edge_offsets[inum] = two_layer_gate_edge_count;
+  two_layer_gate_edge_deriv_x.resize(two_layer_gate_edge_count);
+  two_layer_gate_edge_deriv_y.resize(two_layer_gate_edge_count);
+  two_layer_gate_edge_deriv_z.resize(two_layer_gate_edge_count);
+
   for (int ii = 0; ii < inum; ii++) {
     const int i = ilist[ii];
     const int itype = type[i] - 1;
@@ -748,6 +787,7 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       error->one(FLERR, "Too few species count in the MTP potential!");
     const int jnum = numneigh[i];
     const double xi[3] = {x[i][0], x[i][1], x[i][2]};
+    ensure_two_layer_edge_buffer(jnum);
     std::fill(moment_tensor_vals, moment_tensor_vals + alpha_moment_count, 0.0);
     for (int jj = 0; jj < jnum; jj++) {
       int j = firstneigh[i][jj] & NEIGHMASK;
@@ -756,10 +796,14 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
         error->one(FLERR, "Too few species count in the MTP potential!");
       const double r[3] = {x[j][0] - xi[0], x[j][1] - xi[1], x[j][2] - xi[2]};
       const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
-      if (rsq > cutsq[itype + 1][jtype + 1]) continue;
+      if (rsq > cutsq[itype + 1][jtype + 1]) {
+        within_cutoff[jj] = false;
+        continue;
+      }
+      within_cutoff[jj] = true;
       const double dist = std::sqrt(rsq);
       calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial);
-      accumulate_sh_basic_edge(-1, r, dist, 1.0, false, 0);
+      accumulate_sh_basic_edge(jj, r, dist, 1.0, false, 0);
     }
     forward_sh_products();
     double gate_delta = 0.0;
@@ -772,6 +816,33 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
     }
     two_layer_gate_values[i] =
         two_layer_gate_direct_scale ? (two_layer_gate_bias + gate_delta) : (1.0 + gate_delta);
+
+    std::fill(nbh_energy_ders_wrt_moments,
+              nbh_energy_ders_wrt_moments + alpha_moment_count, 0.0);
+    for (int q = 0; q < two_layer_gate_weight_count; q++) {
+      const int scalar_index = two_layer_gate_scalar_indices[q];
+      nbh_energy_ders_wrt_moments[alpha_moment_mapping[scalar_index]] +=
+          two_layer_gate_weights[q];
+    }
+    backprop_sh_products();
+    for (int jj = 0; jj < jnum; jj++) {
+      if (!within_cutoff[jj]) continue;
+      double gx = 0.0, gy = 0.0, gz = 0.0;
+      const size_t jac_offset = static_cast<size_t>(jj) * alpha_index_basic_count;
+      const double *__restrict jac_x = moment_jacobian_x + jac_offset;
+      const double *__restrict jac_y = moment_jacobian_y + jac_offset;
+      const double *__restrict jac_z = moment_jacobian_z + jac_offset;
+      for (int k = 0; k < alpha_index_basic_count; k++) {
+        const double pref = nbh_energy_ders_wrt_moments[k];
+        gx += pref * jac_x[k];
+        gy += pref * jac_y[k];
+        gz += pref * jac_z[k];
+      }
+      const size_t edge_cache_index = two_layer_gate_edge_offsets[ii] + jj;
+      two_layer_gate_edge_deriv_x[edge_cache_index] = gx;
+      two_layer_gate_edge_deriv_y[edge_cache_index] = gy;
+      two_layer_gate_edge_deriv_z[edge_cache_index] = gz;
+    }
   }
 
   comm->forward_comm(this);
@@ -887,10 +958,6 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       error->one(FLERR, "Too few species count in the MTP potential!");
     const int jnum = numneigh[i];
     const double xi[3] = {x[i][0], x[i][1], x[i][2]};
-    ensure_two_layer_edge_buffer(jnum);
-    std::fill(moment_tensor_vals, moment_tensor_vals + alpha_moment_count, 0.0);
-    std::fill(nbh_energy_ders_wrt_moments,
-              nbh_energy_ders_wrt_moments + alpha_moment_count, 0.0);
 
     for (int jj = 0; jj < jnum; jj++) {
       int j = firstneigh[i][jj] & NEIGHMASK;
@@ -899,41 +966,11 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
         error->one(FLERR, "Too few species count in the MTP potential!");
       const double r[3] = {x[j][0] - xi[0], x[j][1] - xi[1], x[j][2] - xi[2]};
       const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
-      if (rsq > cutsq[itype + 1][jtype + 1]) {
-        within_cutoff[jj] = false;
-        continue;
-      }
-      within_cutoff[jj] = true;
-      const double dist = std::sqrt(rsq);
-      calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial);
-      accumulate_sh_basic_edge(jj, r, dist, 1.0, false, 0);
-    }
-    forward_sh_products();
-
-    for (int q = 0; q < two_layer_gate_weight_count; q++) {
-      const int scalar_index = two_layer_gate_scalar_indices[q];
-      nbh_energy_ders_wrt_moments[alpha_moment_mapping[scalar_index]] +=
-          two_layer_gate_weights[q];
-    }
-    backprop_sh_products();
-    for (int k = 0; k < alpha_index_basic_count; k++)
-      weighted_basic_moment_ders[k] =
-          nbh_energy_ders_wrt_moments[k] * gate_adjoint_center;
-
-    for (int jj = 0; jj < jnum; jj++) {
-      int j = firstneigh[i][jj] & NEIGHMASK;
-      if (!within_cutoff[jj]) continue;
-      double fx = 0.0, fy = 0.0, fz = 0.0;
-      const size_t jac_offset = static_cast<size_t>(jj) * alpha_index_basic_count;
-      const double *__restrict jac_x = moment_jacobian_x + jac_offset;
-      const double *__restrict jac_y = moment_jacobian_y + jac_offset;
-      const double *__restrict jac_z = moment_jacobian_z + jac_offset;
-      for (int k = 0; k < alpha_index_basic_count; k++) {
-        const double pref = weighted_basic_moment_ders[k];
-        fx += pref * jac_x[k];
-        fy += pref * jac_y[k];
-        fz += pref * jac_z[k];
-      }
+      if (rsq > cutsq[itype + 1][jtype + 1]) continue;
+      const size_t edge_cache_index = two_layer_gate_edge_offsets[ii] + jj;
+      const double fx = gate_adjoint_center * two_layer_gate_edge_deriv_x[edge_cache_index];
+      const double fy = gate_adjoint_center * two_layer_gate_edge_deriv_y[edge_cache_index];
+      const double fz = gate_adjoint_center * two_layer_gate_edge_deriv_z[edge_cache_index];
 
       f[i][0] += fx;
       f[i][1] += fy;
@@ -2885,6 +2922,8 @@ access to the buffer size that is not provided in PFR.
   // SUS2-MLIP mapping arrays
   MPI_Bcast(mu_to_K, radial_func_count, MPI_INT, 0, world);
   MPI_Bcast(mu_to_sigma, radial_func_count, MPI_INT, 0, world);
+
+  prepare_two_layer_gate_additive_ratios();
 
   do_list = false;
   list_grid_size = 0;
