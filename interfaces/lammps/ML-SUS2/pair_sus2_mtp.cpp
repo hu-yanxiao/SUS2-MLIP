@@ -238,13 +238,16 @@ void interpolate_table_at_bin(double ***table,
                               double *ders)
 {
   const int r_next = r_list + 1;
-  double *row = table[table_index][r_list];
-  double *next_row = table[table_index][r_next];
-  double *der_row = der_table ? der_table[table_index][r_list] : nullptr;
-  double *der_next_row = der_table ? der_table[table_index][r_next] : nullptr;
+  const double *__restrict row = table[table_index][r_list];
+  const double *__restrict next_row = table[table_index][r_next];
+  const double *__restrict der_row = der_table ? der_table[table_index][r_list] : nullptr;
+  const double *__restrict der_next_row = der_table ? der_table[table_index][r_next] : nullptr;
+  double *__restrict out_values = values;
+  double *__restrict out_ders = ders;
+  #pragma omp simd
   for (int m = 0; m < count; ++m) {
-    values[m] = row[m] + ddr * (next_row[m] - row[m]);
-    if (ders) ders[m] = der_row[m] + ddr * (der_next_row[m] - der_row[m]);
+    out_values[m] = row[m] + ddr * (next_row[m] - row[m]);
+    if (out_ders) out_ders[m] = der_row[m] + ddr * (der_next_row[m] - der_row[m]);
   }
 }
 
@@ -258,11 +261,12 @@ void interpolate_table(double ***table,
                        double *values,
                        double *ders)
 {
-  int r_list = static_cast<int>(std::floor(dist * inv_dr));
+  const double scaled_dist = dist * inv_dr;
+  int r_list = static_cast<int>(scaled_dist);
   const int last_interval = list_grid_size - 2;
   if (r_list < 0) r_list = 0;
   if (r_list > last_interval) r_list = last_interval;
-  double ddr = dist * inv_dr - r_list;
+  double ddr = scaled_dist - r_list;
   if (ddr < 0.0) ddr = 0.0;
   if (ddr > 1.0) ddr = 1.0;
   interpolate_table_at_bin(table, der_table, table_index, r_list, ddr, count,
@@ -585,11 +589,12 @@ bool PairSUS2MTP::get_radial_table_info(int itype,
   table_index = pair_to_table_index[shift];
   if (table_index < 0) return false;
 
-  r_list = static_cast<int>(std::floor(dist * inv_dr));
+  const double scaled_dist = dist * inv_dr;
+  r_list = static_cast<int>(scaled_dist);
   const int last_interval = list_grid_size - 2;
   if (r_list < 0) r_list = 0;
   if (r_list > last_interval) r_list = last_interval;
-  ddr = dist * inv_dr - r_list;
+  ddr = scaled_dist - r_list;
   if (ddr < 0.0) ddr = 0.0;
   if (ddr > 1.0) ddr = 1.0;
   return true;
@@ -1482,12 +1487,13 @@ void PairSUS2MTP::compute(int eflag, int vflag)
         double local_rho = 0.0;
         double local_rho_dr = 0.0;
         if (do_list && env_gate_rho_list) {
-          int r_list = static_cast<int>(std::floor(dist * inv_dr));
+          const double scaled_dist = dist * inv_dr;
+          int r_list = static_cast<int>(scaled_dist);
           const int last_interval = list_grid_size - 2;
           if (r_list < 0) r_list = 0;
           if (r_list > last_interval) r_list = last_interval;
           const int r_next = r_list + 1;
-          double ddr = dist * inv_dr - r_list;
+          double ddr = scaled_dist - r_list;
           if (ddr < 0.0) ddr = 0.0;
           if (ddr > 1.0) ddr = 1.0;
           const double v1 = env_gate_rho_list[itype][r_list];
@@ -1563,27 +1569,29 @@ void PairSUS2MTP::compute(int eflag, int vflag)
         const int shift = C * itype + jtype;
         const int table_index = pair_to_table_index[shift];
         if (table_index >= 0) {
-          int r_list = static_cast<int>(std::floor(dist * inv_dr));
+          const double scaled_dist = dist * inv_dr;
+          int r_list = static_cast<int>(scaled_dist);
           const int last_interval = list_grid_size - 2;
           if (r_list < 0) r_list = 0;
           if (r_list > last_interval) r_list = last_interval;
           int r_next = r_list + 1;
-          double ddr = dist * inv_dr - r_list;
+          double ddr = scaled_dist - r_list;
           if (ddr < 0.0) ddr = 0.0;
           if (ddr > 1.0) ddr = 1.0;
-          double v1, v2, d1, d2;
-          double *radial_row = radial_list[table_index][r_list];
-          double *radial_next_row = radial_list[table_index][r_next];
-          double *deriv_row = radial_der_list[table_index][r_list];
-          double *deriv_next_row = radial_der_list[table_index][r_next];
-
+          const double *__restrict radial_row = radial_list[table_index][r_list];
+          const double *__restrict radial_next_row = radial_list[table_index][r_next];
+          const double *__restrict deriv_row = radial_der_list[table_index][r_list];
+          const double *__restrict deriv_next_row = radial_der_list[table_index][r_next];
+          double *__restrict vals = radial_vals;
+          double *__restrict ders = radial_ders;
+          #pragma omp simd
           for (int m = 0; m < radial_func_count; m++) {
-            v1 = radial_row[m];
-            v2 = radial_next_row[m];
-            d1 = deriv_row[m];
-            d2 = deriv_next_row[m];
-            radial_vals[m] = v1 + ddr * (v2 - v1);
-            radial_ders[m] = d1 + ddr * (d2 - d1);
+            const double v1 = radial_row[m];
+            const double v2 = radial_next_row[m];
+            const double d1 = deriv_row[m];
+            const double d2 = deriv_next_row[m];
+            vals[m] = v1 + ddr * (v2 - v1);
+            ders[m] = d1 + ddr * (d2 - d1);
           }
           used_precomputed_table = true;
         }
