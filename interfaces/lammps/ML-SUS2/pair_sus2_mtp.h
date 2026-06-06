@@ -111,7 +111,8 @@ class PairSUS2MTP : public Pair {
   bool zbl_enabled = false;
   double zbl_inner = 0.7;
   double zbl_outer = 1.4;
-  double zbl_outer_sq = 1.96;
+  double zbl_max_outer = 1.4;
+  double zbl_max_outer_sq = 1.96;
   bool zbl_typewise_cutoff_enabled = false;
   double zbl_typewise_cutoff_factor = 0.7;
   double interaction_cutoff = 0.0;
@@ -120,6 +121,7 @@ class PairSUS2MTP : public Pair {
   double *zbl_pair_inner_cutoffs = nullptr;
   double *zbl_pair_outer_cutoffs = nullptr;
   double *zbl_pair_outer_sq = nullptr;
+  SUS2MTPZBLPairConstants *zbl_pair_constants = nullptr;
   
   double *shift_coeffs;  // Shift coefficients for each species (species_count elements)
   double *scal_coeffs;   // Scaling coefficients for coordinate transformation (scal_coeffs_count elements)
@@ -146,6 +148,7 @@ class PairSUS2MTP : public Pair {
   bool two_layer_residual_enabled = false;
   bool two_layer_gate_direct_scale = false;
   double two_layer_gate_bias = 1.0;
+  double two_layer_gate_tanh_amplitude = 0.8;
   int two_layer_gate_body_order_max = 0;
   int two_layer_gate_weight_count = 0;
   std::vector<int> sh_scalar_body_order;
@@ -158,10 +161,13 @@ class PairSUS2MTP : public Pair {
   std::vector<size_t> two_layer_gate_edge_offsets;
   std::vector<int> two_layer_gate_edge_neighbors;
   std::vector<int> two_layer_gate_edge_types;
+  std::vector<int> two_layer_gate_edge_table_indices;
+  std::vector<int> two_layer_gate_edge_table_bins;
   std::vector<double> two_layer_gate_edge_dx;
   std::vector<double> two_layer_gate_edge_dy;
   std::vector<double> two_layer_gate_edge_dz;
   std::vector<double> two_layer_gate_edge_dist;
+  std::vector<double> two_layer_gate_edge_table_fracs;
   std::vector<double> two_layer_gate_edge_deriv_x;
   std::vector<double> two_layer_gate_edge_deriv_y;
   std::vector<double> two_layer_gate_edge_deriv_z;
@@ -201,10 +207,15 @@ class PairSUS2MTP : public Pair {
   double *two_layer_gate_residual_radial_vals = nullptr;
   double *two_layer_gate_values = nullptr;
   double *two_layer_gate_adjoints = nullptr;
+  double *two_layer_gate_multiplier_mu_cache = nullptr;
+  double *two_layer_gate_deriv_mu_cache = nullptr;
+  unsigned char *two_layer_gate_mu_cache_valid = nullptr;
   double *two_layer_radial_cache_vals = nullptr;
   double *two_layer_radial_cache_ders = nullptr;
   int two_layer_raw_jac_size = 0;
   int two_layer_atom_buffer_size = 0;
+  int two_layer_gate_mu_cache_atom_size = 0;
+  int two_layer_gate_mu_cache_size = 0;
   int two_layer_radial_cache_size = 0;
   double *moment_jacobian_x = nullptr;    // SoA layout for x-component
   double *moment_jacobian_y = nullptr;    // SoA layout for y-component
@@ -214,7 +225,6 @@ class PairSUS2MTP : public Pair {
   double *weighted_basic_moment_ders;     // Basic-moment derivatives with species coeff prefactor applied
   double *env_rho_dr = nullptr;           // Reused env-gate density derivative per neighbor
   double *env_activation_basic_vals = nullptr;  // Reused env-gate chain accumulator per basic moment
-  double *zbl_force_prefactors = nullptr; // Reused 0.5*dE/dr/r for full-neighbor ZBL
   int env_activation_basic_size = 0;
 
   // Cache whether to calculate forces based on cutoff as calculated in alpha basics
@@ -224,9 +234,17 @@ class PairSUS2MTP : public Pair {
   bool requires_two_layer_gate_sh() const;
   void prepare_two_layer_gate_additive_ratios();
   void compute_two_layer_gate_sh(int, int);
+  void compute_zbl(int, int);
+  void accumulate_zbl_pair(int, int, int, int, const double *, double,
+                           int, int);
   int two_layer_gate_additive_coeff_index(int, int) const;
   double two_layer_gate_additive_coeff(int, int) const;
-  void calc_pair_radial_values(int, int, double, bool, double = 0.0, bool = false);
+  bool get_radial_table_info(int, int, double, int &, int &, double &) const;
+  bool calc_gate_additive_table_radial_values(int, double, int, int, int,
+                                              double);
+  void calc_pair_radial_values(int, int, double, bool, double = 0.0,
+                               bool = false, int = -1, int = -2, int = 0,
+                               double = 0.0);
   void accumulate_sh_basic_edge(int, const double *, double, double, bool, int, bool = false);
   void forward_sh_products();
   void backprop_sh_products();
