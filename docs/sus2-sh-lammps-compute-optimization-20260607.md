@@ -462,3 +462,70 @@ Same-node 40-rank A/B on `b03u26a`:
 Decision: accepted and installed. This is a generic optimization for the
 currently supported LAMMPS real-SH path (`lmax <= 4`) and benefits both gate and
 single-layer SH modes.
+
+## Rejected Experiment: First-Layer Sparse Needed Gate Moments
+
+Run directories:
+
+```text
+first correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_sparse_needed_run0_8c_20260608
+first speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_sparse_needed_ab_40c_20260608
+first jobids:      3769513, 3769514
+split correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_sparse_needed_split_run0_8c_20260608
+split speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_sparse_needed_split_ab_40c_20260608
+split jobids:      3769517, 3769518
+```
+
+Candidate binaries:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_sparse_needed_20260608
+sha256 733fba8a9249046014b80ba7cf719c112538dab5a27f673a311b69f56b72c8b4
+
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_sparse_needed_split_20260608
+sha256 8590b4eaf74e8c5c9d6c4f73fcfedf3a653091c67c12fc4bdcd3bcf4ca3fc7ae
+```
+
+Candidate idea: precompute the two-layer gate's required moment dependency
+graph, reduce first-layer gate moment clearing, and only enable product pruning
+when enough products inside the required prefix can be skipped. For the current
+model the gate weight mapping is dense in the prefix:
+
+```text
+alpha_moments = 3313
+alpha_basic = 100
+sh_product_count = 11489
+gate_weight_count = 1503
+gate_product_limit = 10097
+needed_products_in_prefix = 10069
+```
+
+So only 28 products in the prefix could be skipped. The first candidate kept a
+runtime pruning guard in the hot product/backprop loops and slowed down
+substantially:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Speedup |
+| --- | ---: | ---: | ---: |
+| gate | 5.03505 s | 5.28780 s | 0.952x |
+| no-gate | 1.81580 s | 1.81690 s | 0.999x |
+
+The split-loop candidate removed that hot-loop guard when product pruning was
+inactive. Correctness on run0 was exact for both gate and no-gate:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a` for the split-loop candidate:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98995 s | 4.99185 s | 1.000x | 1.001x |
+| no-gate | 1.81600 s | 1.81420 s | 1.001x | 1.008x |
+
+Decision: rejected. The dependency graph is mathematically correct, but the
+current model's gate dependency prefix is too dense for meaningful product
+pruning, and reducing only the first-layer clear is not enough to move Pair
+time. Source and the default LAMMPS build were restored to the accepted
+`sh_eval_precompute` stage-best state after the test.
