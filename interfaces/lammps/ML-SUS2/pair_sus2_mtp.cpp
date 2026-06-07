@@ -524,6 +524,7 @@ void PairSUS2MTP::configure_static_fixed_types()
   static_fixed_basic_cache_enabled = false;
   invalidate_static_fixed_basic_cache();
   invalidate_static_fixed_gate_cache();
+  invalidate_static_fixed_gate_main_cache();
   if (static_fixed_types_arg.empty()) return;
 
   std::stringstream ss(static_fixed_types_arg);
@@ -648,6 +649,64 @@ void PairSUS2MTP::invalidate_static_fixed_gate_cache()
               0);
 }
 
+void PairSUS2MTP::ensure_static_fixed_gate_main_cache()
+{
+  if (!static_fixed_basic_cache_enabled) return;
+  const int nmax = atom->nmax;
+  if (nmax <= 0 || alpha_index_basic_count <= 0) return;
+  if (static_fixed_gate_main_cache_atom_size == nmax &&
+      static_fixed_gate_main_cache_alpha_size == alpha_index_basic_count)
+    return;
+
+  static_fixed_gate_main_cache_valid.assign(nmax, 0);
+  static_fixed_gate_main_cache_tags.assign(nmax, 0);
+  static_fixed_gate_main_cache_offsets.assign(nmax, 0);
+  static_fixed_gate_main_cache_counts.assign(nmax, 0);
+  static_fixed_gate_main_neighbors.clear();
+  static_fixed_gate_main_neighbor_tags.clear();
+  static_fixed_gate_main_base_basic.clear();
+  static_fixed_gate_main_cache_atom_size = nmax;
+  static_fixed_gate_main_cache_alpha_size = alpha_index_basic_count;
+}
+
+void PairSUS2MTP::invalidate_static_fixed_gate_main_cache()
+{
+  std::fill(static_fixed_gate_main_cache_valid.begin(),
+            static_fixed_gate_main_cache_valid.end(), 0);
+  std::fill(static_fixed_gate_main_cache_tags.begin(),
+            static_fixed_gate_main_cache_tags.end(), 0);
+  std::fill(static_fixed_gate_main_cache_offsets.begin(),
+            static_fixed_gate_main_cache_offsets.end(), 0);
+  std::fill(static_fixed_gate_main_cache_counts.begin(),
+            static_fixed_gate_main_cache_counts.end(), 0);
+  static_fixed_gate_main_neighbors.clear();
+  static_fixed_gate_main_neighbor_tags.clear();
+  static_fixed_gate_main_base_basic.clear();
+}
+
+bool PairSUS2MTP::static_fixed_gate_main_cache_valid_for_center(int i) const
+{
+  if (i < 0 || i >= static_fixed_gate_main_cache_atom_size ||
+      i >= static_cast<int>(static_fixed_gate_main_cache_valid.size()))
+    return false;
+  if (!static_fixed_gate_main_cache_valid[i]) return false;
+  if (atom->tag != nullptr &&
+      static_fixed_gate_main_cache_tags[i] != atom->tag[i])
+    return false;
+  const size_t offset = static_fixed_gate_main_cache_offsets[i];
+  const int count = static_fixed_gate_main_cache_counts[i];
+  if (offset + count > static_fixed_gate_main_neighbors.size())
+    return false;
+  for (int e = 0; e < count; e++) {
+    const int j = static_fixed_gate_main_neighbors[offset + e];
+    if (j < 0 || j >= atom->nmax) return false;
+    if (atom->tag != nullptr &&
+        static_fixed_gate_main_neighbor_tags[offset + e] != atom->tag[j])
+      return false;
+  }
+  return true;
+}
+
 void PairSUS2MTP::build_static_fixed_gate_basic_cache_for_center(int i,
                                                                  int itype,
                                                                  int jnum,
@@ -729,6 +788,178 @@ void PairSUS2MTP::build_static_fixed_basic_cache_for_center(int i,
             moment_tensor_vals + alpha_index_basic_count, cache);
   static_fixed_basic_cache_valid[i] = 1;
   static_fixed_basic_cache_tags[i] = atom->tag != nullptr ? atom->tag[i] : 0;
+}
+
+void PairSUS2MTP::build_static_fixed_gate_main_cache_for_center(int i,
+                                                                int itype,
+                                                                int jnum,
+                                                                int *firstneigh_i,
+                                                                const double *xi)
+{
+  ensure_static_fixed_gate_main_cache();
+  if (i < 0 || i >= static_fixed_gate_main_cache_atom_size)
+    error->one(FLERR, "SUS2-SH static fixed gate main cache atom index is out of range.");
+
+  const size_t edge_offset = static_fixed_gate_main_neighbors.size();
+  int edge_count = 0;
+  std::vector<double> edge_basic(alpha_index_basic_count);
+  for (int jj = 0; jj < jnum; jj++) {
+    int j = firstneigh_i[jj];
+    j &= NEIGHMASK;
+    const int jtype = atom->type[j] - 1;
+    if (!is_static_fixed_type(jtype)) continue;
+    const double r[3] = {atom->x[j][0] - xi[0],
+                         atom->x[j][1] - xi[1],
+                         atom->x[j][2] - xi[2]};
+    const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    if (rsq <= 0.0 || rsq > max_cutoff_sq) continue;
+    const double dist = std::sqrt(rsq);
+    int table_index = -1;
+    int table_bin = 0;
+    double table_frac = 0.0;
+    get_radial_table_info(itype, jtype, dist, table_index, table_bin,
+                          table_frac);
+    calc_pair_radial_values(itype, jtype, dist, false, 0.0, false, -1,
+                            table_index, table_bin, table_frac);
+
+    double sh_values[kMaxSHComponents];
+    double sh_ders[3 * kMaxSHComponents];
+    eval_real_sh(r, dist, sh_l_max, sh_values, sh_ders);
+    if (sh_basic_mu_grouped) {
+      for (int mu = 0; mu < radial_func_count; mu++) {
+        const int begin = sh_basic_mu_offsets[mu];
+        const int end = sh_basic_mu_offsets[mu + 1];
+        const double radial_val = radial_vals[mu];
+        for (int k = begin; k < end; k++)
+          edge_basic[k] = radial_val * sh_values[alpha_basic_sh_index[k]];
+      }
+    } else {
+      for (int k = 0; k < alpha_index_basic_count; k++) {
+        const int mu = alpha_basic_mu[k];
+        const int sh_idx = alpha_basic_sh_index[k];
+        edge_basic[k] = radial_vals[mu] * sh_values[sh_idx];
+      }
+    }
+
+    static_fixed_gate_main_neighbors.push_back(j);
+    static_fixed_gate_main_neighbor_tags.push_back(
+        atom->tag != nullptr ? atom->tag[j] : 0);
+    static_fixed_gate_main_base_basic.insert(
+        static_fixed_gate_main_base_basic.end(),
+        edge_basic.begin(), edge_basic.end());
+    edge_count++;
+  }
+
+  static_fixed_gate_main_cache_offsets[i] = edge_offset;
+  static_fixed_gate_main_cache_counts[i] = edge_count;
+  static_fixed_gate_main_cache_tags[i] = atom->tag != nullptr ? atom->tag[i] : 0;
+  static_fixed_gate_main_cache_valid[i] = 1;
+}
+
+void PairSUS2MTP::ensure_two_layer_gate_mu_cache_for_atom(int jtype,
+                                                          int atom_index,
+                                                          double gate_residual)
+{
+  if (disable_two_layer_gate_tanh_cache() ||
+      two_layer_gate_mu_cache_valid == nullptr ||
+      two_layer_gate_multiplier_mu_cache == nullptr ||
+      two_layer_gate_deriv_mu_cache == nullptr)
+    error->one(FLERR, "SUS2-SH static fixed gate main cache requires the gate mu cache.");
+  if (atom_index < 0 || atom_index >= atom->nmax)
+    error->one(FLERR, "SUS2-SH gate mu cache atom index is out of range.");
+  if (two_layer_gate_mu_cache_valid[atom_index]) return;
+  if (jtype < 0 ||
+      jtype >= static_cast<int>(two_layer_gate_additive_ratio_valid.size()) ||
+      !two_layer_gate_additive_ratio_valid[jtype])
+    error->one(FLERR, "SUS2-SH static fixed gate main cache requires additive gate ratios.");
+
+  const size_t ratio_offset = static_cast<size_t>(jtype) * radial_func_count;
+  const double *__restrict ratios =
+      two_layer_gate_additive_ratios.data() + ratio_offset;
+  double *__restrict mult = two_layer_gate_multiplier_mu_cache +
+      static_cast<size_t>(atom_index) * radial_func_count;
+  double *__restrict deriv = two_layer_gate_deriv_mu_cache +
+      static_cast<size_t>(atom_index) * radial_func_count;
+  #pragma omp simd
+  for (int mu = 0; mu < radial_func_count; mu++) {
+    const double additive_coeff = ratios[mu];
+    const double arg = additive_coeff * gate_residual;
+    const double tanh_arg = (arg == 0.0 ? 0.0 : std::tanh(arg));
+    const double sech2 = 1.0 - tanh_arg * tanh_arg;
+    mult[mu] = 1.0 + two_layer_gate_tanh_amplitude * tanh_arg;
+    deriv[mu] = two_layer_gate_tanh_amplitude * additive_coeff * sech2;
+  }
+  two_layer_gate_mu_cache_valid[atom_index] = 1;
+}
+
+bool PairSUS2MTP::apply_static_fixed_gate_main_cache_moments(int i,
+                                                             double default_gate)
+{
+  if (!static_fixed_gate_main_cache_valid_for_center(i)) return false;
+  const size_t edge_offset = static_fixed_gate_main_cache_offsets[i];
+  const int edge_count = static_fixed_gate_main_cache_counts[i];
+  for (int e = 0; e < edge_count; e++) {
+    const size_t edge_index = edge_offset + e;
+    const int j = static_fixed_gate_main_neighbors[edge_index];
+    const int jtype = atom->type[j] - 1;
+    const double gate_residual = two_layer_gate_values[j] - default_gate;
+    ensure_two_layer_gate_mu_cache_for_atom(jtype, j, gate_residual);
+    const double *__restrict mult = two_layer_gate_multiplier_mu_cache +
+        static_cast<size_t>(j) * radial_func_count;
+    const double *__restrict base =
+        static_fixed_gate_main_base_basic.data() +
+        edge_index * alpha_index_basic_count;
+    if (sh_basic_mu_grouped) {
+      for (int mu = 0; mu < radial_func_count; mu++) {
+        const int begin = sh_basic_mu_offsets[mu];
+        const int end = sh_basic_mu_offsets[mu + 1];
+        const double multiplier = mult[mu];
+        #pragma omp simd
+        for (int k = begin; k < end; k++)
+          moment_tensor_vals[k] += base[k] * multiplier;
+      }
+    } else {
+      #pragma omp simd
+      for (int k = 0; k < alpha_index_basic_count; k++) {
+        const int mu = alpha_basic_mu[k];
+        moment_tensor_vals[k] += base[k] * mult[mu];
+      }
+    }
+  }
+  return true;
+}
+
+void PairSUS2MTP::apply_static_fixed_gate_main_cache_adjoints(int i)
+{
+  const size_t edge_offset = static_fixed_gate_main_cache_offsets[i];
+  const int edge_count = static_fixed_gate_main_cache_counts[i];
+  for (int e = 0; e < edge_count; e++) {
+    const size_t edge_index = edge_offset + e;
+    const int j = static_fixed_gate_main_neighbors[edge_index];
+    const double *__restrict deriv = two_layer_gate_deriv_mu_cache +
+        static_cast<size_t>(j) * radial_func_count;
+    const double *__restrict base =
+        static_fixed_gate_main_base_basic.data() +
+        edge_index * alpha_index_basic_count;
+    double gate_adjoint = 0.0;
+    if (sh_basic_mu_grouped) {
+      for (int mu = 0; mu < radial_func_count; mu++) {
+        const int begin = sh_basic_mu_offsets[mu];
+        const int end = sh_basic_mu_offsets[mu + 1];
+        const double deriv_mu = deriv[mu];
+        #pragma omp simd reduction(+:gate_adjoint)
+        for (int k = begin; k < end; k++)
+          gate_adjoint += weighted_basic_moment_ders[k] * base[k] * deriv_mu;
+      }
+    } else {
+      #pragma omp simd reduction(+:gate_adjoint)
+      for (int k = 0; k < alpha_index_basic_count; k++) {
+        const int mu = alpha_basic_mu[k];
+        gate_adjoint += weighted_basic_moment_ders[k] * base[k] * deriv[mu];
+      }
+    }
+    two_layer_gate_adjoints[j] += gate_adjoint;
+  }
 }
 
 int PairSUS2MTP::two_layer_gate_additive_coeff_index(int type_outer, int mu) const
@@ -1173,6 +1404,43 @@ void PairSUS2MTP::accumulate_sh_basic_edge(int jj,
   double sh_ders[3 * kMaxSHComponents];
   eval_real_sh(r, dist, sh_l_max, sh_values, sh_ders);
 
+  if (sh_basic_mu_grouped) {
+    for (int mu = 0; mu < radial_func_count; mu++) {
+      const int begin = sh_basic_mu_offsets[mu];
+      const int end = sh_basic_mu_offsets[mu + 1];
+      if (begin == end) continue;
+      const double radial_val = radial_vals[mu];
+      const double radial_der = radial_ders[mu];
+      for (int k = begin; k < end; k++) {
+        const int sh_idx = alpha_basic_sh_index[k];
+        const double ylm = sh_values[sh_idx];
+        const double raw_contrib = radial_val * ylm;
+        const double radial_der_pref = radial_der * inv_dist * ylm;
+        const double raw_jac_x =
+            radial_der_pref * r[0] + radial_val * sh_ders[3 * sh_idx + 0];
+        const double raw_jac_y =
+            radial_der_pref * r[1] + radial_val * sh_ders[3 * sh_idx + 1];
+        const double raw_jac_z =
+            radial_der_pref * r[2] + radial_val * sh_ders[3 * sh_idx + 2];
+        moment_tensor_vals[k] += gate_scale * raw_contrib;
+        if (jj >= 0) {
+          const size_t jac_idx =
+              static_cast<size_t>(jj) * alpha_index_basic_count + k;
+          moment_jacobian_x[jac_idx] = gate_scale * raw_jac_x;
+          moment_jacobian_y[jac_idx] = gate_scale * raw_jac_y;
+          moment_jacobian_z[jac_idx] = gate_scale * raw_jac_z;
+          if (store_raw) {
+            const double gate_raw = store_gate_residual_raw
+                ? two_layer_gate_residual_radial_vals[mu] * ylm
+                : raw_contrib;
+            two_layer_raw_basic_vals[raw_offset + k] = gate_raw;
+          }
+        }
+      }
+    }
+    return;
+  }
+
   for (int k = 0; k < alpha_index_basic_count; k++) {
     const int mu = alpha_basic_mu[k];
     const int sh_idx = alpha_basic_sh_index[k];
@@ -1347,6 +1615,7 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
         accumulate_zbl_pair(i, j, itype, jtype, r, rsq, eflag, vflag);
       if (rsq > max_cutoff_sq) continue;
       const double dist = std::sqrt(rsq);
+      if (static_first_layer_edge) continue;
       int table_index = -1;
       int table_bin = 0;
       double table_frac = 0.0;
@@ -1364,18 +1633,14 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       two_layer_gate_edge_deriv_x.push_back(0.0);
       two_layer_gate_edge_deriv_y.push_back(0.0);
       two_layer_gate_edge_deriv_z.push_back(0.0);
-      if (static_first_layer_edge) {
-        two_layer_gate_edge_first_local_indices.push_back(-1);
-      } else {
-        two_layer_gate_edge_first_local_indices.push_back(
-            first_layer_active_local_count);
-        calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial,
-                                0.0, false, -1, table_index, table_bin,
-                                table_frac);
-        accumulate_sh_basic_edge(first_layer_active_local_count, r, dist, 1.0,
-                                 false, 0, false);
-        first_layer_active_local_count++;
-      }
+      two_layer_gate_edge_first_local_indices.push_back(
+          first_layer_active_local_count);
+      calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial,
+                              0.0, false, -1, table_index, table_bin,
+                              table_frac);
+      accumulate_sh_basic_edge(first_layer_active_local_count, r, dist, 1.0,
+                               false, 0, false);
+      first_layer_active_local_count++;
     }
     const size_t active_end = two_layer_gate_edge_neighbors.size();
     two_layer_gate_edge_offsets[ii + 1] = active_end;
@@ -1466,11 +1731,23 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
     std::fill(moment_tensor_vals, moment_tensor_vals + alpha_moment_count, 0.0);
     std::fill(nbh_energy_ders_wrt_moments,
               nbh_energy_ders_wrt_moments + alpha_moment_count, 0.0);
+    const bool use_static_fixed_gate_main_cache =
+        static_fixed_basic_cache_enabled && is_sh_model &&
+        !eflag && !vflag && is_static_fixed_type(itype) &&
+        !disable_two_layer_gate_tanh_cache();
+    if (use_static_fixed_gate_main_cache) {
+      ensure_static_fixed_gate_main_cache();
+      if (!static_fixed_gate_main_cache_valid_for_center(i))
+        build_static_fixed_gate_main_cache_for_center(i, itype, numneigh[i],
+                                                      firstneigh[i], x[i]);
+    }
 
     for (size_t active_idx = active_begin; active_idx < active_end; active_idx++) {
       const int active_local = static_cast<int>(active_idx - active_begin);
       const int j = two_layer_gate_edge_neighbors[active_idx];
       const int jtype = two_layer_gate_edge_types[active_idx];
+      if (use_static_fixed_gate_main_cache && is_static_fixed_type(jtype))
+        continue;
       const double r[3] = {two_layer_gate_edge_dx[active_idx],
                            two_layer_gate_edge_dy[active_idx],
                            two_layer_gate_edge_dz[active_idx]};
@@ -1488,6 +1765,14 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       accumulate_sh_basic_edge(active_local, r, dist, 1.0, true, raw_offset,
                                true);
     }
+    if (use_static_fixed_gate_main_cache &&
+        !apply_static_fixed_gate_main_cache_moments(i, default_gate)) {
+      build_static_fixed_gate_main_cache_for_center(i, itype, numneigh[i],
+                                                    firstneigh[i], x[i]);
+      if (!apply_static_fixed_gate_main_cache_moments(i, default_gate))
+        error->one(FLERR, "SUS2-SH static fixed gate main cache rebuild failed.");
+    }
+
     forward_sh_products();
 
     double nbh_energy = 0.0;
@@ -1512,6 +1797,9 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
     for (size_t active_idx = active_begin; active_idx < active_end; active_idx++) {
       const int active_local = static_cast<int>(active_idx - active_begin);
       const int j = two_layer_gate_edge_neighbors[active_idx];
+      if (use_static_fixed_gate_main_cache &&
+          is_static_fixed_type(two_layer_gate_edge_types[active_idx]))
+        continue;
       double fx = 0.0, fy = 0.0, fz = 0.0;
       double gate_adjoint = 0.0;
       const size_t jac_offset = static_cast<size_t>(active_local) * alpha_index_basic_count;
@@ -1559,6 +1847,8 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
         }
       }
     }
+    if (use_static_fixed_gate_main_cache)
+      apply_static_fixed_gate_main_cache_adjoints(i);
   }
 
   comm->reverse_comm(this);
@@ -2030,6 +2320,29 @@ void PairSUS2MTP::compute(int eflag, int vflag)
             moment_jacobian_x[jac_idx] = pair_gate * raw_jac_x + activation_der_factor * r[0];
             moment_jacobian_y[jac_idx] = pair_gate * raw_jac_y + activation_der_factor * r[1];
             moment_jacobian_z[jac_idx] = pair_gate * raw_jac_z + activation_der_factor * r[2];
+          }
+        } else if (sh_basic_mu_grouped) {
+          for (int mu = 0; mu < radial_func_count; mu++) {
+            const int begin = sh_basic_mu_offsets[mu];
+            const int end = sh_basic_mu_offsets[mu + 1];
+            if (begin == end) continue;
+            const double radial_val = radial_vals[mu];
+            const double radial_der = radial_ders[mu];
+            for (int k = begin; k < end; k++) {
+              const size_t jac_idx =
+                  static_cast<size_t>(jj) * alpha_index_basic_count + k;
+              const int sh_idx = alpha_basic_sh_index[k];
+              const double ylm = sh_values[sh_idx];
+              const double raw_contrib = radial_val * ylm;
+              const double radial_der_pref = radial_der * inv_dist * ylm;
+              moment_tensor_vals[k] += raw_contrib;
+              moment_jacobian_x[jac_idx] =
+                  radial_der_pref * r[0] + radial_val * sh_ders[3 * sh_idx + 0];
+              moment_jacobian_y[jac_idx] =
+                  radial_der_pref * r[1] + radial_val * sh_ders[3 * sh_idx + 1];
+              moment_jacobian_z[jac_idx] =
+                  radial_der_pref * r[2] + radial_val * sh_ders[3 * sh_idx + 2];
+            }
           }
         } else {
           for (int k = 0; k < alpha_index_basic_count; k++) {
@@ -3756,6 +4069,26 @@ access to the buffer size that is not provided in PFR.
     alpha_basic_norm_rank[i] = alpha_basic_a0[i] + alpha_basic_a1[i] + alpha_basic_a2[i];
     alpha_basic_sh_index[i] =
         is_sh_model ? sh_flat_index(alpha_basic_a0[i], alpha_basic_a1[i]) : 0;
+  }
+  sh_basic_mu_grouped = false;
+  sh_basic_mu_offsets.clear();
+  if (is_sh_model && radial_func_count > 0) {
+    sh_basic_mu_offsets.assign(radial_func_count + 1, 0);
+    int pos = 0;
+    bool grouped = true;
+    for (int mu = 0; mu < radial_func_count; mu++) {
+      sh_basic_mu_offsets[mu] = pos;
+      while (pos < alpha_index_basic_count && alpha_basic_mu[pos] == mu) pos++;
+      sh_basic_mu_offsets[mu + 1] = pos;
+      if (pos < alpha_index_basic_count && alpha_basic_mu[pos] < mu)
+        grouped = false;
+    }
+    if (pos != alpha_index_basic_count) grouped = false;
+    if (grouped) {
+      sh_basic_mu_grouped = true;
+    } else {
+      sh_basic_mu_offsets.clear();
+    }
   }
   for (int i = 0; i < alpha_index_times_count; i++) {
     alpha_times_a0[i] = alpha_index_times[i][0];
