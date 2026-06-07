@@ -529,3 +529,45 @@ current model's gate dependency prefix is too dense for meaningful product
 pruning, and reducing only the first-layer clear is not enough to move Pair
 time. Source and the default LAMMPS build were restored to the accepted
 `sh_eval_precompute` stage-best state after the test.
+
+## Rejected Experiment: Gate Mu-Cache Precompute Before Main Edge
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_mu_cache_precompute_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_mu_cache_precompute_ab_40c_20260608
+jobids:      3769519, 3769520
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_mu_cache_precompute_20260608
+sha256 189628409f067911cb70c80f0c6331150a26a3b7c9c948fe547f2ee8872e94ca
+```
+
+Candidate idea: after the gate-value `forward_comm`, precompute the per-atom
+per-`mu` tanh multiplier and derivative cache for all local plus ghost atoms,
+then use a cache-only table interpolation path in the main edge loop. This
+keeps the same mathematical inputs as the existing lazy cache path but avoids
+filling tanh cache inside the edge loop.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.99040 s | 4.99445 s | 0.999x | 1.000x |
+| no-gate | 1.81530 s | 1.81510 s | 1.000x | 1.001x |
+
+Decision: rejected. The lazy per-atom tanh cache was already cheap enough; the
+extra precompute pass and cache-only dispatch did not reduce Pair time. Source
+and the default LAMMPS build were restored to the accepted `sh_eval_precompute`
+stage-best state after the test.
