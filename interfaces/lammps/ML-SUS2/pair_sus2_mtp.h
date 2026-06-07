@@ -180,7 +180,6 @@ class PairSUS2MTP : public Pair {
   std::vector<double> two_layer_gate_edge_deriv_x;
   std::vector<double> two_layer_gate_edge_deriv_y;
   std::vector<double> two_layer_gate_edge_deriv_z;
-  std::vector<int> two_layer_gate_edge_first_local_indices;
   int alpha_moment_count, alpha_index_basic_count, alpha_index_times_count, alpha_scalar_count,
       max_alpha_index_basic;    // Counts of various alpha indicies
   int **alpha_index_basic;      // Indicies how to construct elementary moments from coords and dist

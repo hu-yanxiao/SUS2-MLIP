@@ -1609,7 +1609,6 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
   two_layer_gate_edge_deriv_x.clear();
   two_layer_gate_edge_deriv_y.clear();
   two_layer_gate_edge_deriv_z.clear();
-  two_layer_gate_edge_first_local_indices.clear();
   two_layer_gate_edge_offsets[0] = 0;
 
   for (int ii = 0; ii < inum; ii++) {
@@ -1670,8 +1669,6 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       two_layer_gate_edge_deriv_x.push_back(0.0);
       two_layer_gate_edge_deriv_y.push_back(0.0);
       two_layer_gate_edge_deriv_z.push_back(0.0);
-      two_layer_gate_edge_first_local_indices.push_back(
-          first_layer_active_local_count);
       calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial,
                               0.0, false, -1, table_index, table_bin,
                               table_frac);
@@ -1729,8 +1726,7 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       nbh_energy_ders_wrt_moments[a0] += adj * coeff * moment_tensor_vals[a1];
     }
     for (size_t active_idx = active_begin; active_idx < active_end; active_idx++) {
-      const int first_local = two_layer_gate_edge_first_local_indices[active_idx];
-      if (first_local < 0) continue;
+      const int first_local = static_cast<int>(active_idx - active_begin);
       double gx = 0.0, gy = 0.0, gz = 0.0;
       const size_t jac_offset =
           static_cast<size_t>(first_local) * alpha_index_basic_count;

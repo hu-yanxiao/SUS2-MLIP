@@ -817,3 +817,55 @@ Same-node 40-rank direct A/B, two repeats each:
 Status: the no-gate single-layer SH path is near the 20% pair-time target and
 above it by loop time; the gate path remains around 21% faster by pair/loop
 time, still below the requested 40% target.
+
+## Accepted Experiment: Remove Redundant Gate First-Local Edge Vector
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_no_first_local_vector_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_no_first_local_vector_ab_40c_20260608
+speed_check: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_no_first_local_vector_ab2_40c_20260608
+jobids:      3769535, 3769536, 3769537
+```
+
+Candidate/accepted binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.no_first_local_vector_20260608
+sha256 46a2096aebdcb8d05030c3f7164227c402986334f942c558042d569888e9344a
+```
+
+Candidate idea: remove `two_layer_gate_edge_first_local_indices`. In the
+current two-layer gate construction, an edge is pushed to the dynamic edge list
+only after static first-layer fixed edges have already been skipped, and every
+pushed edge immediately calls `accumulate_sh_basic_edge()` with the next local
+edge index. Therefore, within each center,
+`first_local == active_idx - active_begin` exactly. Storing a separate integer
+edge vector is redundant.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, stage-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98935 s | 4.97570 s | 1.003x | 1.002x |
+| no-gate | 1.80955 s | 1.81445 s | 0.997x | 0.999x |
+
+Same-node 40-rank A/B on `b03u26a`, candidate-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.99425 s | 4.97475 s | 1.004x | 1.004x |
+| no-gate | 1.81330 s | 1.81360 s | 1.000x | 1.002x |
+
+Decision: accepted. The gain is small but directionally stable for the gate
+path in both ordering checks, and the no-gate pair-time difference is at the
+noise level. The change removes one gate-only edge vector and one edge-vector
+read without changing radial, SH, gate, force, or virial formulas.
