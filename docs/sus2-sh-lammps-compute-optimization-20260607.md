@@ -898,3 +898,91 @@ Same-node 40-rank direct A/B, two repeats each:
 Status: current gate is about `+21.6%` by Pair time and `+21.1%` by Loop
 time relative to the initial optimization baseline. Current no-gate is about
 `+18.4%` by Pair time and `+23.7%` by Loop time.
+
+## Rejected Experiment: Internal SH Basic-Moment Reorder
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_sh_basic_reorder_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_sh_basic_reorder_ab_40c_20260608
+jobids:      3769539, 3769540
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.sh_basic_reorder_20260608
+sha256 8e125d0786b62b9a549238b18fbfae3718803418ecc69333966cac5edb948bec
+```
+
+Candidate idea: internally permute the first `alpha_index_basic_count` SH
+basic moments by `(mu, sh_index)` after reading the model, then remap every
+`sh_products` reference and `alpha_moment_mapping` entry that points into the
+basic-moment range. This activates the existing `sh_basic_mu_grouped` edge
+accumulation path without changing scalar order, linear coefficients, gate
+scalar indices, gate weights, radial coefficients, or the model file format.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, candidate-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98155 s | 5.33015 s | 0.935x | 0.936x |
+| no-gate | 1.81165 s | 1.81745 s | 0.997x | 0.997x |
+
+Decision: rejected. The permutation is mathematically safe, but the grouped
+edge accumulation path is slower for this model. The likely reason is that the
+extra `mu` loop structure and changed low-index moment access pattern do not
+pay back the removed `alpha_basic_mu[k]` lookup; the gate path pays this cost
+in both first-layer and main-layer edge accumulation, so it regresses most.
+The local and server source were restored to the previous stage-best after
+this test.
+
+## Rejected Experiment: Push Gate Derivatives Only After Backprop
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_deriv_push_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_deriv_push_ab_40c_20260608
+jobids:      3769541, 3769542
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_deriv_push_20260608
+sha256 a1ccf43d304fc82eaac8c77a4e03b8753c32af5853f8fa53aebc82e261198862
+```
+
+Candidate idea: do not append zero placeholders to
+`two_layer_gate_edge_deriv_{x,y,z}` while building the first-layer gate edge
+list. Instead, append the final `(gx, gy, gz)` values in the same edge order
+after gate backprop computes them. This removes one redundant zero write per
+component per active gate edge and leaves formulas and edge ordering unchanged.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, candidate-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98955 s | 5.01705 s | 0.995x | 0.996x |
+| no-gate | 1.81465 s | 1.81535 s | 1.000x | 1.001x |
+
+Decision: rejected. The removed zero writes did not translate into a speedup.
+The extra `push_back` work moved into the gate derivative loop, and the gate
+path was slightly slower by both Pair and Loop time. The no-gate difference
+was noise-level, as expected.
