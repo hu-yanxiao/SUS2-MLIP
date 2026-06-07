@@ -1031,8 +1031,9 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
 
   ensure_two_layer_atom_buffers();
   const double default_gate = two_layer_gate_direct_scale ? two_layer_gate_bias : 1.0;
-  std::fill(two_layer_gate_values, two_layer_gate_values + atom->nmax, default_gate);
-  std::fill(two_layer_gate_adjoints, two_layer_gate_adjoints + atom->nmax, 0.0);
+  const int nall = atom->nlocal + atom->nghost;
+  std::fill(two_layer_gate_values, two_layer_gate_values + nall, default_gate);
+  std::fill(two_layer_gate_adjoints, two_layer_gate_adjoints + nall, 0.0);
 
   two_layer_gate_edge_offsets.resize(static_cast<size_t>(inum) + 1);
   two_layer_gate_edge_neighbors.clear();
@@ -1141,7 +1142,7 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
   if (!disable_two_layer_gate_tanh_cache() &&
       two_layer_gate_mu_cache_valid != nullptr)
     std::fill(two_layer_gate_mu_cache_valid,
-              two_layer_gate_mu_cache_valid + atom->nmax, 0);
+              two_layer_gate_mu_cache_valid + nall, 0);
 
   for (int ii = 0; ii < inum; ii++) {
     const int i = ilist[ii];
