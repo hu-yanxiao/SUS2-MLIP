@@ -654,3 +654,46 @@ Decision: rejected. Moving the subtraction out of the hot loop was not worth
 the extra table memory and cache pressure. Both gate and no-gate slowed down.
 Source and the default LAMMPS build were restored to the accepted
 `sh_eval_precompute` stage-best state after the test.
+
+## Rejected Experiment: Packed Alpha-Times Index Rows
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_alpha_times_packed_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_alpha_times_packed_ab_40c_20260608
+jobids:      3769525, 3769526
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.alpha_times_packed_20260608
+sha256 8103a1a075faebc617c4579e0b833c0ac2b8759afd37bc4e1bdbbd4dc3a76092
+```
+
+Candidate idea: keep the original alpha-times topology/order and scalar
+coefficient array, but pack the three integer indices `(a0, a1, out)` into one
+contiguous row array. Product and backprop loops then read one packed row plus
+one coefficient per product instead of three separate integer arrays. This is
+generic over all `lk` models and does not change product order.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.99415 s | 5.02625 s | 0.994x | 0.992x |
+| no-gate | 1.81590 s | 1.81780 s | 0.999x | 0.991x |
+
+Decision: rejected. Packing the three integer streams did not improve the
+integrated LAMMPS product/backprop loops. The extra row copy/load pattern was
+slightly slower for gate and did not help no-gate. Source and the default
+LAMMPS build were restored to the accepted `sh_eval_precompute` stage-best
+state after the test.
