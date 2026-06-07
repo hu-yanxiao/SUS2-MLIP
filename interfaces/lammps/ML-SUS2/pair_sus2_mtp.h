@@ -29,6 +29,7 @@ PairStyle(sus2mtp,PairSUS2MTP);
 #include "sus2_mtp_zbl.h"
 #include <atomic>    // 原子操作支持
 #include <mutex>     // 互斥锁支持
+#include <string>
 #include <vector>
 
 namespace LAMMPS_NS {
@@ -108,6 +109,14 @@ class PairSUS2MTP : public Pair {
   double env_gate_cutoff_ratio = 0.5;
   double env_gate_activation_on_ratio = 0.5;
   int env_gate_channel_count = 6;
+  bool static_fixed_basic_cache_enabled = false;
+  std::string static_fixed_types_arg = "";
+  std::vector<unsigned char> static_fixed_type_mask;
+  double *static_fixed_basic_cache = nullptr;
+  unsigned char *static_fixed_basic_cache_valid = nullptr;
+  tagint *static_fixed_basic_cache_tags = nullptr;
+  int static_fixed_basic_cache_atom_size = 0;
+  int static_fixed_basic_cache_alpha_size = 0;
   bool zbl_enabled = false;
   double zbl_inner = 0.7;
   double zbl_outer = 1.4;
@@ -171,6 +180,7 @@ class PairSUS2MTP : public Pair {
   std::vector<double> two_layer_gate_edge_deriv_x;
   std::vector<double> two_layer_gate_edge_deriv_y;
   std::vector<double> two_layer_gate_edge_deriv_z;
+  std::vector<int> two_layer_gate_edge_first_local_indices;
   int alpha_moment_count, alpha_index_basic_count, alpha_index_times_count, alpha_scalar_count,
       max_alpha_index_basic;    // Counts of various alpha indicies
   int **alpha_index_basic;      // Indicies how to construct elementary moments from coords and dist
@@ -212,11 +222,18 @@ class PairSUS2MTP : public Pair {
   unsigned char *two_layer_gate_mu_cache_valid = nullptr;
   double *two_layer_radial_cache_vals = nullptr;
   double *two_layer_radial_cache_ders = nullptr;
+  double *static_fixed_gate_basic_cache = nullptr;
+  unsigned char *static_fixed_gate_basic_cache_valid = nullptr;
+  double *static_fixed_gate_value_cache = nullptr;
+  unsigned char *static_fixed_gate_value_cache_valid = nullptr;
+  tagint *static_fixed_gate_cache_tags = nullptr;
   int two_layer_raw_jac_size = 0;
   int two_layer_atom_buffer_size = 0;
   int two_layer_gate_mu_cache_atom_size = 0;
   int two_layer_gate_mu_cache_size = 0;
   int two_layer_radial_cache_size = 0;
+  int static_fixed_gate_cache_atom_size = 0;
+  int static_fixed_gate_cache_alpha_size = 0;
   double *moment_jacobian_x = nullptr;    // SoA layout for x-component
   double *moment_jacobian_y = nullptr;    // SoA layout for y-component
   double *moment_jacobian_z = nullptr;    // SoA layout for z-component
@@ -246,6 +263,15 @@ class PairSUS2MTP : public Pair {
                                bool = false, int = -1, int = -2, int = 0,
                                double = 0.0);
   void accumulate_sh_basic_edge(int, const double *, double, double, bool, int, bool = false);
+  bool is_static_fixed_type(int) const;
+  bool static_fixed_cache_tag_matches(const tagint *, int) const;
+  void configure_static_fixed_types();
+  void ensure_static_fixed_basic_cache();
+  void invalidate_static_fixed_basic_cache();
+  void build_static_fixed_basic_cache_for_center(int, int, int, int *, const double *);
+  void ensure_static_fixed_gate_cache();
+  void invalidate_static_fixed_gate_cache();
+  void build_static_fixed_gate_basic_cache_for_center(int, int, int, int *, const double *);
   void forward_sh_products();
   void backprop_sh_products();
   void ensure_two_layer_atom_buffers();

@@ -467,9 +467,17 @@ PairSUS2MTP::~PairSUS2MTP()
     memory->destroy(two_layer_radial_cache_vals);
     memory->destroy(two_layer_radial_cache_ders);
     memory->destroy(weighted_basic_moment_ders);
-	    memory->destroy(env_rho_dr);
-	    memory->destroy(env_activation_basic_vals);
-	    memory->destroy(mu_to_K);
+    memory->destroy(static_fixed_basic_cache);
+    memory->destroy(static_fixed_basic_cache_valid);
+    memory->destroy(static_fixed_basic_cache_tags);
+    memory->destroy(static_fixed_gate_basic_cache);
+    memory->destroy(static_fixed_gate_basic_cache_valid);
+    memory->destroy(static_fixed_gate_value_cache);
+    memory->destroy(static_fixed_gate_value_cache_valid);
+    memory->destroy(static_fixed_gate_cache_tags);
+    memory->destroy(env_rho_dr);
+    memory->destroy(env_activation_basic_vals);
+    memory->destroy(mu_to_K);
     memory->destroy(mu_to_sigma);
 
     delete radial_basis;
@@ -493,6 +501,234 @@ bool PairSUS2MTP::requires_two_layer_gate_sh() const
   return is_sh_model && two_layer_gate_enabled &&
          (has_nonzero_two_layer_gate_weights() ||
           (two_layer_gate_direct_scale && two_layer_gate_bias != 1.0));
+}
+
+bool PairSUS2MTP::is_static_fixed_type(int zero_based_type) const
+{
+  return static_fixed_basic_cache_enabled &&
+         zero_based_type >= 0 &&
+         zero_based_type < static_cast<int>(static_fixed_type_mask.size()) &&
+         static_fixed_type_mask[zero_based_type] != 0;
+}
+
+bool PairSUS2MTP::static_fixed_cache_tag_matches(const tagint *cache_tags,
+                                                 int atom_index) const
+{
+  return cache_tags != nullptr &&
+         (atom->tag == nullptr || cache_tags[atom_index] == atom->tag[atom_index]);
+}
+
+void PairSUS2MTP::configure_static_fixed_types()
+{
+  static_fixed_type_mask.assign(species_count, 0);
+  static_fixed_basic_cache_enabled = false;
+  invalidate_static_fixed_basic_cache();
+  invalidate_static_fixed_gate_cache();
+  if (static_fixed_types_arg.empty()) return;
+
+  std::stringstream ss(static_fixed_types_arg);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    if (token.empty()) continue;
+    const int lammps_type = utils::inumeric(FLERR, token, true, lmp);
+    if (lammps_type < 1 || lammps_type > species_count)
+      error->all(FLERR, "Pair sus2mtp static_fixed_types entry is outside the model species range.");
+    static_fixed_type_mask[lammps_type - 1] = 1;
+    static_fixed_basic_cache_enabled = true;
+  }
+
+  if (static_fixed_basic_cache_enabled)
+    utils::logmesg(lmp,
+                   "SUS2-SH static fixed basic cache enabled for types: {}\n",
+                   static_fixed_types_arg);
+}
+
+void PairSUS2MTP::ensure_static_fixed_basic_cache()
+{
+  if (!static_fixed_basic_cache_enabled) return;
+  const int nmax = atom->nmax;
+  if (nmax <= 0 || alpha_index_basic_count <= 0) return;
+  if (static_fixed_basic_cache_atom_size == nmax &&
+      static_fixed_basic_cache_alpha_size == alpha_index_basic_count)
+    return;
+
+  memory->destroy(static_fixed_basic_cache);
+  memory->destroy(static_fixed_basic_cache_valid);
+  memory->destroy(static_fixed_basic_cache_tags);
+  memory->create(static_fixed_basic_cache,
+                 static_cast<size_t>(nmax) * alpha_index_basic_count,
+                 "static_fixed_basic_cache");
+  memory->create(static_fixed_basic_cache_valid, nmax,
+                 "static_fixed_basic_cache_valid");
+  memory->create(static_fixed_basic_cache_tags, nmax,
+                 "static_fixed_basic_cache_tags");
+  static_fixed_basic_cache_atom_size = nmax;
+  static_fixed_basic_cache_alpha_size = alpha_index_basic_count;
+  std::fill(static_fixed_basic_cache,
+            static_fixed_basic_cache +
+                static_cast<size_t>(nmax) * alpha_index_basic_count,
+            0.0);
+  std::fill(static_fixed_basic_cache_valid,
+            static_fixed_basic_cache_valid + nmax, 0);
+  std::fill(static_fixed_basic_cache_tags,
+            static_fixed_basic_cache_tags + nmax, 0);
+}
+
+void PairSUS2MTP::invalidate_static_fixed_basic_cache()
+{
+  if (static_fixed_basic_cache_valid != nullptr &&
+      static_fixed_basic_cache_atom_size > 0)
+    std::fill(static_fixed_basic_cache_valid,
+              static_fixed_basic_cache_valid + static_fixed_basic_cache_atom_size,
+              0);
+  if (static_fixed_basic_cache_tags != nullptr &&
+      static_fixed_basic_cache_atom_size > 0)
+    std::fill(static_fixed_basic_cache_tags,
+              static_fixed_basic_cache_tags + static_fixed_basic_cache_atom_size,
+              0);
+}
+
+void PairSUS2MTP::ensure_static_fixed_gate_cache()
+{
+  if (!static_fixed_basic_cache_enabled) return;
+  const int nmax = atom->nmax;
+  if (nmax <= 0 || alpha_index_basic_count <= 0) return;
+  if (static_fixed_gate_cache_atom_size == nmax &&
+      static_fixed_gate_cache_alpha_size == alpha_index_basic_count)
+    return;
+
+  memory->destroy(static_fixed_gate_basic_cache);
+  memory->destroy(static_fixed_gate_basic_cache_valid);
+  memory->destroy(static_fixed_gate_value_cache);
+  memory->destroy(static_fixed_gate_value_cache_valid);
+  memory->destroy(static_fixed_gate_cache_tags);
+  memory->create(static_fixed_gate_basic_cache,
+                 static_cast<size_t>(nmax) * alpha_index_basic_count,
+                 "static_fixed_gate_basic_cache");
+  memory->create(static_fixed_gate_basic_cache_valid, nmax,
+                 "static_fixed_gate_basic_cache_valid");
+  memory->create(static_fixed_gate_value_cache, nmax,
+                 "static_fixed_gate_value_cache");
+  memory->create(static_fixed_gate_value_cache_valid, nmax,
+                 "static_fixed_gate_value_cache_valid");
+  memory->create(static_fixed_gate_cache_tags, nmax,
+                 "static_fixed_gate_cache_tags");
+  static_fixed_gate_cache_atom_size = nmax;
+  static_fixed_gate_cache_alpha_size = alpha_index_basic_count;
+  std::fill(static_fixed_gate_basic_cache,
+            static_fixed_gate_basic_cache +
+                static_cast<size_t>(nmax) * alpha_index_basic_count,
+            0.0);
+  std::fill(static_fixed_gate_basic_cache_valid,
+            static_fixed_gate_basic_cache_valid + nmax, 0);
+  std::fill(static_fixed_gate_value_cache,
+            static_fixed_gate_value_cache + nmax, 0.0);
+  std::fill(static_fixed_gate_value_cache_valid,
+            static_fixed_gate_value_cache_valid + nmax, 0);
+  std::fill(static_fixed_gate_cache_tags,
+            static_fixed_gate_cache_tags + nmax, 0);
+}
+
+void PairSUS2MTP::invalidate_static_fixed_gate_cache()
+{
+  if (static_fixed_gate_basic_cache_valid != nullptr &&
+      static_fixed_gate_cache_atom_size > 0)
+    std::fill(static_fixed_gate_basic_cache_valid,
+              static_fixed_gate_basic_cache_valid + static_fixed_gate_cache_atom_size,
+              0);
+  if (static_fixed_gate_value_cache_valid != nullptr &&
+      static_fixed_gate_cache_atom_size > 0)
+    std::fill(static_fixed_gate_value_cache_valid,
+              static_fixed_gate_value_cache_valid + static_fixed_gate_cache_atom_size,
+              0);
+  if (static_fixed_gate_cache_tags != nullptr &&
+      static_fixed_gate_cache_atom_size > 0)
+    std::fill(static_fixed_gate_cache_tags,
+              static_fixed_gate_cache_tags + static_fixed_gate_cache_atom_size,
+              0);
+}
+
+void PairSUS2MTP::build_static_fixed_gate_basic_cache_for_center(int i,
+                                                                 int itype,
+                                                                 int jnum,
+                                                                 int *firstneigh_i,
+                                                                 const double *xi)
+{
+  ensure_static_fixed_gate_cache();
+  if (static_fixed_gate_basic_cache == nullptr ||
+      static_fixed_gate_basic_cache_valid == nullptr ||
+      i >= static_fixed_gate_cache_atom_size)
+    error->one(FLERR, "SUS2-SH static fixed gate cache atom index is out of range.");
+
+  std::fill(moment_tensor_vals,
+            moment_tensor_vals + alpha_moment_count, 0.0);
+  for (int jj = 0; jj < jnum; jj++) {
+    int j = firstneigh_i[jj];
+    j &= NEIGHMASK;
+    const int jtype = atom->type[j] - 1;
+    if (!is_static_fixed_type(jtype)) continue;
+    const double r[3] = {atom->x[j][0] - xi[0],
+                         atom->x[j][1] - xi[1],
+                         atom->x[j][2] - xi[2]};
+    const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    if (rsq <= 0.0 || rsq > max_cutoff_sq) continue;
+    const double dist = std::sqrt(rsq);
+    int table_index = -1;
+    int table_bin = 0;
+    double table_frac = 0.0;
+    get_radial_table_info(itype, jtype, dist, table_index, table_bin,
+                          table_frac);
+    calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial,
+                            0.0, false, -1, table_index, table_bin,
+                            table_frac);
+    accumulate_sh_basic_edge(-1, r, dist, 1.0, false, 0, false);
+  }
+
+  double *cache = static_fixed_gate_basic_cache +
+      static_cast<size_t>(i) * alpha_index_basic_count;
+  std::copy(moment_tensor_vals,
+            moment_tensor_vals + alpha_index_basic_count, cache);
+  static_fixed_gate_basic_cache_valid[i] = 1;
+  static_fixed_gate_cache_tags[i] = atom->tag != nullptr ? atom->tag[i] : 0;
+  if (static_fixed_gate_value_cache_valid != nullptr)
+    static_fixed_gate_value_cache_valid[i] = 0;
+}
+
+void PairSUS2MTP::build_static_fixed_basic_cache_for_center(int i,
+                                                            int itype,
+                                                            int jnum,
+                                                            int *firstneigh_i,
+                                                            const double *xi)
+{
+  ensure_static_fixed_basic_cache();
+  if (static_fixed_basic_cache == nullptr ||
+      static_fixed_basic_cache_valid == nullptr ||
+      i >= static_fixed_basic_cache_atom_size)
+    error->one(FLERR, "SUS2-SH static fixed basic cache atom index is out of range.");
+
+  std::fill(moment_tensor_vals,
+            moment_tensor_vals + alpha_moment_count, 0.0);
+  for (int jj = 0; jj < jnum; jj++) {
+    int j = firstneigh_i[jj];
+    j &= NEIGHMASK;
+    const int jtype = atom->type[j] - 1;
+    if (!is_static_fixed_type(jtype)) continue;
+    const double r[3] = {atom->x[j][0] - xi[0],
+                         atom->x[j][1] - xi[1],
+                         atom->x[j][2] - xi[2]};
+    const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    if (rsq <= 0.0 || rsq > max_cutoff_sq) continue;
+    const double dist = std::sqrt(rsq);
+    calc_pair_radial_values(itype, jtype, dist, false);
+    accumulate_sh_basic_edge(-1, r, dist, 1.0, false, 0, false);
+  }
+
+  double *cache = static_fixed_basic_cache +
+      static_cast<size_t>(i) * alpha_index_basic_count;
+  std::copy(moment_tensor_vals,
+            moment_tensor_vals + alpha_index_basic_count, cache);
+  static_fixed_basic_cache_valid[i] = 1;
+  static_fixed_basic_cache_tags[i] = atom->tag != nullptr ? atom->tag[i] : 0;
 }
 
 int PairSUS2MTP::two_layer_gate_additive_coeff_index(int type_outer, int mu) const
@@ -1029,6 +1265,26 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
   int *numneigh = list->numneigh;
   int **firstneigh = list->firstneigh;
 
+  int gate_product_limit = alpha_index_times_count;
+  if (two_layer_gate_weight_count > 0 &&
+      two_layer_gate_weight_count < alpha_scalar_count) {
+    std::vector<unsigned char> needed(alpha_moment_count, 0);
+    for (int q = 0; q < two_layer_gate_weight_count; q++) {
+      const int scalar_index = two_layer_gate_scalar_indices[q];
+      if (scalar_index < 0 || scalar_index >= alpha_scalar_count)
+        error->all(FLERR, "SUS2-SH two-layer gate scalar index is out of range.");
+      needed[alpha_moment_mapping[scalar_index]] = 1;
+    }
+    gate_product_limit = 0;
+    for (int k = alpha_index_times_count - 1; k >= 0; k--) {
+      const int out = alpha_times_out[k];
+      if (!needed[out]) continue;
+      needed[alpha_times_a0[k]] = 1;
+      needed[alpha_times_a1[k]] = 1;
+      if (gate_product_limit == 0) gate_product_limit = k + 1;
+    }
+  }
+
   ensure_two_layer_atom_buffers();
   const double default_gate = two_layer_gate_direct_scale ? two_layer_gate_bias : 1.0;
   const int nall = atom->nlocal + atom->nghost;
@@ -1048,6 +1304,7 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
   two_layer_gate_edge_deriv_x.clear();
   two_layer_gate_edge_deriv_y.clear();
   two_layer_gate_edge_deriv_z.clear();
+  two_layer_gate_edge_first_local_indices.clear();
   two_layer_gate_edge_offsets[0] = 0;
 
   for (int ii = 0; ii < inum; ii++) {
@@ -1059,16 +1316,34 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
     const double xi[3] = {x[i][0], x[i][1], x[i][2]};
     ensure_two_layer_edge_buffer(jnum);
     std::fill(moment_tensor_vals, moment_tensor_vals + alpha_moment_count, 0.0);
+    const bool use_static_fixed_gate_cache =
+        static_fixed_basic_cache_enabled && is_sh_model &&
+        !eflag && !vflag && is_static_fixed_type(itype);
+    if (use_static_fixed_gate_cache) {
+      ensure_static_fixed_gate_cache();
+      const bool gate_cache_tag_match =
+          static_fixed_cache_tag_matches(static_fixed_gate_cache_tags, i);
+      if (static_fixed_gate_basic_cache_valid[i] && gate_cache_tag_match) {
+        const double *cache = static_fixed_gate_basic_cache +
+            static_cast<size_t>(i) * alpha_index_basic_count;
+        std::copy(cache, cache + alpha_index_basic_count, moment_tensor_vals);
+      } else {
+        build_static_fixed_gate_basic_cache_for_center(i, itype, jnum,
+                                                       firstneigh[i], xi);
+      }
+    }
     const size_t active_begin = two_layer_gate_edge_neighbors.size();
-    int active_local_count = 0;
+    int first_layer_active_local_count = 0;
     for (int jj = 0; jj < jnum; jj++) {
       int j = firstneigh[i][jj] & NEIGHMASK;
       const int jtype = type[j] - 1;
       if (jtype >= species_count)
         error->one(FLERR, "Too few species count in the MTP potential!");
+      const bool static_first_layer_edge =
+          use_static_fixed_gate_cache && is_static_fixed_type(jtype);
       const double r[3] = {x[j][0] - xi[0], x[j][1] - xi[1], x[j][2] - xi[2]};
       const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
-      if (zbl_enabled && rsq < zbl_max_outer_sq)
+      if (!static_first_layer_edge && zbl_enabled && rsq < zbl_max_outer_sq)
         accumulate_zbl_pair(i, j, itype, jtype, r, rsq, eflag, vflag);
       if (rsq > max_cutoff_sq) continue;
       const double dist = std::sqrt(rsq);
@@ -1089,16 +1364,35 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       two_layer_gate_edge_deriv_x.push_back(0.0);
       two_layer_gate_edge_deriv_y.push_back(0.0);
       two_layer_gate_edge_deriv_z.push_back(0.0);
-      calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial,
-                              0.0, false, -1, table_index, table_bin,
-                              table_frac);
-      accumulate_sh_basic_edge(active_local_count, r, dist, 1.0, false, 0,
-                               false);
-      active_local_count++;
+      if (static_first_layer_edge) {
+        two_layer_gate_edge_first_local_indices.push_back(-1);
+      } else {
+        two_layer_gate_edge_first_local_indices.push_back(
+            first_layer_active_local_count);
+        calc_pair_radial_values(itype, jtype, dist, two_layer_gate_shared_radial,
+                                0.0, false, -1, table_index, table_bin,
+                                table_frac);
+        accumulate_sh_basic_edge(first_layer_active_local_count, r, dist, 1.0,
+                                 false, 0, false);
+        first_layer_active_local_count++;
+      }
     }
     const size_t active_end = two_layer_gate_edge_neighbors.size();
     two_layer_gate_edge_offsets[ii + 1] = active_end;
-    forward_sh_products();
+
+    if (use_static_fixed_gate_cache &&
+        first_layer_active_local_count == 0 &&
+        static_fixed_gate_value_cache_valid[i] &&
+        static_fixed_cache_tag_matches(static_fixed_gate_cache_tags, i)) {
+      two_layer_gate_values[i] = static_fixed_gate_value_cache[i];
+      continue;
+    }
+
+    for (int k = 0; k < gate_product_limit; k++) {
+      moment_tensor_vals[alpha_times_out[k]] +=
+          alpha_times_coeff[k] * moment_tensor_vals[alpha_times_a0[k]] *
+          moment_tensor_vals[alpha_times_a1[k]];
+    }
     double gate_delta = 0.0;
     for (int q = 0; q < two_layer_gate_weight_count; q++) {
       const int scalar_index = two_layer_gate_scalar_indices[q];
@@ -1109,6 +1403,12 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
     }
     two_layer_gate_values[i] =
         two_layer_gate_direct_scale ? (two_layer_gate_bias + gate_delta) : (1.0 + gate_delta);
+    if (use_static_fixed_gate_cache &&
+        first_layer_active_local_count == 0) {
+      static_fixed_gate_value_cache[i] = two_layer_gate_values[i];
+      static_fixed_gate_value_cache_valid[i] = 1;
+      continue;
+    }
 
     std::fill(nbh_energy_ders_wrt_moments,
               nbh_energy_ders_wrt_moments + alpha_moment_count, 0.0);
@@ -1117,11 +1417,21 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
       nbh_energy_ders_wrt_moments[alpha_moment_mapping[scalar_index]] +=
           two_layer_gate_weights[q];
     }
-    backprop_sh_products();
+    for (int k = gate_product_limit - 1; k >= 0; k--) {
+      const int a0 = alpha_times_a0[k];
+      const int a1 = alpha_times_a1[k];
+      const int out = alpha_times_out[k];
+      const double coeff = alpha_times_coeff[k];
+      const double adj = nbh_energy_ders_wrt_moments[out];
+      nbh_energy_ders_wrt_moments[a1] += adj * coeff * moment_tensor_vals[a0];
+      nbh_energy_ders_wrt_moments[a0] += adj * coeff * moment_tensor_vals[a1];
+    }
     for (size_t active_idx = active_begin; active_idx < active_end; active_idx++) {
+      const int first_local = two_layer_gate_edge_first_local_indices[active_idx];
+      if (first_local < 0) continue;
       double gx = 0.0, gy = 0.0, gz = 0.0;
-      const size_t active_local = active_idx - active_begin;
-      const size_t jac_offset = active_local * alpha_index_basic_count;
+      const size_t jac_offset =
+          static_cast<size_t>(first_local) * alpha_index_basic_count;
       const double *__restrict jac_x = moment_jacobian_x + jac_offset;
       const double *__restrict jac_y = moment_jacobian_y + jac_offset;
       const double *__restrict jac_z = moment_jacobian_z + jac_offset;
@@ -1175,7 +1485,8 @@ void PairSUS2MTP::compute_two_layer_gate_sh(int eflag, int vflag)
                                 true, j, table_index, table_bin, table_frac);
       }
       const int raw_offset = active_local * alpha_index_basic_count;
-      accumulate_sh_basic_edge(active_local, r, dist, 1.0, true, raw_offset, true);
+      accumulate_sh_basic_edge(active_local, r, dist, 1.0, true, raw_offset,
+                               true);
     }
     forward_sh_products();
 
@@ -1450,10 +1761,25 @@ void PairSUS2MTP::compute(int eflag, int vflag)
       memory->grow(env_rho_dr, jnum, "env_rho_dr");
       jac_size = jnum;
     }
-    std::fill(&moment_tensor_vals[0], &moment_tensor_vals[0] + alpha_moment_count,
-              0.0);    //Fill moments with 0
-    std::fill(&nbh_energy_ders_wrt_moments[0], &nbh_energy_ders_wrt_moments[0] + alpha_moment_count,
-              0.0);    //Fill moment derivatives with 0
+	    std::fill(&moment_tensor_vals[0], &moment_tensor_vals[0] + alpha_moment_count,
+	              0.0);    //Fill moments with 0
+	    std::fill(&nbh_energy_ders_wrt_moments[0], &nbh_energy_ders_wrt_moments[0] + alpha_moment_count,
+	              0.0);    //Fill moment derivatives with 0
+	    const bool use_static_fixed_basic_cache =
+	        static_fixed_basic_cache_enabled && is_sh_model && !env_gate_enabled &&
+	        !eflag && !vflag && is_static_fixed_type(itype);
+	    if (use_static_fixed_basic_cache) {
+	      ensure_static_fixed_basic_cache();
+	      if (static_fixed_basic_cache_valid[i] &&
+	          static_fixed_cache_tag_matches(static_fixed_basic_cache_tags, i)) {
+	        const double *cache = static_fixed_basic_cache +
+	            static_cast<size_t>(i) * alpha_index_basic_count;
+	        std::copy(cache, cache + alpha_index_basic_count, moment_tensor_vals);
+	      } else {
+	        build_static_fixed_basic_cache_for_center(i, itype, jnum,
+	                                                  firstneigh[i], xi);
+	      }
+	    }
 
     double env_screen_strength = 0.0;
     double env_rho_factor = 0.0;
@@ -1531,15 +1857,20 @@ void PairSUS2MTP::compute(int eflag, int vflag)
 
     // ------------ Begin Alpha Basic Calc ------------
     // Loop over all neighbours
+    int active_dynamic_edge_count = 0;
     for (int jj = 0; jj < jnum; jj++) {
       int j = firstneigh[i][jj];    //List of neighbours
       j &= NEIGHMASK;
-      const int jtype = type[j] - 1;    // Convert back to zero indexing
-      if (jtype >= species_count)
-        error->one(FLERR,
-                   "Too few species count in the MTP potential!");
+	      const int jtype = type[j] - 1;    // Convert back to zero indexing
+	      if (jtype >= species_count)
+	        error->one(FLERR,
+	                   "Too few species count in the MTP potential!");
+	      if (use_static_fixed_basic_cache && is_static_fixed_type(jtype)) {
+	        within_cutoff[jj] = false;
+	        continue;
+	      }
 
-      const double r[3] = {x[j][0] - xi[0], x[j][1] - xi[1], x[j][2] - xi[2]};
+	      const double r[3] = {x[j][0] - xi[0], x[j][1] - xi[1], x[j][2] - xi[2]};
       const double rsq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
       if (zbl_enabled && rsq < zbl_max_outer_sq)
         accumulate_zbl_pair(i, j, itype, jtype, r, rsq, eflag, vflag);
@@ -1549,6 +1880,7 @@ void PairSUS2MTP::compute(int eflag, int vflag)
         continue;
       }
       within_cutoff[jj] = true;
+      active_dynamic_edge_count++;
 
       const double dist = std::sqrt(rsq);
       const double inv_dist = 1.0 / dist;
@@ -1790,6 +2122,11 @@ void PairSUS2MTP::compute(int eflag, int vflag)
 	      }
 	    }
 
+    if (use_static_fixed_basic_cache && active_dynamic_edge_count == 0 &&
+        !eflag && !vflag) {
+      continue;
+    }
+
     // ------------ Contruct Other Alphas  ------------
     const int * __restrict times_a0 = alpha_times_a0;
     const int * __restrict times_a1 = alpha_times_a1;
@@ -1949,6 +2286,7 @@ void PairSUS2MTP::settings(int narg, char **arg)
 {
   requested_tabstep = 1.0e-4;
   tabstep_set_by_user = false;
+  static_fixed_types_arg.clear();
 
   if (narg < 1) error->all(FLERR, "Pair sus2mtp requires a potential file.");
   if ((narg - 1) % 2 != 0)
@@ -1964,14 +2302,19 @@ void PairSUS2MTP::settings(int narg, char **arg)
       tabstep_set_by_user = true;
       continue;
     }
+    if (keyword == "static_fixed_types") {
+      static_fixed_types_arg = arg[i + 1];
+      continue;
+    }
 
     error->all(FLERR,
-               "Pair sus2mtp only supports the optional keyword \"tabstep\".");
+               "Pair sus2mtp only supports optional keywords \"tabstep\" and \"static_fixed_types\".");
   }
 
   FILE *mtp_file = utils::open_potential(arg[0], lmp, nullptr);
   read_file(mtp_file, arg[0]);
   fclose(mtp_file);
+  configure_static_fixed_types();
 }
 
 /* ----------------------------------------------------------------------
