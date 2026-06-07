@@ -322,7 +322,7 @@ void add_real_sh(int l, int m, double coeff, double poly,
   ders[3 * idx + 2] = coeff * (dpz * inv_pow + poly * inv_pow_der * rvec[2]);
 }
 
-void eval_real_sh(const double *rvec, double r, int lmax, double *values, double *ders)
+void eval_real_sh(const double *rvec, double inv_r, int lmax, double *values, double *ders)
 {
   const double x = rvec[0];
   const double y = rvec[1];
@@ -330,7 +330,6 @@ void eval_real_sh(const double *rvec, double r, int lmax, double *values, double
   const double x2 = x * x;
   const double y2 = y * y;
   const double z2 = z * z;
-  const double inv_r = 1.0 / r;
   const double inv_r2 = inv_r * inv_r;
   const double inv_pow0 = 1.0;
   const double inv_pow1 = inv_r;
@@ -862,7 +861,7 @@ void PairSUS2MTP::build_static_fixed_gate_main_cache_for_center(int i,
 
     double sh_values[kMaxSHComponents];
     double sh_ders[3 * kMaxSHComponents];
-    eval_real_sh(r, dist, sh_l_max, sh_values, sh_ders);
+    eval_real_sh(r, 1.0 / dist, sh_l_max, sh_values, sh_ders);
     if (sh_basic_mu_grouped) {
       for (int mu = 0; mu < radial_func_count; mu++) {
         const int begin = sh_basic_mu_offsets[mu];
@@ -1440,7 +1439,7 @@ void PairSUS2MTP::accumulate_sh_basic_edge(int jj,
   const double inv_dist = 1.0 / dist;
   double sh_values[kMaxSHComponents];
   double sh_ders[3 * kMaxSHComponents];
-  eval_real_sh(r, dist, sh_l_max, sh_values, sh_ders);
+  eval_real_sh(r, inv_dist, sh_l_max, sh_values, sh_ders);
 
   if (sh_basic_mu_grouped) {
     for (int mu = 0; mu < radial_func_count; mu++) {
@@ -2333,7 +2332,7 @@ void PairSUS2MTP::compute(int eflag, int vflag)
       if (is_sh_model) {
         double sh_values[kMaxSHComponents];
         double sh_ders[3 * kMaxSHComponents];
-        eval_real_sh(r, dist, sh_l_max, sh_values, sh_ders);
+        eval_real_sh(r, inv_dist, sh_l_max, sh_values, sh_ders);
 
         if (env_gate_enabled) {
           for (int k = 0; k < alpha_index_basic_count; k++) {

@@ -697,3 +697,94 @@ integrated LAMMPS product/backprop loops. The extra row copy/load pattern was
 slightly slower for gate and did not help no-gate. Source and the default
 LAMMPS build were restored to the accepted `sh_eval_precompute` stage-best
 state after the test.
+
+## Rejected Experiment: Split Basic-Edge Accumulation Branches
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_branch_split_basic_edge_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_branch_split_basic_edge_ab_40c_20260608
+jobids:      3769527, 3769529
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.branch_split_basic_edge_20260608
+sha256 b9680b2a56c0925fd20de55c968b50c6473ac245b1fd2827a6ad9605501bab6c
+```
+
+Candidate idea: specialize the hot `accumulate_sh_basic_edge()` loops by call
+mode, moving the `jj >= 0` and `store_raw` branches outside the per-basic
+inner loop. This leaves the radial, SH, gate, force, and virial formulas
+unchanged and is generic for all `lk` models.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98970 s | 5.10005 s | 0.978x | 0.978x |
+| no-gate | 1.81710 s | 1.81610 s | 1.001x | 0.999x |
+
+Decision: rejected. Removing the inner branches did not improve the integrated
+gate path; the larger/specialized loop body was slower, likely from weaker
+instruction-cache or vectorization behavior. Source and the default LAMMPS
+build were restored to the accepted `sh_eval_precompute` stage-best state
+after the test.
+
+## Accepted Experiment: Reuse Inverse Distance in SH Evaluation
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_inv_dist_reuse_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_inv_dist_reuse_ab_40c_20260608
+speed_check: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_inv_dist_reuse_ab2_40c_20260608
+jobids:      3769530, 3769531, 3769532
+```
+
+Candidate/accepted binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.inv_dist_reuse_20260608
+sha256 dd0699d088ce9643f9bebf10d355c84d5706c2a0177f768835409e11fcd3f06e
+```
+
+Candidate idea: pass the caller's already computed `1.0 / dist` into
+`eval_real_sh()` so SH evaluation and the edge-Jacobian path reuse the same
+inverse distance instead of doing separate divisions for the same edge. This
+does not change radial interpolation, SH values, SH derivatives, gate formulas,
+force accumulation, or virial formulas.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, stage-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.99665 s | 4.97920 s | 1.004x | 1.004x |
+| no-gate | 1.81720 s | 1.81020 s | 1.004x | 1.005x |
+
+Same-node 40-rank A/B on `b03u26a`, candidate-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98860 s | 4.98615 s | 1.000x | 1.001x |
+| no-gate | 1.81655 s | 1.81070 s | 1.003x | 1.003x |
+
+Decision: accepted as a small, low-risk incremental improvement. The measured
+gain is below 1% but is positive in both orderings and preserves bitwise
+force/pressure/energy equality on the run0 check.
