@@ -869,3 +869,32 @@ Decision: accepted. The gain is small but directionally stable for the gate
 path in both ordering checks, and the no-gate pair-time difference is at the
 noise level. The change removes one gate-only edge vector and one edge-vector
 read without changing radial, SH, gate, force, or virial formulas.
+
+## Current Stage-Best vs Initial After Removing First-Local Vector
+
+Direct A/B directory:
+
+```text
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_current_no_first_local_vs_initial_ab_40c_20260608
+jobid: 3769538
+```
+
+Compared binaries:
+
+```text
+initial: c060e9103ae741b3334f44fb629b92f4e393766f406173982f8f3fe58fe599cf
+         /work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi.codexbak_20260607_before_static_fixed_final
+current: 46a2096aebdcb8d05030c3f7164227c402986334f942c558042d569888e9344a
+         /work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi
+```
+
+Same-node 40-rank direct A/B, two repeats each:
+
+| Case | Initial Pair avg | Current Pair avg | Pair speedup | Initial Loop avg | Current Loop avg | Loop speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| gate | 6.04470 s | 4.97235 s | 1.216x | 6.17710 s | 5.10171 s | 1.211x |
+| no-gate | 2.14580 s | 1.81255 s | 1.184x | 3.01106 s | 2.43475 s | 1.237x |
+
+Status: current gate is about `+21.6%` by Pair time and `+21.1%` by Loop
+time relative to the initial optimization baseline. Current no-gate is about
+`+18.4%` by Pair time and `+23.7%` by Loop time.
