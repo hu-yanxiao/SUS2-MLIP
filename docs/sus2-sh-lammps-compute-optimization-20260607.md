@@ -788,3 +788,32 @@ Same-node 40-rank A/B on `b03u26a`, candidate-first order:
 Decision: accepted as a small, low-risk incremental improvement. The measured
 gain is below 1% but is positive in both orderings and preserves bitwise
 force/pressure/energy equality on the run0 check.
+
+## Current Stage-Best vs Initial After Inverse-Distance Reuse
+
+Direct A/B directory:
+
+```text
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_current_inv_dist_vs_initial_ab_40c_20260608
+jobid: 3769533
+```
+
+Compared binaries:
+
+```text
+initial: c060e9103ae741b3334f44fb629b92f4e393766f406173982f8f3fe58fe599cf
+         /work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi.codexbak_20260607_before_static_fixed_final
+current: dd0699d088ce9643f9bebf10d355c84d5706c2a0177f768835409e11fcd3f06e
+         /work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi
+```
+
+Same-node 40-rank direct A/B, two repeats each:
+
+| Case | Initial Pair avg | Current Pair avg | Pair speedup | Initial Loop avg | Current Loop avg | Loop speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| gate | 6.05255 s | 4.99210 s | 1.212x | 6.19152 s | 5.12243 s | 1.209x |
+| no-gate | 2.14775 s | 1.81030 s | 1.186x | 3.01924 s | 2.43774 s | 1.239x |
+
+Status: the no-gate single-layer SH path is near the 20% pair-time target and
+above it by loop time; the gate path remains around 21% faster by pair/loop
+time, still below the requested 40% target.
