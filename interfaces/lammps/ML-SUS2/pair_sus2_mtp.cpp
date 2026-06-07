@@ -312,12 +312,10 @@ double sh_inv_power(int l, double r)
 
 void add_real_sh(int l, int m, double coeff, double poly,
                  double dpx, double dpy, double dpz,
-                 const double *rvec, double r, double *values, double *ders)
+                 const double *rvec, double inv_pow, double inv_pow_der,
+                 double *values, double *ders)
 {
   const int idx = sh_flat_index(l, m);
-  const double inv_r = 1.0 / r;
-  const double inv_pow = sh_inv_power(l, r);
-  const double inv_pow_der = (l == 0) ? 0.0 : -static_cast<double>(l) * inv_pow * inv_r * inv_r;
   values[idx] = coeff * poly * inv_pow;
   ders[3 * idx + 0] = coeff * (dpx * inv_pow + poly * inv_pow_der * rvec[0]);
   ders[3 * idx + 1] = coeff * (dpy * inv_pow + poly * inv_pow_der * rvec[1]);
@@ -326,49 +324,70 @@ void add_real_sh(int l, int m, double coeff, double poly,
 
 void eval_real_sh(const double *rvec, double r, int lmax, double *values, double *ders)
 {
-  const int count = (lmax + 1) * (lmax + 1);
-  for (int i = 0; i < count; ++i) {
-    values[i] = 0.0;
-    ders[3 * i + 0] = 0.0;
-    ders[3 * i + 1] = 0.0;
-    ders[3 * i + 2] = 0.0;
-  }
-
   const double x = rvec[0];
   const double y = rvec[1];
   const double z = rvec[2];
   const double x2 = x * x;
   const double y2 = y * y;
   const double z2 = z * z;
+  const double inv_r = 1.0 / r;
+  const double inv_r2 = inv_r * inv_r;
+  const double inv_pow0 = 1.0;
+  const double inv_pow1 = inv_r;
+  const double inv_pow2 = inv_r2;
+  const double inv_pow3 = inv_r2 * inv_r;
+  const double inv_pow4 = inv_r2 * inv_r2;
+  const double inv_der0 = 0.0;
+  const double inv_der1 = -1.0 * inv_pow1 * inv_r * inv_r;
+  const double inv_der2 = -2.0 * inv_pow2 * inv_r * inv_r;
+  const double inv_der3 = -3.0 * inv_pow3 * inv_r * inv_r;
+  const double inv_der4 = -4.0 * inv_pow4 * inv_r * inv_r;
 
-  add_real_sh(0, 0, kRealY00, 1.0, 0.0, 0.0, 0.0, rvec, r, values, ders);
+  add_real_sh(0, 0, kRealY00, 1.0, 0.0, 0.0, 0.0, rvec,
+              inv_pow0, inv_der0, values, ders);
   if (lmax == 0) return;
 
-  add_real_sh(1, -1, kRealY1, y, 0.0, 1.0, 0.0, rvec, r, values, ders);
-  add_real_sh(1, 0, kRealY1, z, 0.0, 0.0, 1.0, rvec, r, values, ders);
-  add_real_sh(1, 1, kRealY1, x, 1.0, 0.0, 0.0, rvec, r, values, ders);
+  add_real_sh(1, -1, kRealY1, y, 0.0, 1.0, 0.0, rvec,
+              inv_pow1, inv_der1, values, ders);
+  add_real_sh(1, 0, kRealY1, z, 0.0, 0.0, 1.0, rvec,
+              inv_pow1, inv_der1, values, ders);
+  add_real_sh(1, 1, kRealY1, x, 1.0, 0.0, 0.0, rvec,
+              inv_pow1, inv_der1, values, ders);
   if (lmax == 1) return;
 
-  add_real_sh(2, -2, kRealY2A, x * y, y, x, 0.0, rvec, r, values, ders);
-  add_real_sh(2, -1, kRealY2A, y * z, 0.0, z, y, rvec, r, values, ders);
+  add_real_sh(2, -2, kRealY2A, x * y, y, x, 0.0, rvec,
+              inv_pow2, inv_der2, values, ders);
+  add_real_sh(2, -1, kRealY2A, y * z, 0.0, z, y, rvec,
+              inv_pow2, inv_der2, values, ders);
   const double p20 = 2.0 * z2 - x2 - y2;
-  add_real_sh(2, 0, kRealY20, p20, -2.0 * x, -2.0 * y, 4.0 * z, rvec, r, values, ders);
-  add_real_sh(2, 1, kRealY2A, x * z, z, 0.0, x, rvec, r, values, ders);
-  add_real_sh(2, 2, kRealY22, x2 - y2, 2.0 * x, -2.0 * y, 0.0, rvec, r, values, ders);
+  add_real_sh(2, 0, kRealY20, p20, -2.0 * x, -2.0 * y, 4.0 * z, rvec,
+              inv_pow2, inv_der2, values, ders);
+  add_real_sh(2, 1, kRealY2A, x * z, z, 0.0, x, rvec,
+              inv_pow2, inv_der2, values, ders);
+  add_real_sh(2, 2, kRealY22, x2 - y2, 2.0 * x, -2.0 * y, 0.0, rvec,
+              inv_pow2, inv_der2, values, ders);
   if (lmax == 2) return;
 
   const double a31 = 4.0 * z2 - x2 - y2;
   const double p3m3 = 3.0 * x2 * y - y * y2;
-  add_real_sh(3, -3, kRealY33, p3m3, 6.0 * x * y, 3.0 * x2 - 3.0 * y2, 0.0, rvec, r, values, ders);
-  add_real_sh(3, -2, kRealY32, x * y * z, y * z, x * z, x * y, rvec, r, values, ders);
-  add_real_sh(3, -1, kRealY31, y * a31, -2.0 * x * y, a31 - 2.0 * y2, 8.0 * y * z, rvec, r, values, ders);
+  add_real_sh(3, -3, kRealY33, p3m3, 6.0 * x * y, 3.0 * x2 - 3.0 * y2, 0.0,
+              rvec, inv_pow3, inv_der3, values, ders);
+  add_real_sh(3, -2, kRealY32, x * y * z, y * z, x * z, x * y,
+              rvec, inv_pow3, inv_der3, values, ders);
+  add_real_sh(3, -1, kRealY31, y * a31, -2.0 * x * y, a31 - 2.0 * y2,
+              8.0 * y * z, rvec, inv_pow3, inv_der3, values, ders);
   const double p30 = z * (2.0 * z2 - 3.0 * x2 - 3.0 * y2);
-  add_real_sh(3, 0, kRealY30, p30, -6.0 * x * z, -6.0 * y * z, 6.0 * z2 - 3.0 * x2 - 3.0 * y2, rvec, r, values, ders);
-  add_real_sh(3, 1, kRealY31, x * a31, a31 - 2.0 * x2, -2.0 * x * y, 8.0 * x * z, rvec, r, values, ders);
+  add_real_sh(3, 0, kRealY30, p30, -6.0 * x * z, -6.0 * y * z,
+              6.0 * z2 - 3.0 * x2 - 3.0 * y2, rvec,
+              inv_pow3, inv_der3, values, ders);
+  add_real_sh(3, 1, kRealY31, x * a31, a31 - 2.0 * x2, -2.0 * x * y,
+              8.0 * x * z, rvec, inv_pow3, inv_der3, values, ders);
   const double p32 = z * (x2 - y2);
-  add_real_sh(3, 2, kRealY3p2, p32, 2.0 * x * z, -2.0 * y * z, x2 - y2, rvec, r, values, ders);
+  add_real_sh(3, 2, kRealY3p2, p32, 2.0 * x * z, -2.0 * y * z, x2 - y2,
+              rvec, inv_pow3, inv_der3, values, ders);
   const double p33 = x * x2 - 3.0 * x * y2;
-  add_real_sh(3, 3, kRealY33, p33, 3.0 * x2 - 3.0 * y2, -6.0 * x * y, 0.0, rvec, r, values, ders);
+  add_real_sh(3, 3, kRealY33, p33, 3.0 * x2 - 3.0 * y2, -6.0 * x * y, 0.0,
+              rvec, inv_pow3, inv_der3, values, ders);
   if (lmax == 3) return;
 
   const double rho2 = x2 + y2;
@@ -376,17 +395,36 @@ void eval_real_sh(const double *rvec, double r, int lmax, double *values, double
   const double a41 = 4.0 * z2 - 3.0 * rho2;
   const double p44base = x2 - y2;
   const double p4m4 = x * y * p44base;
-  add_real_sh(4, -4, kRealY44m, p4m4, y * (3.0 * x2 - y2), x * (x2 - 3.0 * y2), 0.0, rvec, r, values, ders);
-  add_real_sh(4, -3, kRealY43, z * p3m3, 6.0 * x * y * z, z * (3.0 * x2 - 3.0 * y2), p3m3, rvec, r, values, ders);
-  add_real_sh(4, -2, kRealY42m, x * y * a42, y * a42 - 2.0 * x2 * y, x * a42 - 2.0 * x * y2, 12.0 * x * y * z, rvec, r, values, ders);
-  add_real_sh(4, -1, kRealY41, y * z * a41, -6.0 * x * y * z, z * (a41 - 6.0 * y2), y * (12.0 * z2 - 3.0 * rho2), rvec, r, values, ders);
+  add_real_sh(4, -4, kRealY44m, p4m4, y * (3.0 * x2 - y2),
+              x * (x2 - 3.0 * y2), 0.0, rvec, inv_pow4, inv_der4,
+              values, ders);
+  add_real_sh(4, -3, kRealY43, z * p3m3, 6.0 * x * y * z,
+              z * (3.0 * x2 - 3.0 * y2), p3m3, rvec,
+              inv_pow4, inv_der4, values, ders);
+  add_real_sh(4, -2, kRealY42m, x * y * a42,
+              y * a42 - 2.0 * x2 * y, x * a42 - 2.0 * x * y2,
+              12.0 * x * y * z, rvec, inv_pow4, inv_der4, values, ders);
+  add_real_sh(4, -1, kRealY41, y * z * a41, -6.0 * x * y * z,
+              z * (a41 - 6.0 * y2), y * (12.0 * z2 - 3.0 * rho2),
+              rvec, inv_pow4, inv_der4, values, ders);
   const double p40 = 8.0 * z2 * z2 - 24.0 * z2 * rho2 + 3.0 * rho2 * rho2;
-  add_real_sh(4, 0, kRealY40, p40, 12.0 * x * (rho2 - 4.0 * z2), 12.0 * y * (rho2 - 4.0 * z2), 16.0 * z * (2.0 * z2 - 3.0 * rho2), rvec, r, values, ders);
-  add_real_sh(4, 1, kRealY41, x * z * a41, z * (a41 - 6.0 * x2), -6.0 * x * y * z, x * (12.0 * z2 - 3.0 * rho2), rvec, r, values, ders);
-  add_real_sh(4, 2, kRealY42, p44base * a42, 2.0 * x * a42 - 2.0 * x * p44base, -2.0 * y * a42 - 2.0 * y * p44base, 12.0 * z * p44base, rvec, r, values, ders);
-  add_real_sh(4, 3, kRealY43, z * p33, z * (3.0 * x2 - 3.0 * y2), -6.0 * x * y * z, p33, rvec, r, values, ders);
+  add_real_sh(4, 0, kRealY40, p40, 12.0 * x * (rho2 - 4.0 * z2),
+              12.0 * y * (rho2 - 4.0 * z2),
+              16.0 * z * (2.0 * z2 - 3.0 * rho2), rvec,
+              inv_pow4, inv_der4, values, ders);
+  add_real_sh(4, 1, kRealY41, x * z * a41, z * (a41 - 6.0 * x2),
+              -6.0 * x * y * z, x * (12.0 * z2 - 3.0 * rho2),
+              rvec, inv_pow4, inv_der4, values, ders);
+  add_real_sh(4, 2, kRealY42, p44base * a42,
+              2.0 * x * a42 - 2.0 * x * p44base,
+              -2.0 * y * a42 - 2.0 * y * p44base,
+              12.0 * z * p44base, rvec, inv_pow4, inv_der4, values, ders);
+  add_real_sh(4, 3, kRealY43, z * p33, z * (3.0 * x2 - 3.0 * y2),
+              -6.0 * x * y * z, p33, rvec, inv_pow4, inv_der4, values, ders);
   const double p44 = x2 * x2 - 6.0 * x2 * y2 + y2 * y2;
-  add_real_sh(4, 4, kRealY44, p44, 4.0 * x * x2 - 12.0 * x * y2, -12.0 * x2 * y + 4.0 * y * y2, 0.0, rvec, r, values, ders);
+  add_real_sh(4, 4, kRealY44, p44, 4.0 * x * x2 - 12.0 * x * y2,
+              -12.0 * x2 * y + 4.0 * y * y2, 0.0, rvec,
+              inv_pow4, inv_der4, values, ders);
 }
 
 }    // namespace

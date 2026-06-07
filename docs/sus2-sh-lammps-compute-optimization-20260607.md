@@ -3,9 +3,9 @@
 This file records accepted stage-best LAMMPS compute-side optimization states.
 Temporary rejected candidates and raw scripts remain in `.codex_tmp/`.
 
-## Stage-Best Version: Static-Fixed Gate Path + Mu-Grouped SH Edge
+## Stage-Best Version: Static-Fixed Gate Path + Mu-Grouped SH Edge + SH Eval Precompute
 
-Status: accepted stage-best as of 2026-06-07 23:28 CST.
+Status: accepted stage-best as of 2026-06-08 02:07 CST.
 
 Git commit:
 
@@ -18,14 +18,14 @@ Installed CPU LAMMPS binary:
 
 ```text
 /work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi
-sha256 77c3d914a4a03acdd98c703836e4ab46116546fb8d125464c59070d2839af13c
+sha256 3c345dee54696fc7bcd13bd2499c311d9850c80b5b6c2a84ab44d142e82cbf7a
 ```
 
 Previous installed binary backup:
 
 ```text
-/work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi.bak_20260607_before_sh_mu_group
-sha256 938d1362dd1e08089e3d083f000408ac42ff7edd8855425dd021a35ea14b68cb
+/work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi.bak_20260608_before_sh_eval_precompute
+sha256 77c3d914a4a03acdd98c703836e4ab46116546fb8d125464c59070d2839af13c
 ```
 
 Accepted changes in this stage:
@@ -36,6 +36,8 @@ Accepted changes in this stage:
 - Gate main-layer fixed-fixed separable cache for additive tanh gate models.
 - Gate fixed-fixed dynamic edge-list pruning.
 - Generic SH basic edge loop grouped by contiguous `mu=(l,k)` blocks, with fallback to the original loop if the model layout is not `mu` grouped.
+- SH evaluation precomputes inverse powers and removes redundant zero-initialize
+  stores for the supported `lmax <= 4` real-SH path.
 
 Mathematical validation:
 
@@ -81,6 +83,8 @@ Rejected or not-yet-accepted directions already checked:
 - SH edge value/derivative cache between gate layers: exact, much slower due to extra memory traffic.
 - fixed endpoint force-write skip: exact in run0, slower.
 - conservative fixed-only gate center skip: exact in run0, slower.
+- gate dynamic edge buffer AoS (`TwoLayerGateEdge`) conversion: exact in run0,
+  slower in same-node 40-rank A/B; keep the current split-vector layout.
 
 This stage-best version is the rollback baseline for later experiments.
 
@@ -133,11 +137,328 @@ model while enabling the accepted fixed/static caches.
 
 | Case | Initial Pair avg | Stage-best Pair avg | Repeat Pair avg | Pair speedup | Loop speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| gate | 6.0571 s | 5.0889 s | 5.0913 s | 1.190x | 1.187x |
-| no-gate | 2.1471 s | 1.8530 s | 1.8545 s | 1.158x | 1.198x |
+| gate, before SH eval precompute | 6.0571 s | 5.0889 s | 5.0913 s | 1.190x | 1.187x |
+| no-gate, before SH eval precompute | 2.1471 s | 1.8530 s | 1.8545 s | 1.158x | 1.198x |
+| gate, current installed | 6.0571 s | 4.9891 s | 4.9891 s | 1.214x | 1.210x |
+| no-gate, current installed | 2.1471 s | 1.8135 s | n/a | 1.184x | 1.226x |
 
 Direct conclusion:
 
-- gate Pair compute is about `+19.0%` faster than the initial optimization baseline.
-- no-gate Pair compute is about `+15.8%` faster than the initial optimization baseline.
-- no-gate loop time is about `+19.8%` faster because communication/modify balance also improved in this run.
+- gate Pair compute is now about `+21.4%` faster than the initial optimization baseline.
+- no-gate Pair compute is now about `+18.4%` faster than the initial optimization baseline.
+- no-gate loop time is now about `+22.6%` faster because communication/modify balance also improved in this run.
+
+## Rejected Experiment: Gate Dynamic Edge AoS Buffer
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_edge_struct_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_edge_struct_ab_40c_20260608
+jobids:      3769477, 3769479
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.edge_struct_20260608
+sha256 c3724db8e1a57c9acb516113e70e79b674c28420c0908f500074f3a3a961f512
+```
+
+The candidate replaced the separate gate dynamic edge arrays with one
+`TwoLayerGateEdge` vector. It preserved the math exactly in run0:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a` showed no benefit:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Speedup |
+| --- | ---: | ---: | ---: |
+| gate | 5.08595 s | 5.09425 s | 0.998x |
+| no-gate | 1.85350 s | 1.85770 s | 0.998x |
+
+Decision: rejected. The extra AoS cache-line footprint outweighed any reduction
+in vector bookkeeping. The local and remote source trees were restored to the
+stage-best split-vector layout after the test.
+
+## Build Note: Pair Factory Object Must Match the Pair Header
+
+During candidate relinking on 2026-06-08, binaries that replaced only
+`pair_sus2_mtp.o` crashed at pair-style initialization with:
+
+```text
+malloc(): invalid size (unsorted)
+```
+
+Root cause: LAMMPS compiles pair-style factory construction through
+`style_pair.h` inside `force.o`. If `PairSUS2MTP` layout changes in
+`pair_sus2_mtp.h`, a stale `force.o` can contain a stale
+`sizeof(PairSUS2MTP)`, causing constructor memory corruption even when
+`pair_sus2_mtp.o` itself is new.
+
+Rule for future candidate builds: after any header change, and whenever
+relinking a temporary candidate, rebuild and replace both objects in the static
+archive:
+
+```text
+Obj_ml_sus2_avx2_noipo/force.o
+Obj_ml_sus2_avx2_noipo/pair_sus2_mtp.o
+```
+
+This was verified by rebuilding both objects and relinking
+`lmp_ml_sus2_avx2_noipo.stagebest_relink_force_20260608`, which initialized
+`gate.mtp` correctly. Earlier `pair_sus2_mtp.o`-only relinks crashed.
+
+## Rejected Experiment: Scalar Additive Gate Coefficients
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_scalar_additive_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_scalar_additive_ab_40c_20260608
+jobids:      3769498, 3769499
+```
+
+Candidate idea: detect the special case where
+`a_{Z,\mu}` is constant over all radial functions for a neighbor species `Z`.
+Then the current stabilized gate multiplier
+
+```text
+s_{j,\mu} = v_Z * (1 + alpha * tanh(a_{Z,\mu} * f_j))
+```
+
+can be evaluated as a single scalar per atom/species instead of one value per
+`mu`. The derivative factor can also use the same scalar. This would be exact
+only when the loaded model really has species-scalar additive coefficients.
+
+Correctness on run0 was exact for the tested model:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+The current `gate.mtp` does not satisfy the scalar-coefficient condition:
+
+```text
+160 coefficients = 8 species * 20 radial functions
+all species: all_equal = false
+example species 1: min 0.1293, max 1.6915, maxdiff 1.2239
+```
+
+Therefore the fast path did not trigger and only added a branch. Same-node
+40-rank A/B on `b03u26a` showed a slight slowdown:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Speedup |
+| --- | ---: | ---: | ---: |
+| gate | 5.08540 s | 5.10275 s | 0.998x |
+| no-gate | 1.85360 s | 1.85710 s | 0.998x |
+
+Decision: rejected. It may be useful only for a deliberately constrained model
+where `a_{Z,\mu}` is species-scalar. It is not useful for the current general
+`a_{Z,\mu}` gate model.
+
+## Rejected Experiment: Gate Static First-Layer Early Skip
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_static_skip_early_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_static_skip_early_ab_40c_20260608
+jobids:      3769501, 3769502
+```
+
+Candidate idea: in the first-layer gate edge loop, when
+`use_static_fixed_gate_cache` is active and both center and neighbor are fixed
+types, skip before computing `rsq`, `sqrt`, and radial data. This preserves the
+existing static fixed-fixed first-layer cache math and only changes loop order.
+
+Correctness on run0 was exact for the tested model:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a` showed no measurable benefit:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Speedup |
+| --- | ---: | ---: | ---: |
+| gate | 5.07980 s | 5.08390 s | 0.999x |
+| no-gate | 1.85480 s | 1.86020 s | 0.997x |
+
+Decision: rejected. The fixed-fixed early-skip work was already mostly removed
+by the accepted static caches; moving the branch earlier did not materially
+change the hot path.
+
+## Fine Profile: Current Stage-Best Gate Hotspots
+
+Run directory:
+
+```text
+jobid 3769503
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_fine_profile2_40c_20260608
+```
+
+Node and CPU:
+
+```text
+b03u26a
+Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+40 MPI ranks, OMP_NUM_THREADS=1
+```
+
+Profile binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_fine_profile_20260608
+sha256 4c406408abe1ec3493e3819a8114ae5baf20c7cad3aa42b2af34ad80703a1d13
+```
+
+This was a temporary instrumented build on top of the stage-best source. The
+installed production binary was not replaced.
+
+LAMMPS reported:
+
+```text
+Loop time of 2.15494 on 40 procs for 200 steps with 2223 atoms
+Pair max time 2.136 s
+```
+
+The cumulative fine-profile line at 200 calls was:
+
+```text
+total=2.13748997
+init=0.00463830307
+first_edge=0.50445367
+gate_forward=0.207353935
+gate_deriv=0.290371869
+forward_comm=0.425284304
+main_edge=0.539707121
+main_products=0.486487035
+main_force=0.0619456246
+reverse_comm=0.543721773
+gate_chain=0.00300102681
+first_edges=26457262
+zbl_pairs=170414
+main_edge_evals=26457262
+main_static_skips=0
+```
+
+Percentages below divide each per-category MPI-rank maximum by the Pair total
+maximum. They should be treated as hotspot ranking rather than an exactly
+additive decomposition because each category is reduced independently with
+`MPI_MAX`.
+
+| Block | Time | Approx share |
+| --- | ---: | ---: |
+| main edge radial/basic accumulation | 0.5397 s | 25.3% |
+| first-layer edge radial/basic accumulation | 0.5045 s | 23.6% |
+| main products/backprop/weighted derivatives | 0.4865 s | 22.8% |
+| reverse comm for gate adjoints | 0.5437 s | 25.4% |
+| forward comm for gate values | 0.4253 s | 19.9% |
+| first-layer gate derivative backprop/dot | 0.2904 s | 13.6% |
+| first-layer gate forward scalar products | 0.2074 s | 9.7% |
+| main force dot/scatter | 0.0619 s | 2.9% |
+| final gate-chain force scatter | 0.0030 s | 0.1% |
+
+Optimization implication:
+
+- The remaining compute-side target is edge radial/basic accumulation plus
+  product/backprop work.
+- Final force scatter and the last gate-chain force loop are too small to be
+  worth optimizing further.
+- Communication is visible in the two-layer gate path, but the current
+  optimization focus remains compute-only.
+
+## Rejected Experiment: Non-Contiguous Mu-Indexed Basic Traversal
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_mu_indexed_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_mu_indexed_ab_40c_20260608
+jobids:      3769506, 3769507
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.mu_indexed_20260608
+sha256 7413bd8462737c2062407062c927030307c39e67e42a3fb61006d89f0b6e3039
+```
+
+Candidate idea: the current model's `alpha_index_basic` order is not
+contiguously sorted by `mu`, so the existing `sh_basic_mu_grouped` fast path is
+not active. The candidate built a `mu -> original basic index list` and used it
+in SH basic accumulation and the static fixed gate main cache. Each original
+basic index `k` was still written in its original slot, so the math and all
+product definitions were unchanged.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a` showed a clear slowdown:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Speedup |
+| --- | ---: | ---: | ---: |
+| gate | 5.08355 s | 5.47645 s | 0.928x |
+| no-gate | 1.85420 s | 1.92510 s | 0.963x |
+
+Decision: rejected. The indirect `mu -> k` traversal reduced some repeated
+radial metadata reads, but it changed `moment_tensor_vals` and jacobian writes
+from contiguous `k` order to a strided/original-index order. The cache and
+vectorization loss outweighed the savings.
+
+## Accepted Experiment: SH Eval Inverse-Power Precompute
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_sh_eval_precompute_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_sh_eval_precompute_ab_40c_20260608
+jobids:      3769510, 3769511
+```
+
+Candidate and installed binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.sh_eval_precompute_20260608
+/work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi
+sha256 3c345dee54696fc7bcd13bd2499c311d9850c80b5b6c2a84ab44d142e82cbf7a
+```
+
+Change:
+
+- `eval_real_sh()` now computes `1/r`, `r^-2`, `r^-3`, and `r^-4` once per edge
+  and passes the appropriate inverse power and derivative factor to each
+  `Y_lm` component.
+- The old implementation zero-initialized all requested SH values and
+  derivatives before immediately overwriting every supported `lmax <= 4`
+  component. The accepted version removes that redundant zero-fill.
+- Formulas for each real-SH component and derivative are unchanged.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 5.07635 s | 4.98910 s | 1.017x | 1.017x |
+| no-gate | 1.85270 s | 1.81350 s | 1.022x | 1.027x |
+
+Decision: accepted and installed. This is a generic optimization for the
+currently supported LAMMPS real-SH path (`lmax <= 4`) and benefits both gate and
+single-layer SH modes.
