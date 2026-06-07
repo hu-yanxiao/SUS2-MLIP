@@ -986,3 +986,58 @@ Decision: rejected. The removed zero writes did not translate into a speedup.
 The extra `push_back` work moved into the gate derivative loop, and the gate
 path was slightly slower by both Pair and Loop time. The no-gate difference
 was noise-level, as expected.
+
+## Rejected Experiment: Defer First-Layer Gate Jacobian Storage
+
+Run directories:
+
+```text
+isolation correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_recompute_gate_deriv_localreduction_run0_8c_20260608
+correctness:           /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_defer_gate_jac_localreduction_run0_8c_20260608
+speed:                 /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_defer_gate_jac_vs_stagebest_ab_40c_20260608
+jobids:                3769553, 3769554, 3769555
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.defer_gate_jac_localreduction_20260608
+sha256 c141ca177b956f5baa942c42de8b8a5329af68f74d98bb0300d4280fbd3be125
+```
+
+Candidate idea: in the two-layer gate first pass, accumulate only first-layer
+SH basic moment values and avoid storing the per-active-edge
+`3 * alpha_index_basic_count` Jacobian slab. After gate-product backprop,
+recompute the same first-layer radial values and real-SH derivatives for each
+active edge, then dot them with `nbh_energy_ders_wrt_moments` to fill
+`two_layer_gate_edge_deriv_{x,y,z}`. This is mathematically equivalent when
+the recompute path uses the same radial table index/bin/fraction and the same
+`two_layer_gate_shared_radial` setting.
+
+Debug note: the first recompute implementation failed gate force consistency
+with nonzero `x/z` force errors because it used an OpenMP SIMD reduction on
+reference parameters. Changing the helper to accumulate into local
+`local_gx/local_gy/local_gz` variables and then assign the references fixed the
+issue. The isolated recompute-only run was exact after that change.
+
+Correctness for the full candidate was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, stagebest-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.97640 s | 5.27755 s | 0.943x | 0.943x |
+| no-gate | 1.81400 s | 1.81495 s | 0.999x | 1.000x |
+
+Decision: rejected. Removing the first-layer Jacobian slab reduces memory
+traffic and memory footprint, but the later recomputation repeats radial table
+interpolation and SH derivative evaluation for every active gate edge. For the
+current model, that extra compute is more expensive than the saved memory
+traffic, so gate Pair time slows by about 5.7%. The no-gate path is unaffected
+within noise. Local and server source, plus the active default LAMMPS build,
+were restored to the accepted first-local-vector stage-best after the test.
