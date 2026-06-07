@@ -571,3 +571,86 @@ Decision: rejected. The lazy per-atom tanh cache was already cheap enough; the
 extra precompute pass and cache-only dispatch did not reduce Pair time. Source
 and the default LAMMPS build were restored to the accepted `sh_eval_precompute`
 stage-best state after the test.
+
+## Rejected Experiment: Gate Edge SH Geometry Cache
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_sh_cache_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_sh_cache_ab_40c_20260608
+jobids:      3769521, 3769522
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_sh_cache_20260608
+sha256 7b7485f1021ead99f074995e941939e3c9d315a582ad58acb62d1dbc2a786e09
+```
+
+Candidate idea: in the two-layer gate path, cache the first-layer active
+edge's real-SH values and derivatives and reuse them in the main layer. This is
+mathematically valid because both layers see the same edge geometry, while the
+main layer still computes its own radial/table values and gate multipliers.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.99360 s | 5.30630 s | 0.941x | 0.942x |
+| no-gate | 1.81560 s | 1.81490 s | 1.000x | 1.001x |
+
+Decision: rejected. Avoiding the second `eval_real_sh()` did not compensate
+for writing and rereading `(1 + 3) * (lmax + 1)^2` doubles per active edge. The
+extra memory traffic made gate Pair time significantly worse. Source and the
+default LAMMPS build were restored to the accepted `sh_eval_precompute`
+stage-best state after the test.
+
+## Rejected Experiment: Radial Table Delta Precompute
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_radial_delta_table_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_radial_delta_table_ab_40c_20260608
+jobids:      3769523, 3769524
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.radial_delta_table_20260608
+sha256 49faabdfee8107a567454176f64a96ae3ab52f65f47441ea6f20ec4f7e887122
+```
+
+Candidate idea: for `_lmp` radial tables, precompute per-grid deltas
+`table[n+1] - table[n]` for main radial and two-layer gate radial tables, so
+hot-path interpolation uses `row + ddr * delta` instead of computing the
+subtraction per edge. This is mathematically identical for the table path.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98605 s | 5.21920 s | 0.955x | 0.955x |
+| no-gate | 1.81650 s | 1.88450 s | 0.964x | 0.964x |
+
+Decision: rejected. Moving the subtraction out of the hot loop was not worth
+the extra table memory and cache pressure. Both gate and no-gate slowed down.
+Source and the default LAMMPS build were restored to the accepted
+`sh_eval_precompute` stage-best state after the test.
