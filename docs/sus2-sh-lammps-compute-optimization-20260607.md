@@ -1140,3 +1140,47 @@ objective requires improving gate and no-gate without trading one against the
 other, neither version was installed. Local and server source, plus the active
 default LAMMPS build, were restored to the accepted first-local-vector
 stage-best after the test.
+
+## Rejected Experiment: Gate Dynamic Edge Type Removal
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_edge_no_type_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_edge_no_type_vs_stagebest_ab_40c_20260608
+jobids:      3769603, 3769604
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.edge_no_type_20260608
+sha256 6d7a209739957261b63a3e7b270aac115dbc97f12b932ec16288dda70ac99875
+```
+
+Candidate idea: remove the cached `two_layer_gate_edge_types` vector from the
+two-layer gate dynamic edge list and recover `jtype` as `type[j] - 1` from the
+cached neighbor id when needed. This is mathematically equivalent because edge
+order, neighbor ids, radial table indices, and all coordinate caches are
+unchanged.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, stagebest-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.97715 s | 5.03975 s | 0.988x | 0.988x |
+| no-gate | 1.81305 s | 1.81585 s | 0.998x | 0.996x |
+
+Decision: rejected. The removed integer vector saves one push/read stream, but
+the replacement `type[j]` lookup is less favorable on the gate hot path for
+this benchmark. The candidate regressed gate Pair time by about 1.2% and gave
+no useful no-gate gain. Local and server source, plus the active default LAMMPS
+build, were restored to the accepted first-local-vector stage-best after the
+test.
