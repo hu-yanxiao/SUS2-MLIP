@@ -1041,3 +1041,50 @@ current model, that extra compute is more expensive than the saved memory
 traffic, so gate Pair time slows by about 5.7%. The no-gate path is unaffected
 within noise. Local and server source, plus the active default LAMMPS build,
 were restored to the accepted first-local-vector stage-best after the test.
+
+## Rejected Experiment: Basic-Input Pair-Reduced Backprop
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_basic_pair_backprop_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_basic_pair_backprop_vs_stagebest_ab_40c_20260608
+jobids:      3769557, 3769558
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.basic_pair_backprop_20260608
+sha256 d99b5f0fb1ef7548f74c6613930a36f7a24353e185855e546295c6e4e77134c5
+```
+
+Candidate idea: keep the forward product loop in its original order, but in
+the full reverse product pass group repeated product rows with the same
+ordered `(a0, a1)` when both inputs are basic moments. For each safe group,
+compute `sum_r dE/dM[out_r] * coeff_r` once and update the two basic moment
+derivatives once. The two-layer gate prefix backprop was deliberately left on
+the original loop because otherwise the single cached plan would alternate
+between prefix and full limits for every center.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, stagebest-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.97790 s | 5.42525 s | 0.918x | 0.919x |
+| no-gate | 1.81375 s | 2.07350 s | 0.875x | 0.874x |
+
+Decision: rejected. The grouping is mathematically safe for basic-input rows,
+but the generic execution plan adds an extra entry stream, group-row indirection,
+and branch structure to a very tight reverse loop. Those costs are larger than
+the saved basic-derivative updates, especially for no-gate where full product
+backprop is directly on the hot path. Local and server source, plus the active
+default LAMMPS build, were restored to the accepted first-local-vector
+stage-best after the test.
