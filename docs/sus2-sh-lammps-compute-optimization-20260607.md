@@ -1088,3 +1088,55 @@ the saved basic-derivative updates, especially for no-gate where full product
 backprop is directly on the hot path. Local and server source, plus the active
 default LAMMPS build, were restored to the accepted first-local-vector
 stage-best after the test.
+
+## Rejected Experiment: Moment-Derivative Seed Copy
+
+Run directories:
+
+```text
+full correctness:        /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_deriv_seed_run0_8c_20260608
+full speed:              /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_deriv_seed_vs_stagebest_ab_40c_20260608
+no-gate-only correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_deriv_seed_nogate_run0_8c_20260608
+no-gate-only speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_deriv_seed_nogate_vs_stagebest_ab_40c_20260608
+jobids:                  3769559, 3769560, 3769561, 3769562
+```
+
+Candidate binaries:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.deriv_seed_20260608
+sha256 321d8dd84ffe3633ee88831f6ca36fc660bc9c5f245f66c79a607583e77ad09d
+
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.deriv_seed_nogate_20260608
+sha256 1bb2885521dd6ae1f4030cc98b715eb8c45b61317da46202f8e1b96cb5bfc802
+```
+
+Candidate idea: prebuild dense derivative seed arrays and replace
+`fill(0) + scalar-index scatter` with one contiguous copy. The full candidate
+used one seed for ordinary linear derivatives and one seed for two-layer gate
+weights. The second candidate kept only the ordinary linear seed in the
+single-layer/no-gate path and restored the original gate derivative
+initialization.
+
+Correctness on run0 was exact for both candidates:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u26a`, stagebest-first order:
+
+| Candidate | Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | --- | ---: | ---: | ---: | ---: |
+| full seed | gate | 4.97385 s | 5.00340 s | 0.994x | 0.994x |
+| full seed | no-gate | 1.81355 s | 1.79010 s | 1.013x | 1.009x |
+| no-gate-only seed | gate | 4.97410 s | 5.05400 s | 0.984x | 0.985x |
+| no-gate-only seed | no-gate | 1.81525 s | 1.79220 s | 1.013x | 1.013x |
+
+Decision: rejected. The seed copy is useful for no-gate, but both versions
+caused a measurable gate regression in the same A/B setup. Since the active
+objective requires improving gate and no-gate without trading one against the
+other, neither version was installed. Local and server source, plus the active
+default LAMMPS build, were restored to the accepted first-local-vector
+stage-best after the test.
