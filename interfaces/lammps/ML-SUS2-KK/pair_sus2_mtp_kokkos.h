@@ -47,6 +47,7 @@ namespace LAMMPS_NS {
 	  struct TagPairSUS2MTPComputeGateFirstLayer {};
 	  struct TagPairSUS2MTPComputeGateFirstFinalize {};
 	  struct TagPairSUS2MTPComputeGateFirstDerivs {};
+	  struct TagPairSUS2MTPComputeGateFirstDerivsTeam {};
 	  struct TagPairSUS2MTPComputeGateMainAlphaBasic {};
 	  struct TagPairSUS2MTPComputeAlphaBasic {};
 	  struct TagPairSUS2MTPComputeAlphaTimes {};
@@ -55,8 +56,11 @@ namespace LAMMPS_NS {
 	  struct TagPairSUS2MTPComputeEnvRhoChain {};
 	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeGateMainForce {};
 	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeGateChainForce {};
+	  template <int NEIGHFLAG> struct TagPairSUS2MTPComputeGateMainForceTeam {};
+	  template <int NEIGHFLAG> struct TagPairSUS2MTPComputeGateChainForceTeam {};
 	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeZBLForce {};
 	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeForce {};
+	  template <int NEIGHFLAG> struct TagPairSUS2MTPComputeForceTeam {};
 
   enum { EnabledNeighFlags = HALF | HALFTHREAD };
   enum { COUL_FLAG = 0 };
@@ -160,6 +164,12 @@ namespace LAMMPS_NS {
 		  void operator()(TagPairSUS2MTPComputeGateFirstDerivs, const int &ii) const;
 
 		  KOKKOS_INLINE_FUNCTION
+		  void
+		  operator()(TagPairSUS2MTPComputeGateFirstDerivsTeam,
+		             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateFirstDerivsTeam>::member_type
+		                 &team) const;
+
+		  KOKKOS_INLINE_FUNCTION
 	  void
 	  operator()(TagPairSUS2MTPComputeGateMainAlphaBasic,
 	             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainAlphaBasic>::member_type
@@ -193,6 +203,12 @@ namespace LAMMPS_NS {
 	  operator()(TagPairSUS2MTPComputeGateMainForce<NEIGHFLAG, EVFLAG>, const int &ii,
 	             EV_FLOAT &) const;
 
+	  template <int NEIGHFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeGateMainForceTeam<NEIGHFLAG>,
+	             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainForceTeam<NEIGHFLAG>>::member_type
+	                 &team) const;
+
 	  template <int NEIGHFLAG, int EVFLAG>
 	  KOKKOS_INLINE_FUNCTION void
 	  operator()(TagPairSUS2MTPComputeGateChainForce<NEIGHFLAG, EVFLAG>,
@@ -202,6 +218,12 @@ namespace LAMMPS_NS {
 	  KOKKOS_INLINE_FUNCTION void
 	  operator()(TagPairSUS2MTPComputeGateChainForce<NEIGHFLAG, EVFLAG>, const int &ii,
 	             EV_FLOAT &) const;
+
+	  template <int NEIGHFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeGateChainForceTeam<NEIGHFLAG>,
+	             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateChainForceTeam<NEIGHFLAG>>::member_type
+	                 &team) const;
 
 	  template <int NEIGHFLAG, int EVFLAG>
 	  KOKKOS_INLINE_FUNCTION void
@@ -218,10 +240,16 @@ namespace LAMMPS_NS {
 	  operator()(TagPairSUS2MTPComputeForce<NEIGHFLAG, EVFLAG>,
              const int &ii) const;    // This eventually calls the below version
 
-  template <int NEIGHFLAG, int EVFLAG>
-  KOKKOS_INLINE_FUNCTION void
-  operator()(TagPairSUS2MTPComputeForce<NEIGHFLAG, EVFLAG>, const int &ii,
-             EV_FLOAT &) const;    // With global energy reduction as needed
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeForce<NEIGHFLAG, EVFLAG>, const int &ii,
+	             EV_FLOAT &) const;    // With global energy reduction as needed
+
+	  template <int NEIGHFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeForceTeam<NEIGHFLAG>,
+	             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeForceTeam<NEIGHFLAG>>::member_type
+	                 &team) const;
 
  protected:
   int input_chunk_size, chunk_size,
@@ -337,9 +365,9 @@ namespace LAMMPS_NS {
   typedef Kokkos::View<F_FLOAT **[3], typename DeviceType::scratch_memory_space,
                        Kokkos::MemoryTraits<Kokkos::Unmanaged>>
       shared_double_3d;    // Used for coord powers
-  typedef Kokkos::View<F_FLOAT **, typename DeviceType::scratch_memory_space,
-                       Kokkos::MemoryTraits<Kokkos::Unmanaged>>
-      shared_double_2d;    // Used for radial basis vals, ders, and dist powers
+	  typedef Kokkos::View<F_FLOAT **, typename DeviceType::scratch_memory_space,
+	                       Kokkos::MemoryTraits<Kokkos::Unmanaged>>
+	      shared_double_2d;    // Used for radial basis vals, ders, and dist powers
 
   // SUS2-MLIP parameters
 	  int L_max;             // Maximum moment tensor level

@@ -71,6 +71,12 @@ bool gate_profile_enabled_kk()
   return value != nullptr && value[0] != '\0' && value[0] != '0';
 }
 
+bool sh_profile_enabled_kk()
+{
+  const char *value = std::getenv("SUS2_SH_KK_PROFILE");
+  return value != nullptr && value[0] != '\0' && value[0] != '0';
+}
+
 KOKKOS_INLINE_FUNCTION int sh_flat_index_kk(int l, int m)
 {
   return l * l + (m + l);
@@ -92,7 +98,80 @@ KOKKOS_INLINE_FUNCTION void add_real_sh_kk(int l, int m, KK_FLOAT coeff,
   ders[3 * idx + 1] =
       coeff * (dpy * inv_pow + poly * inv_pow_der * rvec[1]);
   ders[3 * idx + 2] =
-      coeff * (dpz * inv_pow + poly * inv_pow_der * rvec[2]);
+	      coeff * (dpz * inv_pow + poly * inv_pow_der * rvec[2]);
+}
+
+KOKKOS_INLINE_FUNCTION void add_real_sh_value_kk(int l, int m, KK_FLOAT coeff,
+                                                 KK_FLOAT poly, KK_FLOAT inv_pow,
+                                                 KK_FLOAT *values)
+{
+  values[sh_flat_index_kk(l, m)] = coeff * poly * inv_pow;
+}
+
+KOKKOS_INLINE_FUNCTION void eval_real_sh_values_kk(const KK_FLOAT *rvec,
+                                                   KK_FLOAT inv_r, int lmax,
+                                                   KK_FLOAT *values)
+{
+  const KK_FLOAT x = rvec[0];
+  const KK_FLOAT y = rvec[1];
+  const KK_FLOAT z = rvec[2];
+  const KK_FLOAT x2 = x * x;
+  const KK_FLOAT y2 = y * y;
+  const KK_FLOAT z2 = z * z;
+  const KK_FLOAT inv_r2 = inv_r * inv_r;
+  const KK_FLOAT inv_pow0 = 1.0;
+  const KK_FLOAT inv_pow1 = inv_r;
+  const KK_FLOAT inv_pow2 = inv_r2;
+  const KK_FLOAT inv_pow3 = inv_r2 * inv_r;
+  const KK_FLOAT inv_pow4 = inv_r2 * inv_r2;
+
+  add_real_sh_value_kk(0, 0, kRealY00KK, 1.0, inv_pow0, values);
+  if (lmax == 0) return;
+
+  add_real_sh_value_kk(1, -1, kRealY1KK, y, inv_pow1, values);
+  add_real_sh_value_kk(1, 0, kRealY1KK, z, inv_pow1, values);
+  add_real_sh_value_kk(1, 1, kRealY1KK, x, inv_pow1, values);
+  if (lmax == 1) return;
+
+  add_real_sh_value_kk(2, -2, kRealY2AKK, x * y, inv_pow2, values);
+  add_real_sh_value_kk(2, -1, kRealY2AKK, y * z, inv_pow2, values);
+  const KK_FLOAT p20 = 2.0 * z2 - x2 - y2;
+  add_real_sh_value_kk(2, 0, kRealY20KK, p20, inv_pow2, values);
+  add_real_sh_value_kk(2, 1, kRealY2AKK, x * z, inv_pow2, values);
+  add_real_sh_value_kk(2, 2, kRealY22KK, x2 - y2, inv_pow2, values);
+  if (lmax == 2) return;
+
+  const KK_FLOAT a31 = 4.0 * z2 - x2 - y2;
+  const KK_FLOAT p3m3 = 3.0 * x2 * y - y * y2;
+  add_real_sh_value_kk(3, -3, kRealY33KK, p3m3, inv_pow3, values);
+  add_real_sh_value_kk(3, -2, kRealY32KK, x * y * z, inv_pow3, values);
+  add_real_sh_value_kk(3, -1, kRealY31KK, y * a31, inv_pow3, values);
+  const KK_FLOAT p30 = z * (2.0 * z2 - 3.0 * x2 - 3.0 * y2);
+  add_real_sh_value_kk(3, 0, kRealY30KK, p30, inv_pow3, values);
+  add_real_sh_value_kk(3, 1, kRealY31KK, x * a31, inv_pow3, values);
+  const KK_FLOAT p32 = z * (x2 - y2);
+  add_real_sh_value_kk(3, 2, kRealY3p2KK, p32, inv_pow3, values);
+  const KK_FLOAT p33 = x * x2 - 3.0 * x * y2;
+  add_real_sh_value_kk(3, 3, kRealY33KK, p33, inv_pow3, values);
+  if (lmax == 3) return;
+
+  const KK_FLOAT rho2 = x2 + y2;
+  const KK_FLOAT a42 = 6.0 * z2 - rho2;
+  const KK_FLOAT a41 = 4.0 * z2 - 3.0 * rho2;
+  const KK_FLOAT p44base = x2 - y2;
+  const KK_FLOAT p4m4 = x * y * p44base;
+  add_real_sh_value_kk(4, -4, kRealY44mKK, p4m4, inv_pow4, values);
+  add_real_sh_value_kk(4, -3, kRealY43KK, z * p3m3, inv_pow4, values);
+  add_real_sh_value_kk(4, -2, kRealY42mKK, x * y * a42, inv_pow4, values);
+  add_real_sh_value_kk(4, -1, kRealY41KK, y * z * a41, inv_pow4, values);
+  const KK_FLOAT p40 =
+      8.0 * z2 * z2 - 24.0 * z2 * rho2 + 3.0 * rho2 * rho2;
+  add_real_sh_value_kk(4, 0, kRealY40KK, p40, inv_pow4, values);
+  add_real_sh_value_kk(4, 1, kRealY41KK, x * z * a41, inv_pow4, values);
+  add_real_sh_value_kk(4, 2, kRealY42KK, p44base * a42, inv_pow4, values);
+  add_real_sh_value_kk(4, 3, kRealY43KK, z * p33, inv_pow4, values);
+  const KK_FLOAT p44 = x2 * x2 - 6.0 * x2 * y2 + y2 * y2;
+  add_real_sh_value_kk(4, 4, kRealY44KK, p44, inv_pow4, values);
 }
 
 KOKKOS_INLINE_FUNCTION void eval_real_sh_kk(const KK_FLOAT *rvec,
@@ -1410,7 +1489,6 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
   int alpha_basic_team_size = team_size_default;
   if (!host_flag) alpha_basic_team_size = 16;
   int alpha_basic_vector_length = vector_length_default;
-  if (!host_flag) alpha_basic_vector_length = is_sh_model ? 1 : 4;
   const bool trace_first_site =
       is_sh_model && trace_first_site_enabled_kk() && comm->me == 0;
   auto trace_kokkos_moments = [&](const char *stage) {
@@ -1441,8 +1519,12 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
     }
     utils::logmesg(lmp, "{}\n", oss.str());
   };
-  const bool gate_profile =
-      two_layer_gate_enabled && gate_profile_enabled_kk() && comm->me == 0;
+	  const bool kk_profile =
+	      is_sh_model && comm->me == 0 &&
+	      ((two_layer_gate_enabled && gate_profile_enabled_kk()) ||
+	       (!two_layer_gate_enabled && sh_profile_enabled_kk()));
+	  const bool gate_profile = kk_profile && two_layer_gate_enabled;
+	  const bool sh_profile = kk_profile && !two_layer_gate_enabled;
   auto profile_now = []() {
     return std::chrono::duration<double>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -1450,13 +1532,13 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
   };
   double profile_t0 = 0.0;
   auto profile_begin = [&]() {
-    if (gate_profile) {
+	    if (kk_profile) {
       Kokkos::fence();
       profile_t0 = profile_now();
     }
   };
   auto profile_end = [&](double &slot) {
-    if (gate_profile) {
+	    if (kk_profile) {
       Kokkos::fence();
       slot += profile_now() - profile_t0;
     }
@@ -1478,7 +1560,7 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
   double prof_zbl = 0.0;
   int prof_first_chunks = 0;
   int prof_main_chunks = 0;
-  const double prof_total_start = gate_profile ? profile_now() : 0.0;
+	  const double prof_total_start = kk_profile ? profile_now() : 0.0;
 
   // Resize the arrays to the chunksize if needed. Do not initialize values, we do so in the loop.
   if ((int) d_moment_tensor_vals.extent(0) < chunk_size) {
@@ -1571,8 +1653,12 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 			      }
 
 			      {
-			        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeGateFirstDerivs>
-			            policy_gate_first_derivs(0, chunk_size);
+			        int deriv_team_size = team_size_default;
+			        const int deriv_vector_length = 1;
+			        check_team_size_for<TagPairSUS2MTPComputeGateFirstDerivsTeam>(
+			            chunk_size, deriv_team_size, deriv_vector_length);
+			        Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateFirstDerivsTeam>
+			            policy_gate_first_derivs(chunk_size, deriv_team_size, deriv_vector_length);
 			        profile_begin();
 			        Kokkos::parallel_for("ComputeGateFirstDerivs", policy_gate_first_derivs, *this);
 			        profile_end(prof_first_derivs);
@@ -1674,13 +1760,21 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	        ev += ev_tmp;
 	      } else {
 	        if (neighflag == HALF) {
-	          typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeGateMainForce<HALF, 0>>
-	              policy_force(0, chunk_size);
-	          Kokkos::parallel_for(policy_force, *this);
+		          int force_team_size = team_size_default;
+		          const int force_vector_length = 1;
+	          check_team_size_for<TagPairSUS2MTPComputeGateMainForceTeam<HALF>>(
+	              chunk_size, force_team_size, force_vector_length);
+	          Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainForceTeam<HALF>>
+	              policy_force(chunk_size, force_team_size, force_vector_length);
+	          Kokkos::parallel_for("ComputeGateMainForceTeam", policy_force, *this);
 	        } else if (neighflag == HALFTHREAD) {
-	          typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeGateMainForce<HALFTHREAD, 0>>
-	              policy_force(0, chunk_size);
-	          Kokkos::parallel_for(policy_force, *this);
+		          int force_team_size = team_size_default;
+		          const int force_vector_length = 1;
+	          check_team_size_for<TagPairSUS2MTPComputeGateMainForceTeam<HALFTHREAD>>(
+	              chunk_size, force_team_size, force_vector_length);
+	          Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainForceTeam<HALFTHREAD>>
+	              policy_force(chunk_size, force_team_size, force_vector_length);
+	          Kokkos::parallel_for("ComputeGateMainForceTeam", policy_force, *this);
 	        }
 		      }
 		      profile_end(prof_main_force);
@@ -1707,13 +1801,21 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	      ev += ev_tmp;
 	    } else {
 	      if (neighflag == HALF) {
-	        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeGateChainForce<HALF, 0>>
-	            policy_chain(0, inum);
-	        Kokkos::parallel_for(policy_chain, *this);
+	        int chain_team_size = team_size_default;
+	        const int chain_vector_length = 1;
+	        check_team_size_for<TagPairSUS2MTPComputeGateChainForceTeam<HALF>>(
+	            inum, chain_team_size, chain_vector_length);
+	        Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateChainForceTeam<HALF>>
+	            policy_chain(inum, chain_team_size, chain_vector_length);
+	        Kokkos::parallel_for("ComputeGateChainForceTeam", policy_chain, *this);
 	      } else if (neighflag == HALFTHREAD) {
-	        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeGateChainForce<HALFTHREAD, 0>>
-	            policy_chain(0, inum);
-	        Kokkos::parallel_for(policy_chain, *this);
+	        int chain_team_size = team_size_default;
+	        const int chain_vector_length = 1;
+	        check_team_size_for<TagPairSUS2MTPComputeGateChainForceTeam<HALFTHREAD>>(
+	            inum, chain_team_size, chain_vector_length);
+	        Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateChainForceTeam<HALFTHREAD>>
+	            policy_chain(inum, chain_team_size, chain_vector_length);
+	        Kokkos::parallel_for("ComputeGateChainForceTeam", policy_chain, *this);
 	      }
 		    }
 		    profile_end(prof_chain_force);
@@ -1722,15 +1824,17 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	    while (chunk_offset < inum) {    // batching to prevent OOM on device
 	      EV_FLOAT ev_tmp;
 	      if (chunk_size > inum - chunk_offset) chunk_size = inum - chunk_offset;
-	      // ========== Init working views as 0  ==========
-	      {
-	        // These working buffers are dense and zero-filled every chunk, so let Kokkos map the
-	        // reset to the backend's bulk memset/deep-copy path instead of launching a custom kernel.
-	        Kokkos::deep_copy(d_moment_tensor_vals, moment_buffer_value_type(0));
-	        Kokkos::deep_copy(d_nbh_energy_ders_wrt_moments, nbh_der_buffer_value_type(0));
-	        if (env_gate_enabled)
-	          Kokkos::deep_copy(d_env_gate_activation_basic_vals, moment_buffer_value_type(0));
-	      }
+		      // ========== Init working views as 0  ==========
+		      profile_begin();
+		      {
+		        // These working buffers are dense and zero-filled every chunk, so let Kokkos map the
+		        // reset to the backend's bulk memset/deep-copy path instead of launching a custom kernel.
+		        Kokkos::deep_copy(d_moment_tensor_vals, moment_buffer_value_type(0));
+		        Kokkos::deep_copy(d_nbh_energy_ders_wrt_moments, nbh_der_buffer_value_type(0));
+		        if (env_gate_enabled)
+		          Kokkos::deep_copy(d_env_gate_activation_basic_vals, moment_buffer_value_type(0));
+		      }
+		      profile_end(prof_main_clear);
 
 	      if (env_gate_enabled) {
 	        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeEnvGate> policy_env_gate(
@@ -1750,35 +1854,42 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	        int coord_scratch_count = 3 * max_alpha_index_basic;      // s_coord_powers (3 dimensions)
 	        int scratch_size = scratch_size_helper<F_FLOAT>(
 	            team_size * (radial_scratch_count + dist_scratch_count + coord_scratch_count));
-	        Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeAlphaBasic> policy_basic_alpha(team_count,
-	                                                                                       team_size,
-	                                                                                       vector_length);
-	        policy_basic_alpha = policy_basic_alpha.set_scratch_size(0, Kokkos::PerTeam(scratch_size));
-	        Kokkos::parallel_for("ComputeAlphaBasic", policy_basic_alpha, *this);
-	      }
-	      trace_kokkos_moments("after_basic");
+		        Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeAlphaBasic> policy_basic_alpha(team_count,
+		                                                                                       team_size,
+		                                                                                       vector_length);
+		        policy_basic_alpha = policy_basic_alpha.set_scratch_size(0, Kokkos::PerTeam(scratch_size));
+		        profile_begin();
+		        Kokkos::parallel_for("ComputeAlphaBasic", policy_basic_alpha, *this);
+		        profile_end(prof_main_basic);
+		      }
+		      trace_kokkos_moments("after_basic");
 
 	      // ========== Calculate the non-elementary alphas  ==========
 	      {
-	        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeAlphaTimes> policy_times(
-	            0, chunk_size);
-	        Kokkos::parallel_for("ComputeAlphaTimes", policy_times, *this);
-	      }
+		        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeAlphaTimes> policy_times(
+		            0, chunk_size);
+		        profile_begin();
+		        Kokkos::parallel_for("ComputeAlphaTimes", policy_times, *this);
+		        profile_end(prof_products);
+		      }
 	      trace_kokkos_moments("after_products");
 	      // ========== Calc the nbh ders wrt moments ==========
 	      {
-	        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeNbhDers> policy_nbh_calc(
-	            0, chunk_size);
-	        Kokkos::parallel_for("ComputeNbhDers", policy_nbh_calc, *this);
-	      }
+		        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeNbhDers> policy_nbh_calc(
+		            0, chunk_size);
+		        profile_begin();
+		        Kokkos::parallel_for("ComputeNbhDers", policy_nbh_calc, *this);
+		        profile_end(prof_nbh_der);
+		      }
 	      if (env_gate_enabled) {
 	        typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeEnvRhoChain>
 	            policy_env_rho_chain(0, chunk_size);
 	        Kokkos::parallel_for("ComputeEnvRhoChain", policy_env_rho_chain, *this);
 	      }
-	      // ========== Compute force (and dot product with alphas to get energy if needed) ==========
-	      {
-	        if (evflag) {
+		      // ========== Compute force (and dot product with alphas to get energy if needed) ==========
+		      profile_begin();
+		      {
+		        if (evflag) {
 	          if (neighflag == HALF) {
 	            typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeForce<HALF, 1>> policy_force(
 	                0, chunk_size);
@@ -1789,19 +1900,29 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	            Kokkos::parallel_reduce(policy_force, *this, ev_tmp);
 	          }
 	          ev += ev_tmp;
-	        } else {
-	          if (neighflag == HALF) {
-	            typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeForce<HALF, 0>> policy_force(
-	                0, chunk_size);
-	            Kokkos::parallel_for(policy_force, *this);
-	          } else if (neighflag == HALFTHREAD) {
-	            typename Kokkos::RangePolicy<DeviceType, TagPairSUS2MTPComputeForce<HALFTHREAD, 0>>
-	                policy_force(0, chunk_size);
-	            Kokkos::parallel_for(policy_force, *this);
-	          }
-	        }
-	      }
-	      chunk_offset += chunk_size;    // Manage halt condition
+		        } else {
+		          if (neighflag == HALF) {
+		            int force_team_size = team_size_default;
+		            const int force_vector_length = 1;
+		            check_team_size_for<TagPairSUS2MTPComputeForceTeam<HALF>>(
+		                chunk_size, force_team_size, force_vector_length);
+		            Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeForceTeam<HALF>>
+		                policy_force(chunk_size, force_team_size, force_vector_length);
+		            Kokkos::parallel_for("ComputeForceTeam", policy_force, *this);
+		          } else if (neighflag == HALFTHREAD) {
+		            int force_team_size = team_size_default;
+		            const int force_vector_length = 1;
+		            check_team_size_for<TagPairSUS2MTPComputeForceTeam<HALFTHREAD>>(
+		                chunk_size, force_team_size, force_vector_length);
+		            Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeForceTeam<HALFTHREAD>>
+		                policy_force(chunk_size, force_team_size, force_vector_length);
+		            Kokkos::parallel_for("ComputeForceTeam", policy_force, *this);
+		          }
+		        }
+		      }
+		      profile_end(prof_main_force);
+		      prof_main_chunks++;
+		      chunk_offset += chunk_size;    // Manage halt condition
 	    }    // end batching while loop
 	  }
 
@@ -1833,9 +1954,9 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 		  }
 		  profile_end(prof_zbl);
 
-		  if (gate_profile) {
-		    const double prof_total = profile_now() - prof_total_start;
-		    utils::logmesg(
+			  if (gate_profile) {
+			    const double prof_total = profile_now() - prof_total_start;
+			    utils::logmesg(
 		        lmp,
 		        "SUS2_SH_GATE_KK_PROFILE step={} inum={} max_neighs={} "
 		        "first_chunks={} main_chunks={} setup={:.9g} first_clear={:.9g} "
@@ -1849,9 +1970,20 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 		        prof_first_derivs, prof_forward_comm, prof_mu_cache, prof_main_clear, prof_main_basic, prof_products,
 		        prof_nbh_der, prof_main_force, prof_reverse_comm, prof_chain_force,
 		        prof_zbl, prof_total);
-		  }
+			  }
+			  if (sh_profile) {
+			    const double prof_total = profile_now() - prof_total_start;
+			    utils::logmesg(
+			        lmp,
+			        "SUS2_SH_KK_PROFILE step={} inum={} main_chunks={} "
+			        "main_clear={:.9g} main_basic={:.9g} products={:.9g} "
+			        "nbh_der={:.9g} main_force={:.9g} zbl={:.9g} total={:.9g}\n",
+			        update->ntimestep, inum, prof_main_chunks, prof_main_clear,
+			        prof_main_basic, prof_products, prof_nbh_der, prof_main_force,
+			        prof_zbl, prof_total);
+			  }
 
-		  // ========== End Main Computation ==========
+			  // ========== End Main Computation ==========
 
   if (need_dup) Kokkos::Experimental::contribute(f, dup_f);
 
@@ -2002,26 +2134,51 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    const int j = d_neighbors(i, jj) & NEIGHMASK;
 	    const int jtype = type[j] - 1;
 	    const F_FLOAT r[3] = {x(j, 0) - xi[0], x(j, 1) - xi[1], x(j, 2) - xi[2]};
-	    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
-	    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
-		    const F_FLOAT dist = Kokkos::sqrt(rsq);
-
-			    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
-			      eval_gate_radial_value_basic_mu_group(itype, jtype, dist, mu_group,
-			                                            s_radial_vals(thread, mu_group));
+		    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
+		    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
+			    const F_FLOAT dist = Kokkos::sqrt(rsq);
+			    int table_index = -1;
+			    int r_list = 0;
+			    int r_next = 0;
+			    F_FLOAT ddr = 0.0;
+			    if (do_list && d_two_layer_gate_radial_list.extent(0) > 0) {
+			      r_list = (int) Kokkos::floor(dist * inv_dr);
+			      const int last_interval = list_grid_size - 2;
+			      if (r_list < 0) r_list = 0;
+			      if (r_list > last_interval) r_list = last_interval;
+			      r_next = r_list + 1;
+			      const int shift = itype * species_count + jtype;
+			      table_index = d_pair_to_table_index(shift);
+			      if (table_index >= 0) {
+			        ddr = dist * inv_dr - r_list;
+			        if (ddr < 0.0) ddr = 0.0;
+			        if (ddr > 1.0) ddr = 1.0;
+			      }
 			    }
-			    if (is_sh_model) {
-			      F_FLOAT sh_values[kMaxSHComponentsKK];
-			      F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
-		      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
-		                      sh_values, sh_ders);
-		      for (int k = 0; k < alpha_index_basic_count; k++) {
-		        const int mu_group = d_alpha_basic_mu_group(k);
-		        const int sh_idx = d_alpha_basic_sh_index(k);
-		        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
-		                           s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
-		      }
-		    } else {
+
+				    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+				      if (table_index >= 0) {
+				        const F_FLOAT v1 =
+				            d_two_layer_gate_radial_list(table_index, r_list, mu_group);
+				        const F_FLOAT v2 =
+				            d_two_layer_gate_radial_list(table_index, r_next, mu_group);
+				        s_radial_vals(thread, mu_group) = v1 + ddr * (v2 - v1);
+				      } else {
+				        s_radial_vals(thread, mu_group) = static_cast<F_FLOAT>(0.0);
+				      }
+				    }
+				    if (is_sh_model) {
+				      F_FLOAT sh_values[kMaxSHComponentsKK];
+			      eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
+			                             sh_l_max, sh_values);
+			      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
+			                           [&](const int k) {
+			        const int mu_group = d_alpha_basic_mu_group(k);
+			        const int sh_idx = d_alpha_basic_sh_index(k);
+			        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
+			                           s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
+			      });
+			    } else {
 		      s_dist_powers(thread, 0) = 1.0;
 		      s_coord_powers(thread, 0, 0) = 1.0;
 		      s_coord_powers(thread, 0, 1) = 1.0;
@@ -2107,8 +2264,155 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    const int jtype = type[j] - 1;
 	    const F_FLOAT r[3] = {x(j, 0) - xi[0], x(j, 1) - xi[1], x(j, 2) - xi[2]};
 	    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
-	    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) continue;
+		    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) continue;
+		    const F_FLOAT dist = Kokkos::sqrt(rsq);
+		    int table_index = -1;
+		    int r_list = 0;
+		    int r_next = 0;
+		    F_FLOAT ddr = 0.0;
+		    if (do_list && d_two_layer_gate_radial_list.extent(0) > 0) {
+		      r_list = (int) Kokkos::floor(dist * inv_dr);
+		      const int last_interval = list_grid_size - 2;
+		      if (r_list < 0) r_list = 0;
+		      if (r_list > last_interval) r_list = last_interval;
+		      r_next = r_list + 1;
+		      const int shift = itype * species_count + jtype;
+		      table_index = d_pair_to_table_index(shift);
+		      if (table_index >= 0) {
+		        ddr = dist * inv_dr - r_list;
+		        if (ddr < 0.0) ddr = 0.0;
+		        if (ddr > 1.0) ddr = 1.0;
+		      }
+		    }
+
+		    F_FLOAT gx = 0.0;
+	    F_FLOAT gy = 0.0;
+	    F_FLOAT gz = 0.0;
+	    F_FLOAT sh_values[kMaxSHComponentsKK];
+	    F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
+	    if (is_sh_model)
+	      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
+	                      sh_values, sh_ders);
+		    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+		      F_FLOAT val = 0.0;
+		      F_FLOAT der = 0.0;
+		      if (table_index >= 0) {
+		        const F_FLOAT v1 =
+		            d_two_layer_gate_radial_list(table_index, r_list, mu_group);
+		        const F_FLOAT v2 =
+		            d_two_layer_gate_radial_list(table_index, r_next, mu_group);
+		        const F_FLOAT d1 =
+		            d_two_layer_gate_radial_der_list(table_index, r_list, mu_group);
+		        const F_FLOAT d2 =
+		            d_two_layer_gate_radial_der_list(table_index, r_next, mu_group);
+		        val = v1 + ddr * (v2 - v1);
+		        der = d1 + ddr * (d2 - d1);
+		      }
+		      if (is_sh_model) {
+		        F_FLOAT dot_y = 0.0;
+		        F_FLOAT dot_d0 = 0.0;
+		        F_FLOAT dot_d1 = 0.0;
+		        F_FLOAT dot_d2 = 0.0;
+		        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+		             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+		          const int k = d_basic_grouped_indices(grouped_idx);
+		          const F_FLOAT pref = d_nbh_energy_ders_wrt_moments(ii, k);
+		          if (pref == static_cast<F_FLOAT>(0.0)) continue;
+		          const int sh_idx = d_alpha_basic_sh_index(k);
+		          dot_y += pref * sh_values[sh_idx];
+		          dot_d0 += pref * sh_ders[3 * sh_idx + 0];
+		          dot_d1 += pref * sh_ders[3 * sh_idx + 1];
+		          dot_d2 += pref * sh_ders[3 * sh_idx + 2];
+		        }
+		        const F_FLOAT radial_der_pref = der * (static_cast<F_FLOAT>(1.0) / dist);
+		        gx += radial_der_pref * r[0] * dot_y + val * dot_d0;
+		        gy += radial_der_pref * r[1] * dot_y + val * dot_d1;
+		        gz += radial_der_pref * r[2] * dot_y + val * dot_d2;
+		      } else {
+		        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+		             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+		          const int k = d_basic_grouped_indices(grouped_idx);
+		          const F_FLOAT pref = d_nbh_energy_ders_wrt_moments(ii, k);
+		          if (pref == static_cast<F_FLOAT>(0.0)) continue;
+		          F_FLOAT jac0 = 0.0;
+		          F_FLOAT jac1 = 0.0;
+		          F_FLOAT jac2 = 0.0;
+		          const int a0 = d_alpha_index_basic(k, 1);
+		          const int a1 = d_alpha_index_basic(k, 2);
+		          const int a2 = d_alpha_index_basic(k, 3);
+		          const int norm_rank = a0 + a1 + a2;
+		          const F_FLOAT norm_fac = 1.0 / int_pow(dist, norm_rank);
+		          const F_FLOAT val_scaled = val * norm_fac;
+		          const F_FLOAT der_scaled =
+		              Kokkos::fma(norm_fac, der, -norm_rank * val_scaled / dist);
+		          const F_FLOAT pow0 = int_pow(r[0], a0);
+		          const F_FLOAT pow1 = int_pow(r[1], a1);
+		          const F_FLOAT pow2 = int_pow(r[2], a2);
+		          const F_FLOAT pow = pow0 * pow1 * pow2;
+		          const F_FLOAT common = pow * der_scaled / dist;
+		          jac0 = common * r[0];
+		          jac1 = common * r[1];
+		          jac2 = common * r[2];
+		          if (a0 != 0)
+		            jac0 = Kokkos::fma(val_scaled * a0, int_pow(r[0], a0 - 1) * pow1 * pow2, jac0);
+		          if (a1 != 0)
+		            jac1 = Kokkos::fma(val_scaled * a1, pow0 * int_pow(r[1], a1 - 1) * pow2, jac1);
+		          if (a2 != 0)
+		            jac2 = Kokkos::fma(val_scaled * a2, pow0 * pow1 * int_pow(r[2], a2 - 1), jac2);
+		          gx += pref * jac0;
+		          gy += pref * jac1;
+		          gz += pref * jac2;
+		        }
+		      }
+		    }
+	    d_two_layer_gate_first_derivs(ilist_index, jj, 0) = gx;
+	    d_two_layer_gate_first_derivs(ilist_index, jj, 1) = gy;
+	    d_two_layer_gate_first_derivs(ilist_index, jj, 2) = gz;
+	  }
+	}
+
+	template <class DeviceType>
+	KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
+	    TagPairSUS2MTPComputeGateFirstDerivsTeam,
+	    const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateFirstDerivsTeam>::member_type
+	        &team) const
+	{
+	  const int ii = team.league_rank();
+	  const int ilist_index = ii + chunk_offset;
+	  const int i = d_ilist[ilist_index];
+	  const F_FLOAT xi[3] = {x(i, 0), x(i, 1), x(i, 2)};
+	  const int itype = type[i] - 1;
+	  const int jnum = d_numneigh(i);
+
+	  Kokkos::parallel_for(Kokkos::TeamThreadRange(team, jnum), [&](const int jj) {
+	    d_two_layer_gate_first_derivs(ilist_index, jj, 0) = 0.0;
+	    d_two_layer_gate_first_derivs(ilist_index, jj, 1) = 0.0;
+	    d_two_layer_gate_first_derivs(ilist_index, jj, 2) = 0.0;
+	    const int j = d_neighbors(i, jj) & NEIGHMASK;
+	    const int jtype = type[j] - 1;
+	    const F_FLOAT r[3] = {x(j, 0) - xi[0], x(j, 1) - xi[1], x(j, 2) - xi[2]};
+	    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
+	    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
 	    const F_FLOAT dist = Kokkos::sqrt(rsq);
+
+	    int table_index = -1;
+	    int r_list = 0;
+	    int r_next = 0;
+	    F_FLOAT ddr = 0.0;
+	    if (do_list && d_two_layer_gate_radial_list.extent(0) > 0) {
+	      r_list = (int) Kokkos::floor(dist * inv_dr);
+	      const int last_interval = list_grid_size - 2;
+	      if (r_list < 0) r_list = 0;
+	      if (r_list > last_interval) r_list = last_interval;
+	      r_next = r_list + 1;
+	      const int shift = itype * species_count + jtype;
+	      table_index = d_pair_to_table_index(shift);
+	      if (table_index >= 0) {
+	        ddr = dist * inv_dr - r_list;
+	        if (ddr < 0.0) ddr = 0.0;
+	        if (ddr > 1.0) ddr = 1.0;
+	      }
+	    }
 
 	    F_FLOAT gx = 0.0;
 	    F_FLOAT gy = 0.0;
@@ -2118,27 +2422,67 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    if (is_sh_model)
 	      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
 	                      sh_values, sh_ders);
-	    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
-	      F_FLOAT val = 0.0;
-	      F_FLOAT der = 0.0;
-	      eval_gate_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
-	      for (int grouped_idx = d_basic_mu_offsets(mu_group);
-	           grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
-	        const int k = d_basic_grouped_indices(grouped_idx);
-	        const F_FLOAT pref = d_nbh_energy_ders_wrt_moments(ii, k);
-	        if (pref == static_cast<F_FLOAT>(0.0)) continue;
-	        F_FLOAT jac0 = 0.0;
-	        F_FLOAT jac1 = 0.0;
-	        F_FLOAT jac2 = 0.0;
-	        if (is_sh_model) {
+
+	    if (is_sh_model) {
+	      for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+	        F_FLOAT val = 0.0;
+	        F_FLOAT der = 0.0;
+	        if (table_index >= 0) {
+	          const F_FLOAT v1 =
+	              d_two_layer_gate_radial_list(table_index, r_list, mu_group);
+	          const F_FLOAT v2 =
+	              d_two_layer_gate_radial_list(table_index, r_next, mu_group);
+	          const F_FLOAT d1 =
+	              d_two_layer_gate_radial_der_list(table_index, r_list, mu_group);
+	          const F_FLOAT d2 =
+	              d_two_layer_gate_radial_der_list(table_index, r_next, mu_group);
+	          val = v1 + ddr * (v2 - v1);
+	          der = d1 + ddr * (d2 - d1);
+	        }
+	        F_FLOAT dot_y = 0.0;
+	        F_FLOAT dot_d0 = 0.0;
+	        F_FLOAT dot_d1 = 0.0;
+	        F_FLOAT dot_d2 = 0.0;
+	        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+	             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+	          const int k = d_basic_grouped_indices(grouped_idx);
+	          const F_FLOAT pref = d_nbh_energy_ders_wrt_moments(ii, k);
+	          if (pref == static_cast<F_FLOAT>(0.0)) continue;
 	          const int sh_idx = d_alpha_basic_sh_index(k);
-	          const F_FLOAT ylm = sh_values[sh_idx];
-	          const F_FLOAT radial_der_pref =
-	              der * (static_cast<F_FLOAT>(1.0) / dist) * ylm;
-	          jac0 = radial_der_pref * r[0] + val * sh_ders[3 * sh_idx + 0];
-	          jac1 = radial_der_pref * r[1] + val * sh_ders[3 * sh_idx + 1];
-	          jac2 = radial_der_pref * r[2] + val * sh_ders[3 * sh_idx + 2];
-	        } else {
+	          dot_y += pref * sh_values[sh_idx];
+	          dot_d0 += pref * sh_ders[3 * sh_idx + 0];
+	          dot_d1 += pref * sh_ders[3 * sh_idx + 1];
+	          dot_d2 += pref * sh_ders[3 * sh_idx + 2];
+	        }
+	        const F_FLOAT radial_der_pref = der * (static_cast<F_FLOAT>(1.0) / dist);
+	        gx += radial_der_pref * r[0] * dot_y + val * dot_d0;
+	        gy += radial_der_pref * r[1] * dot_y + val * dot_d1;
+	        gz += radial_der_pref * r[2] * dot_y + val * dot_d2;
+	      }
+	    } else {
+	      for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+	        F_FLOAT val = 0.0;
+	        F_FLOAT der = 0.0;
+	        if (table_index >= 0) {
+	          const F_FLOAT v1 =
+	              d_two_layer_gate_radial_list(table_index, r_list, mu_group);
+	          const F_FLOAT v2 =
+	              d_two_layer_gate_radial_list(table_index, r_next, mu_group);
+	          const F_FLOAT d1 =
+	              d_two_layer_gate_radial_der_list(table_index, r_list, mu_group);
+	          const F_FLOAT d2 =
+	              d_two_layer_gate_radial_der_list(table_index, r_next, mu_group);
+	          val = v1 + ddr * (v2 - v1);
+	          der = d1 + ddr * (d2 - d1);
+	        }
+	        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+	             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+	          const int k = d_basic_grouped_indices(grouped_idx);
+	          const F_FLOAT pref = d_nbh_energy_ders_wrt_moments(ii, k);
+	          if (pref == static_cast<F_FLOAT>(0.0)) continue;
+	          F_FLOAT jac0 = 0.0;
+	          F_FLOAT jac1 = 0.0;
+	          F_FLOAT jac2 = 0.0;
 	          const int a0 = d_alpha_index_basic(k, 1);
 	          const int a1 = d_alpha_index_basic(k, 2);
 	          const int a2 = d_alpha_index_basic(k, 3);
@@ -2161,16 +2505,17 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	            jac1 = Kokkos::fma(val_scaled * a1, pow0 * int_pow(r[1], a1 - 1) * pow2, jac1);
 	          if (a2 != 0)
 	            jac2 = Kokkos::fma(val_scaled * a2, pow0 * pow1 * int_pow(r[2], a2 - 1), jac2);
+	          gx += pref * jac0;
+	          gy += pref * jac1;
+	          gz += pref * jac2;
 	        }
-	        gx += pref * jac0;
-	        gy += pref * jac1;
-	        gz += pref * jac2;
 	      }
 	    }
+
 	    d_two_layer_gate_first_derivs(ilist_index, jj, 0) = gx;
 	    d_two_layer_gate_first_derivs(ilist_index, jj, 1) = gy;
 	    d_two_layer_gate_first_derivs(ilist_index, jj, 2) = gz;
-	  }
+	  });
 	}
 
 	template <class DeviceType>
@@ -2195,27 +2540,53 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    const int j = d_neighbors(i, jj) & NEIGHMASK;
 	    const int jtype = type[j] - 1;
 	    const F_FLOAT r[3] = {x(j, 0) - xi[0], x(j, 1) - xi[1], x(j, 2) - xi[2]};
-		    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
-		    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
-		    const F_FLOAT dist = Kokkos::sqrt(rsq);
-		    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
-		      eval_main_gate_radial_value_basic_mu_group(itype, jtype, dist, mu_group,
-		                                                 j,
-		                                                 s_radial_vals(thread, mu_group));
-		    }
-
-		    if (is_sh_model) {
-		      F_FLOAT sh_values[kMaxSHComponentsKK];
-		      F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
-		      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
-		                      sh_values, sh_ders);
-		      for (int k = 0; k < alpha_index_basic_count; k++) {
-		        const int mu_group = d_alpha_basic_mu_group(k);
-		        const int sh_idx = d_alpha_basic_sh_index(k);
-		        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
-		                           s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
+			    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
+			    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
+			    const F_FLOAT dist = Kokkos::sqrt(rsq);
+			    int table_index = -1;
+			    int r_list = 0;
+			    int r_next = 0;
+			    F_FLOAT ddr = 0.0;
+			    if (do_list && d_radial_list.extent(0) > 0) {
+			      r_list = (int) Kokkos::floor(dist * inv_dr);
+			      const int last_interval = list_grid_size - 2;
+			      if (r_list < 0) r_list = 0;
+			      if (r_list > last_interval) r_list = last_interval;
+			      r_next = r_list + 1;
+			      const int shift = itype * species_count + jtype;
+			      table_index = d_pair_to_table_index(shift);
+			      if (table_index >= 0) {
+			        ddr = dist * inv_dr - r_list;
+			        if (ddr < 0.0) ddr = 0.0;
+			        if (ddr > 1.0) ddr = 1.0;
 		      }
-		    } else {
+		    }
+			    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+			      F_FLOAT base_val = static_cast<F_FLOAT>(0.0);
+			      if (table_index >= 0) {
+			        const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
+			        const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
+			        base_val = v1 + ddr * (v2 - v1);
+			      } else {
+			        eval_radial_value_basic_mu_group(itype, jtype, dist, mu_group, base_val);
+			      }
+			      const int mu = d_basic_mu_values(mu_group);
+			      s_radial_vals(thread, mu_group) =
+			          base_val * d_two_layer_gate_mu_multipliers(j, mu);
+			    }
+
+			    if (is_sh_model) {
+			      F_FLOAT sh_values[kMaxSHComponentsKK];
+			      eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
+			                             sh_l_max, sh_values);
+			      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
+			                           [&](const int k) {
+			        const int mu_group = d_alpha_basic_mu_group(k);
+			        const int sh_idx = d_alpha_basic_sh_index(k);
+			        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
+			                           s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
+			      });
+			    } else {
 		      s_dist_powers(thread, 0) = 1.0;
 		      s_coord_powers(thread, 0, 0) = 1.0;
 		      s_coord_powers(thread, 0, 1) = 1.0;
@@ -2315,26 +2686,26 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
       env_pair_gate = static_cast<F_FLOAT>(1.0) - d_env_gate_values(ii) * env_activation;
     }
 
-	    if (is_sh_model) {
-	      F_FLOAT sh_values[kMaxSHComponentsKK];
-	      F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
-	      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
-	                      sh_values, sh_ders);
-	      for (int k = 0; k < alpha_index_basic_count; k++) {
-	        const int mu_group = d_alpha_basic_mu_group(k);
-	        const int sh_idx = d_alpha_basic_sh_index(k);
-	        const F_FLOAT raw_contrib =
-	            s_radial_vals(thread, mu_group) * sh_values[sh_idx];
+		    if (is_sh_model) {
+		      F_FLOAT sh_values[kMaxSHComponentsKK];
+		      eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
+		                             sh_l_max, sh_values);
+		      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
+		                           [&](const int k) {
+		        const int mu_group = d_alpha_basic_mu_group(k);
+		        const int sh_idx = d_alpha_basic_sh_index(k);
+		        const F_FLOAT raw_contrib =
+		            s_radial_vals(thread, mu_group) * sh_values[sh_idx];
 	        if (env_gate_enabled) {
 	          Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
 	                             env_pair_gate * raw_contrib);
 	          Kokkos::atomic_add(&d_env_gate_activation_basic_vals(ii, k),
 	                             env_activation * raw_contrib);
-	        } else {
-	          Kokkos::atomic_add(&d_moment_tensor_vals(ii, k), raw_contrib);
-	        }
-	      }
-	    } else {
+		        } else {
+		          Kokkos::atomic_add(&d_moment_tensor_vals(ii, k), raw_contrib);
+		        }
+		      });
+		    } else {
 	      s_dist_powers(thread, 0) = 1.0;
 	      s_coord_powers(thread, 0, 0) = 1.0;
 	      s_coord_powers(thread, 0, 1) = 1.0;
@@ -2471,66 +2842,112 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
 	    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) continue;
 	    const F_FLOAT dist = Kokkos::sqrt(rsq);
-		    F_FLOAT temp_force[3] = {0.0, 0.0, 0.0};
-		    F_FLOAT gate_adjoint = 0.0;
-		    F_FLOAT sh_values[kMaxSHComponentsKK];
-		    F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
-		    if (is_sh_model)
-		      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
-		                      sh_values, sh_ders);
 
-		    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
-	      F_FLOAT val = 0.0;
-	      F_FLOAT der = 0.0;
-	      F_FLOAT gate_residual_val = 0.0;
-	      eval_main_gate_radial_basic_mu_group(itype, jtype, dist, mu_group, j,
-	                                           val, der, gate_residual_val);
-	      for (int grouped_idx = d_basic_mu_offsets(mu_group);
-	           grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
-		        const int k = d_basic_grouped_indices(grouped_idx);
-		        const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
-		        F_FLOAT jac0 = 0.0;
-		        F_FLOAT jac1 = 0.0;
-		        F_FLOAT jac2 = 0.0;
-		        F_FLOAT gate_raw = 0.0;
-		        if (is_sh_model) {
-		          const int sh_idx = d_alpha_basic_sh_index(k);
-		          const F_FLOAT ylm = sh_values[sh_idx];
-		          const F_FLOAT radial_der_pref =
-		              der * (static_cast<F_FLOAT>(1.0) / dist) * ylm;
-		          jac0 = radial_der_pref * r[0] + val * sh_ders[3 * sh_idx + 0];
-		          jac1 = radial_der_pref * r[1] + val * sh_ders[3 * sh_idx + 1];
-		          jac2 = radial_der_pref * r[2] + val * sh_ders[3 * sh_idx + 2];
-		          gate_raw = gate_residual_val * ylm;
-		        } else {
-		          const int a0 = d_alpha_index_basic(k, 1);
-		          const int a1 = d_alpha_index_basic(k, 2);
-		          const int a2 = d_alpha_index_basic(k, 3);
-		          const int norm_rank = a0 + a1 + a2;
-		          const F_FLOAT norm_fac = 1.0 / int_pow(dist, norm_rank);
-		          const F_FLOAT val_scaled = val * norm_fac;
-		          const F_FLOAT der_scaled =
-		              Kokkos::fma(norm_fac, der, -norm_rank * val_scaled / dist);
-		          const F_FLOAT pow0 = int_pow(r[0], a0);
-		          const F_FLOAT pow1 = int_pow(r[1], a1);
-		          const F_FLOAT pow2 = int_pow(r[2], a2);
-		          const F_FLOAT pow = pow0 * pow1 * pow2;
-		          const F_FLOAT common = pow * der_scaled / dist;
-		          jac0 = common * r[0];
-		          jac1 = common * r[1];
-		          jac2 = common * r[2];
-		          if (a0 != 0)
-		            jac0 = Kokkos::fma(val_scaled * a0, int_pow(r[0], a0 - 1) * pow1 * pow2, jac0);
-		          if (a1 != 0)
-		            jac1 = Kokkos::fma(val_scaled * a1, pow0 * int_pow(r[1], a1 - 1) * pow2, jac1);
-		          if (a2 != 0)
-		            jac2 = Kokkos::fma(val_scaled * a2, pow0 * pow1 * int_pow(r[2], a2 - 1), jac2);
-		          gate_raw = gate_residual_val * norm_fac * pow;
-		        }
-		        temp_force[0] += coeff * jac0;
-		        temp_force[1] += coeff * jac1;
-		        temp_force[2] += coeff * jac2;
-		        gate_adjoint += coeff * gate_raw;
+	    int table_index = -1;
+	    int r_list = 0;
+	    int r_next = 0;
+	    F_FLOAT ddr = 0.0;
+	    if (do_list && d_radial_list.extent(0) > 0) {
+	      r_list = (int) Kokkos::floor(dist * inv_dr);
+	      const int last_interval = list_grid_size - 2;
+	      if (r_list < 0) r_list = 0;
+	      if (r_list > last_interval) r_list = last_interval;
+	      r_next = r_list + 1;
+	      const int shift = itype * species_count + jtype;
+	      table_index = d_pair_to_table_index(shift);
+	      if (table_index >= 0) {
+	        ddr = dist * inv_dr - r_list;
+	        if (ddr < 0.0) ddr = 0.0;
+	        if (ddr > 1.0) ddr = 1.0;
+	      }
+	    }
+
+	    F_FLOAT temp_force[3] = {0.0, 0.0, 0.0};
+	    F_FLOAT gate_adjoint = 0.0;
+	    F_FLOAT sh_values[kMaxSHComponentsKK];
+	    F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
+	    if (is_sh_model)
+	      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
+	                      sh_values, sh_ders);
+
+	    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+	      F_FLOAT base_val = static_cast<F_FLOAT>(0.0);
+	      F_FLOAT base_der = static_cast<F_FLOAT>(0.0);
+	      if (table_index >= 0) {
+	        const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
+	        const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
+	        const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
+	        const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
+	        base_val = v1 + ddr * (v2 - v1);
+	        base_der = d1 + ddr * (d2 - d1);
+	      } else {
+	        eval_radial_basic_mu_group(itype, jtype, dist, mu_group,
+	                                   base_val, base_der);
+	      }
+	      const int mu = d_basic_mu_values(mu_group);
+	      const F_FLOAT gate_multiplier = d_two_layer_gate_mu_multipliers(j, mu);
+	      const F_FLOAT gate_deriv = d_two_layer_gate_mu_derivs(j, mu);
+	      const F_FLOAT val = base_val * gate_multiplier;
+	      const F_FLOAT der = base_der * gate_multiplier;
+	      const F_FLOAT gate_residual_val = base_val * gate_deriv;
+
+	      if (is_sh_model) {
+	        F_FLOAT dot_y = 0.0;
+	        F_FLOAT dot_d0 = 0.0;
+	        F_FLOAT dot_d1 = 0.0;
+	        F_FLOAT dot_d2 = 0.0;
+	        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+	             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+	          const int k = d_basic_grouped_indices(grouped_idx);
+	          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+	          const int sh_idx = d_alpha_basic_sh_index(k);
+	          dot_y += coeff * sh_values[sh_idx];
+	          dot_d0 += coeff * sh_ders[3 * sh_idx + 0];
+	          dot_d1 += coeff * sh_ders[3 * sh_idx + 1];
+	          dot_d2 += coeff * sh_ders[3 * sh_idx + 2];
+	        }
+	        const F_FLOAT radial_der_pref = der * (static_cast<F_FLOAT>(1.0) / dist);
+	        temp_force[0] += radial_der_pref * r[0] * dot_y + val * dot_d0;
+	        temp_force[1] += radial_der_pref * r[1] * dot_y + val * dot_d1;
+	        temp_force[2] += radial_der_pref * r[2] * dot_y + val * dot_d2;
+	        gate_adjoint += gate_residual_val * dot_y;
+	      } else {
+	        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+	             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+	          const int k = d_basic_grouped_indices(grouped_idx);
+	          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+	          F_FLOAT jac0 = 0.0;
+	          F_FLOAT jac1 = 0.0;
+	          F_FLOAT jac2 = 0.0;
+	          F_FLOAT gate_raw = 0.0;
+	          const int a0 = d_alpha_index_basic(k, 1);
+	          const int a1 = d_alpha_index_basic(k, 2);
+	          const int a2 = d_alpha_index_basic(k, 3);
+	          const int norm_rank = a0 + a1 + a2;
+	          const F_FLOAT norm_fac = 1.0 / int_pow(dist, norm_rank);
+	          const F_FLOAT val_scaled = val * norm_fac;
+	          const F_FLOAT der_scaled =
+	              Kokkos::fma(norm_fac, der, -norm_rank * val_scaled / dist);
+	          const F_FLOAT pow0 = int_pow(r[0], a0);
+	          const F_FLOAT pow1 = int_pow(r[1], a1);
+	          const F_FLOAT pow2 = int_pow(r[2], a2);
+	          const F_FLOAT pow = pow0 * pow1 * pow2;
+	          const F_FLOAT common = pow * der_scaled / dist;
+	          jac0 = common * r[0];
+	          jac1 = common * r[1];
+	          jac2 = common * r[2];
+	          if (a0 != 0)
+	            jac0 = Kokkos::fma(val_scaled * a0, int_pow(r[0], a0 - 1) * pow1 * pow2, jac0);
+	          if (a1 != 0)
+	            jac1 = Kokkos::fma(val_scaled * a1, pow0 * int_pow(r[1], a1 - 1) * pow2, jac1);
+	          if (a2 != 0)
+	            jac2 = Kokkos::fma(val_scaled * a2, pow0 * pow1 * int_pow(r[2], a2 - 1), jac2);
+	          gate_raw = gate_residual_val * norm_fac * pow;
+	          temp_force[0] += coeff * jac0;
+	          temp_force[1] += coeff * jac1;
+	          temp_force[2] += coeff * jac2;
+	          gate_adjoint += coeff * gate_raw;
+	        }
 	      }
 	    }
 
@@ -2543,8 +2960,8 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    a_f(j, 2) -= temp_force[2];
 
 	    if (need_virial_tally)
-	      v_tally_xyz<NEIGHFLAG>(ev, i, j, temp_force[0], temp_force[1], temp_force[2],
-	                             r[0], r[1], r[2]);
+	      v_tally_xyz<NEIGHFLAG>(ev, i, j, temp_force[0], temp_force[1],
+	                             temp_force[2], r[0], r[1], r[2]);
 	  }
 
 	  if (need_energy_tally) {
@@ -2559,9 +2976,371 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	  }
 	}
 
-	template <class DeviceType>
-	template <int NEIGHFLAG, int EVFLAG>
-	KOKKOS_INLINE_FUNCTION void
+template <class DeviceType>
+template <int NEIGHFLAG>
+KOKKOS_INLINE_FUNCTION void
+PairSUS2MTPKokkos<DeviceType>::operator()(
+    TagPairSUS2MTPComputeGateMainForceTeam<NEIGHFLAG>,
+    const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainForceTeam<NEIGHFLAG>>::member_type
+        &team) const
+{
+  auto v_f =
+      ScatterViewHelper<NeedDup_v<NEIGHFLAG, DeviceType>, decltype(dup_f), decltype(ndup_f)>::get(
+          dup_f, ndup_f);
+  auto a_f = v_f.template access<AtomicDup_v<NEIGHFLAG, DeviceType>>();
+
+  const int ii = team.league_rank();
+  const int i = d_ilist[ii + chunk_offset];
+  const int jnum = d_numneigh(i);
+  const int itype = type[i] - 1;
+  const F_FLOAT xi[3] = {x(i, 0), x(i, 1), x(i, 2)};
+
+  F_FLOAT center_fx = static_cast<F_FLOAT>(0.0);
+  F_FLOAT center_fy = static_cast<F_FLOAT>(0.0);
+  F_FLOAT center_fz = static_cast<F_FLOAT>(0.0);
+  Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, jnum),
+                          [&](const int jj, F_FLOAT &sum_fx, F_FLOAT &sum_fy,
+                              F_FLOAT &sum_fz) {
+    const int j = d_neighbors(i, jj) & NEIGHMASK;
+    const int jtype = type[j] - 1;
+    const F_FLOAT r[3] = {x(j, 0) - xi[0], x(j, 1) - xi[1], x(j, 2) - xi[2]};
+	    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
+	    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
+	    const F_FLOAT dist = Kokkos::sqrt(rsq);
+	    int table_index = -1;
+	    int r_list = 0;
+	    int r_next = 0;
+	    F_FLOAT ddr = 0.0;
+	    if (do_list && d_radial_list.extent(0) > 0) {
+	      r_list = (int) Kokkos::floor(dist * inv_dr);
+	      const int last_interval = list_grid_size - 2;
+	      if (r_list < 0) r_list = 0;
+	      if (r_list > last_interval) r_list = last_interval;
+	      r_next = r_list + 1;
+	      const int shift = itype * species_count + jtype;
+	      table_index = d_pair_to_table_index(shift);
+	      if (table_index >= 0) {
+	        ddr = dist * inv_dr - r_list;
+	        if (ddr < 0.0) ddr = 0.0;
+	        if (ddr > 1.0) ddr = 1.0;
+	      }
+	    }
+	    F_FLOAT temp_force[3] = {0.0, 0.0, 0.0};
+    F_FLOAT gate_adjoint = 0.0;
+    F_FLOAT sh_values[kMaxSHComponentsKK];
+    F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
+    if (is_sh_model)
+      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
+                      sh_values, sh_ders);
+
+	    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+	      F_FLOAT base_val = static_cast<F_FLOAT>(0.0);
+	      F_FLOAT base_der = static_cast<F_FLOAT>(0.0);
+	      if (table_index >= 0) {
+	        const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
+	        const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
+	        const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
+	        const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
+	        base_val = v1 + ddr * (v2 - v1);
+	        base_der = d1 + ddr * (d2 - d1);
+	      } else {
+	        eval_radial_basic_mu_group(itype, jtype, dist, mu_group,
+	                                   base_val, base_der);
+	      }
+	      const int mu = d_basic_mu_values(mu_group);
+	      const F_FLOAT gate_multiplier = d_two_layer_gate_mu_multipliers(j, mu);
+	      const F_FLOAT gate_deriv = d_two_layer_gate_mu_derivs(j, mu);
+	      const F_FLOAT val = base_val * gate_multiplier;
+	      const F_FLOAT der = base_der * gate_multiplier;
+	      const F_FLOAT gate_residual_val = base_val * gate_deriv;
+	      if (is_sh_model) {
+        F_FLOAT dot_y = 0.0;
+        F_FLOAT dot_d0 = 0.0;
+        F_FLOAT dot_d1 = 0.0;
+        F_FLOAT dot_d2 = 0.0;
+        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+          const int k = d_basic_grouped_indices(grouped_idx);
+          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+          const int sh_idx = d_alpha_basic_sh_index(k);
+          dot_y += coeff * sh_values[sh_idx];
+          dot_d0 += coeff * sh_ders[3 * sh_idx + 0];
+          dot_d1 += coeff * sh_ders[3 * sh_idx + 1];
+          dot_d2 += coeff * sh_ders[3 * sh_idx + 2];
+        }
+        const F_FLOAT radial_der_pref = der * (static_cast<F_FLOAT>(1.0) / dist);
+        temp_force[0] += radial_der_pref * r[0] * dot_y + val * dot_d0;
+        temp_force[1] += radial_der_pref * r[1] * dot_y + val * dot_d1;
+        temp_force[2] += radial_der_pref * r[2] * dot_y + val * dot_d2;
+        gate_adjoint += gate_residual_val * dot_y;
+      } else {
+        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+          const int k = d_basic_grouped_indices(grouped_idx);
+          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+          F_FLOAT jac0 = 0.0;
+          F_FLOAT jac1 = 0.0;
+          F_FLOAT jac2 = 0.0;
+          F_FLOAT gate_raw = 0.0;
+          const int a0 = d_alpha_index_basic(k, 1);
+          const int a1 = d_alpha_index_basic(k, 2);
+          const int a2 = d_alpha_index_basic(k, 3);
+          const int norm_rank = a0 + a1 + a2;
+          const F_FLOAT norm_fac = 1.0 / int_pow(dist, norm_rank);
+          const F_FLOAT val_scaled = val * norm_fac;
+          const F_FLOAT der_scaled =
+              Kokkos::fma(norm_fac, der, -norm_rank * val_scaled / dist);
+          const F_FLOAT pow0 = int_pow(r[0], a0);
+          const F_FLOAT pow1 = int_pow(r[1], a1);
+          const F_FLOAT pow2 = int_pow(r[2], a2);
+          const F_FLOAT pow = pow0 * pow1 * pow2;
+          const F_FLOAT common = pow * der_scaled / dist;
+          jac0 = common * r[0];
+          jac1 = common * r[1];
+          jac2 = common * r[2];
+          if (a0 != 0)
+            jac0 = Kokkos::fma(val_scaled * a0, int_pow(r[0], a0 - 1) * pow1 * pow2, jac0);
+          if (a1 != 0)
+            jac1 = Kokkos::fma(val_scaled * a1, pow0 * int_pow(r[1], a1 - 1) * pow2, jac1);
+          if (a2 != 0)
+            jac2 = Kokkos::fma(val_scaled * a2, pow0 * pow1 * int_pow(r[2], a2 - 1), jac2);
+          gate_raw = gate_residual_val * norm_fac * pow;
+          temp_force[0] += coeff * jac0;
+          temp_force[1] += coeff * jac1;
+          temp_force[2] += coeff * jac2;
+	          gate_adjoint += coeff * gate_raw;
+	        }
+	      }
+	    }
+
+	    Kokkos::atomic_add(&d_two_layer_gate_adjoints(j), gate_adjoint);
+	    sum_fx += temp_force[0];
+    sum_fy += temp_force[1];
+    sum_fz += temp_force[2];
+    a_f(j, 0) -= temp_force[0];
+    a_f(j, 1) -= temp_force[1];
+    a_f(j, 2) -= temp_force[2];
+  }, center_fx, center_fy, center_fz);
+
+  Kokkos::single(Kokkos::PerTeam(team), [&]() {
+    a_f(i, 0) += center_fx;
+    a_f(i, 1) += center_fy;
+    a_f(i, 2) += center_fz;
+  });
+}
+
+template <class DeviceType>
+template <int NEIGHFLAG>
+KOKKOS_INLINE_FUNCTION void
+PairSUS2MTPKokkos<DeviceType>::operator()(
+    TagPairSUS2MTPComputeForceTeam<NEIGHFLAG>,
+    const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeForceTeam<NEIGHFLAG>>::member_type
+        &team) const
+{
+  auto v_f =
+      ScatterViewHelper<NeedDup_v<NEIGHFLAG, DeviceType>, decltype(dup_f), decltype(ndup_f)>::get(
+          dup_f, ndup_f);
+  auto a_f = v_f.template access<AtomicDup_v<NEIGHFLAG, DeviceType>>();
+
+  const int ii = team.league_rank();
+  const int i = d_ilist[ii + chunk_offset];
+  const int jnum = d_numneigh(i);
+  const int itype = type[i] - 1;
+  const F_FLOAT xi[3] = {x(i, 0), x(i, 1), x(i, 2)};
+  const bool use_env_gate = env_gate_enabled;
+  const F_FLOAT env_screen_strength =
+      use_env_gate ? d_env_gate_values(ii) : static_cast<F_FLOAT>(0.0);
+  const F_FLOAT env_rho_chain_prefactor =
+      use_env_gate ? d_env_gate_rho_chain_values(ii) : static_cast<F_FLOAT>(0.0);
+  const F_FLOAT r_env = env_gate_cutoff_ratio * max_cutoff;
+
+  F_FLOAT center_fx = static_cast<F_FLOAT>(0.0);
+  F_FLOAT center_fy = static_cast<F_FLOAT>(0.0);
+  F_FLOAT center_fz = static_cast<F_FLOAT>(0.0);
+  Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, jnum),
+                          [&](const int jj, F_FLOAT &sum_fx, F_FLOAT &sum_fy,
+                              F_FLOAT &sum_fz) {
+    const int j = d_neighbors(i, jj) & NEIGHMASK;
+    const int jtype = type[j] - 1;
+    const F_FLOAT r[3] = {x(j, 0) - xi[0], x(j, 1) - xi[1], x(j, 2) - xi[2]};
+    const F_FLOAT rsq = Kokkos::fma(r[0], r[0], Kokkos::fma(r[1], r[1], r[2] * r[2]));
+    if (rsq <= static_cast<F_FLOAT>(0.0) || rsq >= max_cutoff_sq) return;
+    const F_FLOAT dist = Kokkos::sqrt(rsq);
+    F_FLOAT temp_force[3] = {0.0, 0.0, 0.0};
+    F_FLOAT env_rho_dr = 0.0;
+    F_FLOAT env_activation = 0.0;
+    F_FLOAT env_activation_der = 0.0;
+    F_FLOAT env_pair_gate = 1.0;
+    if (use_env_gate && dist > static_cast<F_FLOAT>(0.0) && dist < r_env) {
+      F_FLOAT local_rho = 0.0;
+      eval_env_gate_rho(itype, dist, local_rho, env_rho_dr);
+    }
+    if (use_env_gate) {
+      env_gate_activation_kk(dist, r_env, env_gate_activation_on_ratio,
+                             env_activation, env_activation_der);
+      env_pair_gate = static_cast<F_FLOAT>(1.0) - env_screen_strength * env_activation;
+    }
+    int table_index = -1;
+    int r_list = 0;
+    int r_next = 0;
+    F_FLOAT ddr = 0.0;
+    if (do_list) {
+      r_list = (int) Kokkos::floor(dist * inv_dr);
+      const int last_interval = list_grid_size - 2;
+      if (r_list < 0) r_list = 0;
+      if (r_list > last_interval) r_list = last_interval;
+      r_next = r_list + 1;
+      const int shift = itype * species_count + jtype;
+      table_index = d_pair_to_table_index(shift);
+      if (table_index >= 0) {
+        ddr = dist * inv_dr - r_list;
+        if (ddr < 0.0) ddr = 0.0;
+        if (ddr > 1.0) ddr = 1.0;
+      }
+    }
+
+    F_FLOAT sh_values[kMaxSHComponentsKK];
+    F_FLOAT sh_ders[3 * kMaxSHComponentsKK];
+    if (is_sh_model)
+      eval_real_sh_kk(r, static_cast<F_FLOAT>(1.0) / dist, sh_l_max,
+                      sh_values, sh_ders);
+
+	    if (is_sh_model) {
+	      for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+	        F_FLOAT val = 0.0;
+	        F_FLOAT der = 0.0;
+	        if (table_index >= 0) {
+	          const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
+	          const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
+	          const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
+	          const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
+	          val = v1 + ddr * (v2 - v1);
+	          der = d1 + ddr * (d2 - d1);
+	        } else {
+	          eval_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
+	        }
+	        F_FLOAT dot_y = 0.0;
+	        F_FLOAT dot_d0 = 0.0;
+	        F_FLOAT dot_d1 = 0.0;
+	        F_FLOAT dot_d2 = 0.0;
+	        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+	             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+	          const int k = d_basic_grouped_indices(grouped_idx);
+	          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+	          const int sh_idx = d_alpha_basic_sh_index(k);
+	          dot_y += coeff * sh_values[sh_idx];
+	          dot_d0 += coeff * sh_ders[3 * sh_idx + 0];
+	          dot_d1 += coeff * sh_ders[3 * sh_idx + 1];
+	          dot_d2 += coeff * sh_ders[3 * sh_idx + 2];
+	        }
+	        const F_FLOAT radial_der_pref =
+	            der * (static_cast<F_FLOAT>(1.0) / dist);
+	        const F_FLOAT jac0 = radial_der_pref * r[0] * dot_y + val * dot_d0;
+	        const F_FLOAT jac1 = radial_der_pref * r[1] * dot_y + val * dot_d1;
+	        const F_FLOAT jac2 = radial_der_pref * r[2] * dot_y + val * dot_d2;
+	        if (use_env_gate) {
+	          const F_FLOAT activation_der_factor =
+	              -env_screen_strength * env_activation_der * val * dot_y *
+	              (static_cast<F_FLOAT>(1.0) / dist);
+	          temp_force[0] += env_pair_gate * jac0 + activation_der_factor * r[0];
+	          temp_force[1] += env_pair_gate * jac1 + activation_der_factor * r[1];
+	          temp_force[2] += env_pair_gate * jac2 + activation_der_factor * r[2];
+	        } else {
+	          temp_force[0] += jac0;
+	          temp_force[1] += jac1;
+	          temp_force[2] += jac2;
+	        }
+	      }
+	    } else {
+	      for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
+	        F_FLOAT val = 0.0;
+	        F_FLOAT der = 0.0;
+	        if (table_index >= 0) {
+	          const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
+	          const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
+	          const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
+	          const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
+	          val = v1 + ddr * (v2 - v1);
+	          der = d1 + ddr * (d2 - d1);
+	        } else {
+	          eval_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
+	        }
+		        for (int grouped_idx = d_basic_mu_offsets(mu_group);
+		             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+		          const int k = d_basic_grouped_indices(grouped_idx);
+	          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+	          F_FLOAT raw_contrib = 0.0;
+	          F_FLOAT jac0 = 0.0;
+	          F_FLOAT jac1 = 0.0;
+	          F_FLOAT jac2 = 0.0;
+	          const int a0 = d_alpha_index_basic(k, 1);
+	          const int a1 = d_alpha_index_basic(k, 2);
+	          const int a2 = d_alpha_index_basic(k, 3);
+          const int norm_rank = a0 + a1 + a2;
+
+          const F_FLOAT norm_fac = 1.0 / int_pow(dist, norm_rank);
+          const F_FLOAT val_scaled = val * norm_fac;
+          const F_FLOAT der_scaled =
+              Kokkos::fma(norm_fac, der, -norm_rank * val_scaled / dist);
+
+          const F_FLOAT pow0 = int_pow(r[0], a0);
+          const F_FLOAT pow1 = int_pow(r[1], a1);
+          const F_FLOAT pow2 = int_pow(r[2], a2);
+          const F_FLOAT pow = pow0 * pow1 * pow2;
+          raw_contrib = val_scaled * pow;
+          const F_FLOAT common = pow * der_scaled / dist;
+
+          jac0 = common * r[0];
+          jac1 = common * r[1];
+          jac2 = common * r[2];
+
+          if (a0 != 0)
+            jac0 = Kokkos::fma(val_scaled * a0, int_pow(r[0], a0 - 1) * pow1 * pow2, jac0);
+          if (a1 != 0)
+            jac1 = Kokkos::fma(val_scaled * a1, pow0 * int_pow(r[1], a1 - 1) * pow2, jac1);
+	          if (a2 != 0)
+	            jac2 = Kokkos::fma(val_scaled * a2, pow0 * pow1 * int_pow(r[2], a2 - 1), jac2);
+
+	          if (use_env_gate) {
+	            const F_FLOAT inv_dist = static_cast<F_FLOAT>(1.0) / dist;
+	            const F_FLOAT activation_der_factor =
+	                -env_screen_strength * env_activation_der * raw_contrib * inv_dist;
+	            temp_force[0] += coeff * (env_pair_gate * jac0 + activation_der_factor * r[0]);
+	            temp_force[1] += coeff * (env_pair_gate * jac1 + activation_der_factor * r[1]);
+	            temp_force[2] += coeff * (env_pair_gate * jac2 + activation_der_factor * r[2]);
+	          } else {
+	            temp_force[0] += coeff * jac0;
+	            temp_force[1] += coeff * jac1;
+		            temp_force[2] += coeff * jac2;
+		          }
+		        }
+	      }
+	    }
+    if (use_env_gate && env_rho_dr != static_cast<F_FLOAT>(0.0)) {
+      const F_FLOAT rho_der_factor = env_rho_chain_prefactor * env_rho_dr / dist;
+      temp_force[0] += rho_der_factor * r[0];
+      temp_force[1] += rho_der_factor * r[1];
+      temp_force[2] += rho_der_factor * r[2];
+    }
+
+    sum_fx += temp_force[0];
+    sum_fy += temp_force[1];
+    sum_fz += temp_force[2];
+    a_f(j, 0) -= temp_force[0];
+    a_f(j, 1) -= temp_force[1];
+    a_f(j, 2) -= temp_force[2];
+  }, center_fx, center_fy, center_fz);
+
+  Kokkos::single(Kokkos::PerTeam(team), [&]() {
+    a_f(i, 0) += center_fx;
+    a_f(i, 1) += center_fy;
+    a_f(i, 2) += center_fz;
+  });
+}
+
+template <class DeviceType>
+template <int NEIGHFLAG, int EVFLAG>
+KOKKOS_INLINE_FUNCTION void
 	PairSUS2MTPKokkos<DeviceType>::operator()(
 	    TagPairSUS2MTPComputeGateMainForce<NEIGHFLAG, EVFLAG>, const int &ii) const
 	{
@@ -2619,6 +3398,55 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	  EV_FLOAT ev;
 	  this->template operator()<NEIGHFLAG, EVFLAG>(
 	      TagPairSUS2MTPComputeGateChainForce<NEIGHFLAG, EVFLAG>(), ii, ev);
+	}
+
+	template <class DeviceType>
+	template <int NEIGHFLAG>
+	KOKKOS_INLINE_FUNCTION void
+	PairSUS2MTPKokkos<DeviceType>::operator()(
+	    TagPairSUS2MTPComputeGateChainForceTeam<NEIGHFLAG>,
+	    const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateChainForceTeam<NEIGHFLAG>>::member_type
+	        &team) const
+	{
+	  auto v_f =
+	      ScatterViewHelper<NeedDup_v<NEIGHFLAG, DeviceType>, decltype(dup_f), decltype(ndup_f)>::get(
+	          dup_f, ndup_f);
+	  auto a_f = v_f.template access<AtomicDup_v<NEIGHFLAG, DeviceType>>();
+
+	  const int ii = team.league_rank();
+	  const int i = d_ilist[ii];
+	  const F_FLOAT gate_adjoint_center = d_two_layer_gate_adjoints(i);
+	  const int jnum = d_numneigh(i);
+
+	  F_FLOAT center_fx = static_cast<F_FLOAT>(0.0);
+	  F_FLOAT center_fy = static_cast<F_FLOAT>(0.0);
+	  F_FLOAT center_fz = static_cast<F_FLOAT>(0.0);
+	  if (gate_adjoint_center != static_cast<F_FLOAT>(0.0)) {
+	    Kokkos::parallel_reduce(Kokkos::TeamThreadRange(team, jnum),
+	                            [&](const int jj, F_FLOAT &sum_fx, F_FLOAT &sum_fy,
+	                                F_FLOAT &sum_fz) {
+	      const int j = d_neighbors(i, jj) & NEIGHMASK;
+	      const F_FLOAT fx = gate_adjoint_center * d_two_layer_gate_first_derivs(ii, jj, 0);
+	      const F_FLOAT fy = gate_adjoint_center * d_two_layer_gate_first_derivs(ii, jj, 1);
+	      const F_FLOAT fz = gate_adjoint_center * d_two_layer_gate_first_derivs(ii, jj, 2);
+	      if (fx == static_cast<F_FLOAT>(0.0) &&
+	          fy == static_cast<F_FLOAT>(0.0) &&
+	          fz == static_cast<F_FLOAT>(0.0))
+	        return;
+	      sum_fx += fx;
+	      sum_fy += fy;
+	      sum_fz += fz;
+	      a_f(j, 0) -= fx;
+	      a_f(j, 1) -= fy;
+	      a_f(j, 2) -= fz;
+	    }, center_fx, center_fy, center_fz);
+	  }
+
+	  Kokkos::single(Kokkos::PerTeam(team), [&]() {
+	    a_f(i, 0) += center_fx;
+	    a_f(i, 1) += center_fy;
+	    a_f(i, 2) += center_fz;
+	  });
 	}
 
 	template <class DeviceType>

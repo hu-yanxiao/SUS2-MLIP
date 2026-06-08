@@ -212,6 +212,87 @@ This was verified by rebuilding both objects and relinking
 `lmp_ml_sus2_avx2_noipo.stagebest_relink_force_20260608`, which initialized
 `gate.mtp` correctly. Earlier `pair_sus2_mtp.o`-only relinks crashed.
 
+## GPU Kokkos Gate Stage-Best - 2026-06-08
+
+Status: accepted stage-best for the SUS2-SH Kokkos `/kk/device` interface.
+
+Installed candidate before promotion:
+
+```text
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_gatekk_candidate_20260608
+sha256 bea9719ef8f520fb42ba4eb58c12c1c49aee3e7d85be6fa5eb2eeaf6d640d2a3
+```
+
+Build job:
+
+```text
+jobid 3770695
+host a05u22g
+queue gpu-phy-zhangwq
+source hashes:
+  pair_sus2_mtp_kokkos.cpp 474d794850284ac7f4251d58e8ff85ecd03d21050b1549da006d3e7c1923294d
+  pair_sus2_mtp_kokkos.h   5a47a8b3ebc11fe1c0ba5f3a58be25da48906a0f14de4759602ac37c801cb700
+```
+
+Verification job:
+
+```text
+jobid 3770733
+host a05u22g
+queue gpu-phy-zhangwq
+directory /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608
+pair_style sus2mtp/kk/device gate.mtp chunksize 129600 tabstep 0.0005
+```
+
+CPU/GPU correctness against the CPU SUS2-SH LAMMPS implementation:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 5.076636e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.592310e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 5.076636e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.834484e-10 |
+
+Performance on the same verification job:
+
+| Case | Loop time | Throughput |
+| --- | ---: | ---: |
+| gate run100 | 43.1765 s | 329.513 katom-step/s |
+| no-gate run100 | 19.2852 s | 737.726 katom-step/s |
+| gate run500 | 215.463 s | 330.154 katom-step/s |
+| no-gate run500 | 96.1945 s | 739.502 katom-step/s |
+
+The best observed run for the same stage was job `3770529` on `b05u08g`:
+
+```text
+gate run500   336.277 katom-step/s
+no-gate run500 766.659 katom-step/s
+gate/no-gate 0.438626
+```
+
+Use the `3770529` numbers as the best observed throughput and the `3770733`
+numbers as the final promotion verification on the latest rebuilt binary.
+
+### Rejected Kokkos Experiment: Mu-Group ThreadVectorRange
+
+The attempted CUDA `ThreadVectorRange(team, basic_mu_group_count)` reduction
+over radial `mu=(l,k)` groups was exact but much slower. It increased the
+gate first-derivative profile from about `0.114 s` to `0.250 s`, and reduced
+the 500-step benchmark on `b05u08g` to:
+
+```text
+jobid 3770671
+gate run500   202.066 katom-step/s
+no-gate run500 514.904 katom-step/s
+gate/no-gate 0.392434
+```
+
+Decision: reject and roll back. For this Kokkos path, keep serial `mu` loops
+inside the team kernels and use device parallelism over atoms/edges instead of
+vectorizing the small radial-group loop. The accepted code keeps the value-only
+real-SH helper for basic-moment kernels, but does not use the rejected
+`ThreadVectorRange` reduction over `basic_mu_group_count`.
+
 ## Rejected Experiment: Scalar Additive Gate Coefficients
 
 Run directories:
