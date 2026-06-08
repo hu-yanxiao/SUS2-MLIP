@@ -1801,3 +1801,72 @@ pair_sus2_mtp_kokkos.h
 installed canonical binary
 4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161
 ```
+
+### Rejected candidate: no-gate SH-only alpha dispatch
+
+Date: 2026-06-09.
+
+Candidate change: split the no-gate SH branch of `ComputeAlphaBasic` into a
+dedicated `ComputeAlphaBasicSH` team kernel and reduce its scratch allocation to
+`team_size * basic_mu_group_count`. The mathematical expression was unchanged:
+
+```text
+B_{i,k} += R_{Z_i Z_j,\mu(k)}(r_ij) Y_k(rhat_ij)
+```
+
+The candidate excluded env-gate and non-SH models from the fast path, so those
+fallback paths stayed on the original generic kernel.
+
+Build and verification:
+
+```text
+build job: 3770862 on c04u01g
+failed first verify job: 3770863 on a05u22g
+successful verify job: 3770864 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/nogate_alpha_sh_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_nogate_alpha_sh_candidate_20260609
+candidate sha256:
+ff5927d891cb6843a17c8cda117439b2b323b3ded07bac1c2196b9c0bd75cb19
+```
+
+Correctness against the CPU SUS2-SH LAMMPS implementation remained at the same
+level as the installed binary:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.959568e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.829111e-10 |
+
+Same-node A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Installed stage-best | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate | 340.372 katom-step/s | 340.512 katom-step/s | +0.04% |
+| no-gate | 751.060 katom-step/s | 707.377 katom-step/s | -5.82% |
+| gate/no-gate | 0.453188 | 0.481372 | ratio changes only because no-gate slowed |
+
+Candidate profile at evflag0:
+
+```text
+profile_gate_evflag0 total = 0.486520613 s
+profile_nogate_evflag0 main_basic = 0.0530149713 s
+profile_nogate_evflag0 total = 0.281182376 s
+```
+
+Decision: rejected. The dedicated no-gate SH kernel preserved math but degraded
+no-gate performance materially. Likely causes are worse compiler scheduling or
+register/local-memory behavior after introducing another Kokkos tag; avoiding
+the unused tensor scratch did not translate into speed. The current stage-best
+remains the installed canonical binary with sha256
+`4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161`.
+
+Operational note: the first verify job landed on `a05u22g` and exited with
+signal 4 before candidate execution; the installed stage-best binary also hit
+the illegal instruction in the stable reference phase. The same script completed
+on `c04u01g`. Until the GPU build is moved fully to a host-GCC path, speed
+verification should avoid CPU-incompatible GPU nodes or explicitly pin to a
+known-good host.
