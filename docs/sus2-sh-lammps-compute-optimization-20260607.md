@@ -2184,3 +2184,111 @@ e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
 canonical binary sha256 =
 4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
 ```
+
+### Accepted runtime setting: one chunk for the 2x2x2 benchmark
+
+Date: 2026-06-09.
+
+No source code changed. The benchmark system has `inum = 142272` after
+`replicate 2 2 2`. The previous default test setting `chunksize 129600` split
+both gate layers into two chunks, while `chunksize 142272` keeps each layer in
+one chunk. This reduces fixed per-chunk overhead without changing the math.
+
+Job and directory:
+
+```text
+chunk tune job: 3770880 on c04u01g
+directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/chunk_tune_20260609
+binary sha256:
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
+Measured `run 500` performance:
+
+| chunksize | gate katom-step/s | no-gate katom-step/s | gate chunks | main chunks |
+| ---: | ---: | ---: | ---: | ---: |
+| 129600 | 358.659 | 836.557 | 2 | 2 |
+| 142272 | 370.853 | 855.228 | 1 | 1 |
+
+Representative profile totals:
+
+```text
+chunksize 129600 gate profile total = 0.441479186 s
+chunksize 142272 gate profile total = 0.426689608 s
+chunksize 129600 no-gate profile total = 0.225758208 s
+chunksize 142272 no-gate profile total = 0.219275195 s
+```
+
+Decision: accepted as the current best benchmark configuration. For this
+benchmark, run with:
+
+```text
+pair_style sus2mtp/kk/device MODEL.mtp chunksize 142272 tabstep 0.0005
+```
+
+Equivalently, use a `chunksize` at least as large as `inum` if the goal is to
+avoid chunk splitting on this single-GPU benchmark. This is a runtime setting,
+not a new binary.
+
+### Rejected candidate: grouped SH index fast path
+
+Date: 2026-06-09.
+
+Candidate change: detect whether each `mu` group is contiguous in both
+`alpha_index_basic` and the SH component index, then use `first_k + offset` and
+`first_sh + offset` in the two gate force hot loops. The fallback path remained
+the original indexed loop, so the formula was unchanged for all `lk` models:
+
+```text
+dot_mu = sum_{k in group(mu)} coeff_k Y_k(rhat)
+F terms use d/dx [R_mu(r) dot_mu]
+gate adjoint uses R_mu(r) dgate_mu/df dot_mu
+```
+
+Build and verification:
+
+```text
+build job: 3770881 on c04u01g
+verify job: 3770882 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/groupfast_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_groupfast_candidate_20260609
+candidate sha256:
+7e564aa7997b0ecd40fb9c27ca6f56d4180c11225bf1a129ab41b81f61a72bd5
+```
+
+Correctness against CPU SUS2-SH LAMMPS remained at the previous precision:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.277164e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.956876e-10 |
+
+Same-node speed comparison at `chunksize 142272`:
+
+| Version | gate katom-step/s | no-gate katom-step/s |
+| --- | ---: | ---: |
+| stable packed-radial | 370.828 | 855.601 |
+| grouped-index candidate | 372.469 | 855.441 |
+
+The gate profile total moved only from `0.425761543 s` to `0.425490489 s`.
+The candidate also increased build wall time to `438 s`. The measured gate
+throughput increase is only about `0.44%`, which is within benchmark noise for
+this setup and does not justify the extra branch and state in the monolithic
+Kokkos translation unit.
+
+Decision: rejected. The active remote source and canonical binary were restored
+to the accepted packed-radial version:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
