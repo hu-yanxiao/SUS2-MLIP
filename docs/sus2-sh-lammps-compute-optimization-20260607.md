@@ -1184,3 +1184,49 @@ this benchmark. The candidate regressed gate Pair time by about 1.2% and gave
 no useful no-gate gain. Local and server source, plus the active default LAMMPS
 build, were restored to the accepted first-local-vector stage-best after the
 test.
+
+## Rejected Experiment: Native Mu-Run SH Basic Fast Path
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_sh_run_group_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_sh_run_group_vs_stagebest_ab_40c_20260608
+jobids:      3769642, 3769644
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.sh_run_group_20260608
+sha256 868cafb35f0996f6e0668c454f07fce0d2b3b439aed93d11eb3fbe8889b95169
+```
+
+Candidate idea: add a native-order contiguous-`mu` run fast path for SUS2-SH
+basic moment accumulation. The existing `sh_basic_mu_grouped` path only works
+when all basic moments are globally sorted by increasing `mu`. The current
+model has repeated contiguous `mu` runs in its native order, so the candidate
+hoisted `radial_vals[mu]` and `radial_ders[mu]` once per run while preserving
+the original basic-moment indices, moment writes, Jacobian writes, and product
+graph.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u22a`, stagebest-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.96935 s | 5.41400 s | 0.918x | 0.918x |
+| no-gate | 1.81305 s | 1.85290 s | 0.978x | 0.975x |
+
+Decision: rejected. The native-run path is mathematically equivalent, but the
+extra run loop, additional branch, and weaker compiler vectorization are more
+expensive than the saved `radial_vals/radial_ders` loads. This is especially
+bad for gate, where it regressed Pair time by about 8.2%. Local and server
+source, plus the active default LAMMPS build, were restored to the accepted
+first-local-vector stage-best after the test.
