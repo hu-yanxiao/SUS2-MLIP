@@ -368,6 +368,9 @@ namespace LAMMPS_NS {
 	  typedef Kokkos::View<F_FLOAT **, typename DeviceType::scratch_memory_space,
 	                       Kokkos::MemoryTraits<Kokkos::Unmanaged>>
 	      shared_double_2d;    // Used for radial basis vals, ders, and dist powers
+	  typedef Kokkos::View<F_FLOAT *, typename DeviceType::scratch_memory_space,
+	                       Kokkos::MemoryTraits<Kokkos::Unmanaged>>
+	      shared_double_1d;    // Used for per-center SH adjoint values
 
   // SUS2-MLIP parameters
 	  int L_max;             // Maximum moment tensor level

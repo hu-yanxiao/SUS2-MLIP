@@ -1659,6 +1659,11 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 			            chunk_size, deriv_team_size, deriv_vector_length);
 			        Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateFirstDerivsTeam>
 			            policy_gate_first_derivs(chunk_size, deriv_team_size, deriv_vector_length);
+			        const int deriv_scratch_size =
+			            scratch_size_helper<F_FLOAT>(alpha_index_basic_count);
+			        policy_gate_first_derivs =
+			            policy_gate_first_derivs.set_scratch_size(
+			                0, Kokkos::PerTeam(deriv_scratch_size));
 			        profile_begin();
 			        Kokkos::parallel_for("ComputeGateFirstDerivs", policy_gate_first_derivs, *this);
 			        profile_end(prof_first_derivs);
@@ -2384,6 +2389,15 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	  const int itype = type[i] - 1;
 	  const int jnum = d_numneigh(i);
 
+	  shared_double_1d s_basic_coeffs(team.team_scratch(0), alpha_index_basic_count);
+	  if (is_sh_model) {
+	    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, alpha_index_basic_count),
+	                         [&](const int k) {
+	      s_basic_coeffs(k) = d_nbh_energy_ders_wrt_moments(ii, k);
+	    });
+	    team.team_barrier();
+	  }
+
 	  Kokkos::parallel_for(Kokkos::TeamThreadRange(team, jnum), [&](const int jj) {
 	    d_two_layer_gate_first_derivs(ilist_index, jj, 0) = 0.0;
 	    d_two_layer_gate_first_derivs(ilist_index, jj, 1) = 0.0;
@@ -2446,7 +2460,7 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	        for (int grouped_idx = d_basic_mu_offsets(mu_group);
 	             grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
 	          const int k = d_basic_grouped_indices(grouped_idx);
-	          const F_FLOAT pref = d_nbh_energy_ders_wrt_moments(ii, k);
+	          const F_FLOAT pref = s_basic_coeffs(k);
 	          if (pref == static_cast<F_FLOAT>(0.0)) continue;
 	          const int sh_idx = d_alpha_basic_sh_index(k);
 	          dot_y += pref * sh_values[sh_idx];

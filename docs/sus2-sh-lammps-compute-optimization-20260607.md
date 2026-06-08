@@ -1505,3 +1505,73 @@ Final direct A/B against the initial optimization baseline remains:
 Conclusion: current best is mathematically verified and installed. No later
 candidate produced a verified improvement over it, so this version is the final
 selected LAMMPS CPU build for the current optimization round.
+
+## GPU Kokkos Stage-Best Update - 2026-06-09
+
+Scope: SUS2-SH Kokkos `/kk/device` gate path in
+`interfaces/lammps/ML-SUS2-KK/pair_sus2_mtp_kokkos.{cpp,h}` and the installed
+GPU LAMMPS binary:
+
+```text
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_tabstep_double_compute1
+```
+
+Rejected full scratch-adjoint candidate:
+
+- Candidate binary:
+  `/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_scratchadj_candidate_20260609`
+- Correctness: gate max force diff `1.0e-8`; no-gate max force diff `1.0e-7`.
+- Same-node `c04u01g` performance: gate `338.688 katom-step/s`, but no-gate
+  dropped to `711.994 katom-step/s`.
+- Decision: rejected because scratch caching in the ordinary main-force path
+  damaged single-layer SH performance.
+
+Accepted narrow candidate: cache only the per-center
+`d_nbh_energy_ders_wrt_moments(ii,k)` adjoints in team scratch inside
+`GateFirstDerivsTeam`. The main-force and no-gate force kernels remain on the
+old path. This is mathematically identical because the cached values are copied
+from the same per-center adjoint view before the edge loop and only reused in
+the first-layer derivative contraction.
+
+Build and verification:
+
+```text
+build job: 3770832 on c04u01g
+verify job: 3770839 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/firstderiv_scratch_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_firstderiv_scratch_candidate_20260609
+candidate sha256:
+3dc2c35872bb84f3a4d816b5f12de189c0686fccdc0f4820f8437840cf356239
+```
+
+CPU/GPU correctness against the CPU SUS2-SH LAMMPS implementation:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.702725e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 9.343427e-10 |
+
+Same-node A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Previous installed | Accepted candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate | 333.230 katom-step/s | 337.451 katom-step/s | +1.27% |
+| no-gate | 751.174 katom-step/s | 751.071 katom-step/s | -0.01% |
+| gate/no-gate | 0.443613 | 0.449293 | +1.28% |
+
+Accepted candidate profile at evflag0:
+
+```text
+gate first_derivs = 0.110735228 s
+gate total        = 0.488591147 s
+no-gate total     = 0.269471024 s
+```
+
+Decision: accepted as the current GPU Kokkos stage-best because it gives a
+small but clean gate speedup while preserving no-gate single-layer SH
+performance and CPU/GPU correctness. The rejected full scratch-adjoint variant
+must not be revived without a separate no-gate regression fix.
