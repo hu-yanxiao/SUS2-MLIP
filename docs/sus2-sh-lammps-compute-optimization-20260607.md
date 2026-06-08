@@ -1864,6 +1864,71 @@ the unused tensor scratch did not translate into speed. The current stage-best
 remains the installed canonical binary with sha256
 `4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161`.
 
+### Build-route candidate: GCC host with `nvcc_wrapper`
+
+Date: 2026-06-09.
+
+Candidate change: no source-code change. Rebuilt the current stage-best source
+from an independent CMake directory using Kokkos `nvcc_wrapper` with GCC 11.2 as
+the host compiler:
+
+```text
+CMAKE_CXX_COMPILER=/work/phy-weigw/apps/lammps-10Dec2025/lib/kokkos/bin/nvcc_wrapper
+NVCC_WRAPPER_DEFAULT_COMPILER=g++
+C++ Compiler Type: GNU
+C++ Compiler Version: 11.2.0
+```
+
+This was tested because the installed NVHPC-host binary exited with signal 4 on
+`a05u22g`, while the project build standard prefers GCC host code with NVCC for
+GPU Kokkos builds.
+
+Build and verification:
+
+```text
+build job: 3770867 on c04u01g
+verify job: 3770868 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/gcc_host_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_gcc_host_candidate_20260609
+candidate sha256:
+3090f86d6bcae4e7a57414b2ac7d9873bd5208e9f79f4637bc9ae52dafff0c05
+```
+
+Correctness against the CPU SUS2-SH LAMMPS implementation:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 5.076636e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.594976e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 5.076636e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.137441e-10 |
+
+Same-node A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Installed stage-best | GCC-host candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate | 340.271 katom-step/s | 340.152 katom-step/s | -0.03% |
+| no-gate | 751.312 katom-step/s | 751.120 katom-step/s | -0.03% |
+| gate/no-gate | 0.452902 | 0.452860 | -0.01% |
+
+Candidate profile at evflag0:
+
+```text
+profile_gate_evflag0 total = 0.485523748 s
+profile_nogate_evflag0 main_force = 0.169506524 s
+profile_nogate_evflag0 total = 0.268052655 s
+```
+
+Decision: not accepted as a speed optimization. It is mathematically correct
+and essentially performance-neutral, but it does not move toward the
+400/800 katom-step/s targets and the binary is larger. A short `a05u22g`
+compatibility smoke was submitted as job 3770870 but canceled while pending
+because the specified host could not satisfy the requested affinity resources.
+The current installed stage-best remains the NVHPC-host binary with sha256
+`4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161`.
+
 Operational note: the first verify job landed on `a05u22g` and exited with
 signal 4 before candidate execution; the installed stage-best binary also hit
 the illegal instruction in the stable reference phase. The same script completed
