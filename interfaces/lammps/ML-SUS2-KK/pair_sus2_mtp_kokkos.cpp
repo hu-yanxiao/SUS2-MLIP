@@ -1632,10 +1632,8 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	      check_team_size_for<TagPairSUS2MTPComputeGateFirstLayer>(team_count, team_size,
 	                                                               vector_length);
 	      const int radial_scratch_count = basic_mu_group_count;
-	      const int dist_scratch_count = max_alpha_index_basic;
-	      const int coord_scratch_count = 3 * max_alpha_index_basic;
 	      const int scratch_size = scratch_size_helper<F_FLOAT>(
-	          team_size * (radial_scratch_count + dist_scratch_count + coord_scratch_count));
+	          team_size * radial_scratch_count);
 	      Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateFirstLayer>
 	          policy_gate_first(team_count, team_size, vector_length);
 		      policy_gate_first =
@@ -1727,10 +1725,8 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	      check_team_size_for<TagPairSUS2MTPComputeGateMainAlphaBasic>(team_count, team_size,
 	                                                                   vector_length);
 	      const int radial_scratch_count = basic_mu_group_count;
-	      const int dist_scratch_count = max_alpha_index_basic;
-	      const int coord_scratch_count = 3 * max_alpha_index_basic;
 	      const int scratch_size = scratch_size_helper<F_FLOAT>(
-	          team_size * (radial_scratch_count + dist_scratch_count + coord_scratch_count));
+	          team_size * radial_scratch_count);
 	      Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainAlphaBasic>
 	          policy_gate_main(team_count, team_size, vector_length);
 		      policy_gate_main =
@@ -2131,8 +2127,6 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    const
 	{
 	  shared_double_2d s_radial_vals(team.team_scratch(0), team.team_size(), basic_mu_group_count);
-	  shared_double_2d s_dist_powers(team.team_scratch(0), team.team_size(), max_alpha_index_basic);
-	  shared_double_3d s_coord_powers(team.team_scratch(0), team.team_size(), max_alpha_index_basic);
 
 	  const int ii = team.league_rank();
 	  if (ii >= chunk_size) return;
@@ -2180,43 +2174,16 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 				        s_radial_vals(thread, mu_group) = static_cast<F_FLOAT>(0.0);
 				      }
 				    }
-				    if (is_sh_model) {
-				      F_FLOAT sh_values[kMaxSHComponentsKK];
-			      eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
-			                             sh_l_max, sh_values);
-			      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
-			                           [&](const int k) {
-			        const int mu_group = d_alpha_basic_mu_group(k);
-			        const int sh_idx = d_alpha_basic_sh_index(k);
-			        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
-			                           s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
-			      });
-			    } else {
-		      s_dist_powers(thread, 0) = 1.0;
-		      s_coord_powers(thread, 0, 0) = 1.0;
-		      s_coord_powers(thread, 0, 1) = 1.0;
-		      s_coord_powers(thread, 0, 2) = 1.0;
-		      for (int k = 1; k < max_alpha_index_basic; k++) {
-		        s_dist_powers(thread, k) = s_dist_powers(thread, k - 1) * dist;
-		        for (int a = 0; a < 3; a++)
-		          s_coord_powers(thread, k, a) = s_coord_powers(thread, k - 1, a) * r[a];
-		      }
-
-		      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
-		                           [&](const int k) {
-		        const int mu_group = d_alpha_basic_mu_group(k);
-		        const int a0 = d_alpha_index_basic(k, 1);
-		        const int a1 = d_alpha_index_basic(k, 2);
-		        const int a2 = d_alpha_index_basic(k, 3);
-		        const int norm_rank = a0 + a1 + a2;
-		        const F_FLOAT norm_fac = 1.0 / s_dist_powers(thread, norm_rank);
-		        const F_FLOAT val_scaled = s_radial_vals(thread, mu_group) * norm_fac;
-		        const F_FLOAT pow = s_coord_powers(thread, a0, 0) *
-		                            s_coord_powers(thread, a1, 1) *
-		                            s_coord_powers(thread, a2, 2);
-		        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k), val_scaled * pow);
-		      });
-			    }
+	    F_FLOAT sh_values[kMaxSHComponentsKK];
+	    eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
+	                           sh_l_max, sh_values);
+	    Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
+	                         [&](const int k) {
+	      const int mu_group = d_alpha_basic_mu_group(k);
+	      const int sh_idx = d_alpha_basic_sh_index(k);
+	      Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
+	                         s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
+	    });
 		  });
 
 	}
@@ -2547,8 +2514,6 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	    const
 	{
 	  shared_double_2d s_radial_vals(team.team_scratch(0), team.team_size(), basic_mu_group_count);
-	  shared_double_2d s_dist_powers(team.team_scratch(0), team.team_size(), max_alpha_index_basic);
-	  shared_double_3d s_coord_powers(team.team_scratch(0), team.team_size(), max_alpha_index_basic);
 
 	  const int ii = team.league_rank();
 	  if (ii >= chunk_size) return;
@@ -2597,43 +2562,16 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 			          base_val * d_two_layer_gate_mu_multipliers(j, mu);
 			    }
 
-			    if (is_sh_model) {
-			      F_FLOAT sh_values[kMaxSHComponentsKK];
-			      eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
-			                             sh_l_max, sh_values);
-			      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
-			                           [&](const int k) {
-			        const int mu_group = d_alpha_basic_mu_group(k);
-			        const int sh_idx = d_alpha_basic_sh_index(k);
-			        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
-			                           s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
-			      });
-			    } else {
-		      s_dist_powers(thread, 0) = 1.0;
-		      s_coord_powers(thread, 0, 0) = 1.0;
-		      s_coord_powers(thread, 0, 1) = 1.0;
-		      s_coord_powers(thread, 0, 2) = 1.0;
-		      for (int k = 1; k < max_alpha_index_basic; k++) {
-		        s_dist_powers(thread, k) = s_dist_powers(thread, k - 1) * dist;
-		        for (int a = 0; a < 3; a++)
-		          s_coord_powers(thread, k, a) = s_coord_powers(thread, k - 1, a) * r[a];
-		      }
-
-		      Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
-		                           [&](const int k) {
-		        const int mu_group = d_alpha_basic_mu_group(k);
-		        const int a0 = d_alpha_index_basic(k, 1);
-		        const int a1 = d_alpha_index_basic(k, 2);
-		        const int a2 = d_alpha_index_basic(k, 3);
-		        const int norm_rank = a0 + a1 + a2;
-		        const F_FLOAT norm_fac = 1.0 / s_dist_powers(thread, norm_rank);
-		        const F_FLOAT val_scaled = s_radial_vals(thread, mu_group) * norm_fac;
-		        const F_FLOAT pow = s_coord_powers(thread, a0, 0) *
-		                            s_coord_powers(thread, a1, 1) *
-		                            s_coord_powers(thread, a2, 2);
-		        Kokkos::atomic_add(&d_moment_tensor_vals(ii, k), val_scaled * pow);
-		      });
-		    }
+	    F_FLOAT sh_values[kMaxSHComponentsKK];
+	    eval_real_sh_values_kk(r, static_cast<F_FLOAT>(1.0) / dist,
+	                           sh_l_max, sh_values);
+	    Kokkos::parallel_for(Kokkos::ThreadVectorRange(team, alpha_index_basic_count),
+	                         [&](const int k) {
+	      const int mu_group = d_alpha_basic_mu_group(k);
+	      const int sh_idx = d_alpha_basic_sh_index(k);
+	      Kokkos::atomic_add(&d_moment_tensor_vals(ii, k),
+	                         s_radial_vals(thread, mu_group) * sh_values[sh_idx]);
+	    });
 		  });
 		}
 

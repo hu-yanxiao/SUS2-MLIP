@@ -1712,3 +1712,92 @@ pair_sus2_mtp_kokkos.h
 installed canonical binary
 345770229e108abffe09f2910bde95337f63427b0aad8ffc65fbdab81b25ad10
 ```
+
+### Accepted Gate SH-Only Alpha Scratch Candidate - 2026-06-09
+
+Candidate idea: the `/kk/device` two-layer gate path already rejects non-SH
+models at settings time, so `GateFirstLayer` and `GateMainAlphaBasic` do not
+need the generic tensor-power scratch or the non-SH polynomial branch. This
+candidate keeps exactly the old `is_sh_model` formula path:
+
+```text
+B_{i,k} += R_{Z_i Z_j,\mu(k)}(r_ij) Y_k(rhat_ij)
+B^{main}_{i,k} += R^{main}_{Z_i Z_j,\mu(k)}(r_ij)
+                 [1 + A tanh(a_{Z_j,\mu(k)} f_j)] Y_k(rhat_ij)
+```
+
+The only implementation changes are reducing the per-team scratch allocation
+for those two gate alpha kernels to `team_size * basic_mu_group_count`, and
+removing the unreachable non-SH branch inside those kernels. No product graph,
+force formula, gate chain rule, ZBL term, no-gate alpha kernel, or no-gate force
+kernel is changed.
+
+Build and verification:
+
+```text
+build job: 3770858 on c04u01g
+full verify job: 3770859 on c04u01g
+repeat gate-only A/B job: 3770860 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/alpha_scratch_verify_20260609
+repeat directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/alpha_scratch_repeat_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_alpha_scratch_candidate_20260609
+candidate sha256:
+4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161
+```
+
+CPU/GPU correctness against the CPU SUS2-SH LAMMPS implementation:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.963439e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.694191e-10 |
+
+Same-node full A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Previous installed | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate | 338.848 katom-step/s | 340.605 katom-step/s | +0.52% |
+| no-gate | 751.489 katom-step/s | 751.563 katom-step/s | +0.01% |
+| gate/no-gate | 0.450902 | 0.453196 | +0.51% |
+
+Gate-only repeat A/B on the same node:
+
+| Case | Previous installed | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate repeat | 338.772 katom-step/s | 339.808 katom-step/s | +0.31% |
+
+Profile at evflag0:
+
+```text
+stable gate first_layer = 0.0521211935 s
+candidate gate first_layer = 0.0504507413 s
+stable gate main_basic = 0.0513359069 s
+candidate gate main_basic = 0.0510981713 s
+stable gate total = 0.488569380 s
+candidate gate total = 0.486472460 s
+candidate no-gate total = 0.268341438 s
+```
+
+Decision: accepted. The speedup is modest but repeatable, and the profile shows
+the expected first-layer scratch reduction. The current GPU Kokkos stage-best
+is still below the 400 katom-step/s gate and 800 katom-step/s no-gate targets,
+so the next higher-headroom candidates remain SH basic-moment scratch
+reduction and SH/table-only fast dispatch.
+
+Installed canonical binary and source hashes after acceptance:
+
+```text
+pair_sus2_mtp_kokkos.cpp
+569c167e428a9623b3f169d8feec78e79078d0557f2562801d7bf1be61d4a74e
+
+pair_sus2_mtp_kokkos.h
+0539ce97045843e05a7f085c963b72e20fa52edfe341ce6cfa3e7bcabb84f7f9
+
+installed canonical binary
+4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161
+```
