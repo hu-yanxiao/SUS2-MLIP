@@ -1321,3 +1321,45 @@ more per-edge control flow and loses the simpler old hot-loop structure, so the
 saved scratch writes do not pay for the extra work. No-gate is effectively
 unchanged. Local and server source, plus the active default LAMMPS build, were
 restored to the accepted first-local-vector stage-best after the test.
+
+## Final Selection After Last Candidate Attempt
+
+The last candidate considered was a gate main-additive fast-dispatch path:
+prevalidate that additive coefficients and table ratios are complete, then let
+the common `_lmp` additive-table edge skip repeated per-edge storage-size and
+fallback checks while preserving the same table interpolation, tanh multiplier,
+mu cache, SH accumulation, force, and virial formulas.
+
+This candidate was not installed. During the final build attempt on
+`/work/phy-weigw/apps/lammps-10Dec2025/src`, the Intel build reached the static
+archive step and then stayed in uninterruptible I/O inside `ar` for several
+minutes with an incomplete `liblammps_ml_sus2_avx2_noipo.a`. The build process
+was killed, and the candidate never produced a verified binary, run0 result, or
+40-rank A/B result. Because the user requested this to be the final attempt,
+no further candidate was started.
+
+The selected final best version is the accepted first-local-vector stage-best:
+
+```text
+installed binary:
+/work/phy-weigw/cpu-lammps/lmp.ml-sus2_tabstep_intelmpi
+sha256 46a2096aebdcb8d05030c3f7164227c402986334f942c558042d569888e9344a
+
+LAMMPS source restored to:
+/work/phy-weigw/apps/lammps-10Dec2025/src/pair_sus2_mtp.cpp
+sha256 6d6fef9ffcad2f00f9a1c31129e3daf11bca3e82176d74d6fc5487b01a621e8e
+
+/work/phy-weigw/apps/lammps-10Dec2025/src/pair_sus2_mtp.h
+sha256 a6a22d610f31ff7c5614689b5ff617648a8d2215208b531a99008bd243816078
+```
+
+Final direct A/B against the initial optimization baseline remains:
+
+| Case | Pair speedup | Loop speedup |
+| --- | ---: | ---: |
+| gate | 1.216x, about +21.6% | 1.211x, about +21.1% |
+| no-gate single-layer SH | 1.184x, about +18.4% | 1.237x, about +23.7% |
+
+Conclusion: current best is mathematically verified and installed. No later
+candidate produced a verified improvement over it, so this version is the final
+selected LAMMPS CPU build for the current optimization round.
