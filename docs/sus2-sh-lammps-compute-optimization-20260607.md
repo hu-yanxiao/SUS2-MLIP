@@ -1275,3 +1275,49 @@ saved edge metadata streams on the gate benchmark. No-gate is effectively
 unchanged because this candidate only touches the two-layer gate path. Local
 and server source, plus the active default LAMMPS build, were restored to the
 accepted first-local-vector stage-best after the test.
+
+## Rejected Experiment: Fuse Gate Additive Table Interpolation With SH Basic Accumulation
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_table_sh_fusion_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gate_table_sh_fusion_vs_stagebest_ab_40c_20260608
+jobids:      3769673, 3769674
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.gate_table_sh_fusion_20260608
+sha256 15c0f59f94869cd3da27e029ce85193fd6468f8a62924a8e57e70f2c913a708f
+```
+
+Candidate idea: for the main additive gate pass under `_lmp` radial tables,
+fuse table interpolation, tanh-gate multiplier evaluation, real-SH evaluation,
+moment accumulation, Jacobian write, and raw basic value write into one helper.
+This avoids materializing and then rereading `radial_vals`, `radial_ders`, and
+`two_layer_gate_residual_radial_vals` for the gate main-additive dynamic edge.
+The fallback path kept the original `calc_pair_radial_values()` plus
+`accumulate_sh_basic_edge()` behavior for unsupported basis/table cases.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u32a`, stagebest-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.96800 s | 5.53640 s | 0.897x | 0.897x |
+| no-gate | 1.81280 s | 1.81350 s | 1.000x | 0.998x |
+
+Decision: rejected. The fused path is mathematically identical in the run0
+check, but it regresses gate Pair time by about 10.3%. The fused helper adds
+more per-edge control flow and loses the simpler old hot-loop structure, so the
+saved scratch writes do not pay for the extra work. No-gate is effectively
+unchanged. Local and server source, plus the active default LAMMPS build, were
+restored to the accepted first-local-vector stage-best after the test.
