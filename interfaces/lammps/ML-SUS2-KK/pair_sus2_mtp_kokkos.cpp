@@ -892,16 +892,21 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::settings(int nar
                                           basic_mu_group_count);
   d_radial_der_list = decltype(d_radial_der_list)("device:radial_der_list", species_pairs,
                                                   list_grid_size, basic_mu_group_count);
+  const int radial_vd_table_size = species_pairs * list_grid_size * basic_mu_group_count * 2;
+  d_radial_vd_list =
+      decltype(d_radial_vd_list)("device:radial_vd_list", radial_vd_table_size);
 
   // Create host-side mirrors that are compatible with device layout
   auto h_radial_list = Kokkos::create_mirror_view(d_radial_list);
   auto h_radial_der_list = Kokkos::create_mirror_view(d_radial_der_list);
+  auto h_radial_vd_list = Kokkos::create_mirror_view(d_radial_vd_list);
   auto h_basic_mu_values = Kokkos::create_mirror_view(d_basic_mu_values);
   Kokkos::deep_copy(h_basic_mu_values, d_basic_mu_values);
 
   // Initialize to zero
   Kokkos::deep_copy(h_radial_list, 0.0);
   Kokkos::deep_copy(h_radial_der_list, 0.0);
+  Kokkos::deep_copy(h_radial_vd_list, 0.0);
 
   // Build preinterpolation table
   for (int i = 0; i < C; i++) {                              // Central atom type
@@ -933,8 +938,14 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::settings(int nar
                            regression_coeffs[C + 2*pairs_count*K_ + R + i] *
                            regression_coeffs[C + 2*pairs_count*K_ + R + j];
 
-            h_radial_list(table_index, n, mu_group) += radial_basis->radial_basis_vals[xi] * factor;
-            h_radial_der_list(table_index, n, mu_group) += radial_basis->radial_basis_ders[xi] * factor;
+            const double value = radial_basis->radial_basis_vals[xi] * factor;
+            const double deriv = radial_basis->radial_basis_ders[xi] * factor;
+            h_radial_list(table_index, n, mu_group) += value;
+            h_radial_der_list(table_index, n, mu_group) += deriv;
+            const int entry =
+                ((table_index * list_grid_size + n) * basic_mu_group_count + mu_group) * 2;
+            h_radial_vd_list(entry) += value;
+            h_radial_vd_list(entry + 1) += deriv;
           }
         }
       }
@@ -944,6 +955,7 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::settings(int nar
 	  // Copy to device (now layouts are compatible)
 	  Kokkos::deep_copy(d_radial_list, h_radial_list);
 	  Kokkos::deep_copy(d_radial_der_list, h_radial_der_list);
+	  Kokkos::deep_copy(d_radial_vd_list, h_radial_vd_list);
 
 	  if (two_layer_gate_enabled && two_layer_gate_shared_radial) {
 	    const int expected_gate_radial_count = radial_func_count * R;
@@ -1183,13 +1195,30 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::eval_radial_basic_mu_
       der_prev2 = der_prev1;
       der_prev1 = der_basis;
     }
-	  }
-	}
+  }
+}
 
-	template <class DeviceType>
-	KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::eval_radial_value_basic_mu_group(
-	    const int itype, const int jtype, const KK_FLOAT dist, const int mu_group,
-	    KK_FLOAT &val) const
+template <class DeviceType>
+KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::eval_radial_packed_basic_mu_group(
+    const int table_index, const int r_list, const int r_next, const KK_FLOAT ddr,
+    const int mu_group, KK_FLOAT &val, KK_FLOAT &der) const
+{
+  const int entry0 =
+      ((table_index * list_grid_size + r_list) * basic_mu_group_count + mu_group) * 2;
+  const int entry1 =
+      ((table_index * list_grid_size + r_next) * basic_mu_group_count + mu_group) * 2;
+  const F_FLOAT v0 = d_radial_vd_list(entry0);
+  const F_FLOAT d0 = d_radial_vd_list(entry0 + 1);
+  const F_FLOAT v1 = d_radial_vd_list(entry1);
+  const F_FLOAT d1 = d_radial_vd_list(entry1 + 1);
+  val = v0 + ddr * (v1 - v0);
+  der = d0 + ddr * (d1 - d0);
+}
+
+template <class DeviceType>
+KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::eval_radial_value_basic_mu_group(
+    const int itype, const int jtype, const KK_FLOAT dist, const int mu_group,
+    KK_FLOAT &val) const
 	{
 	  val = static_cast<KK_FLOAT>(0.0);
 	  if (do_list) {
@@ -2834,12 +2863,8 @@ KOKKOS_INLINE_FUNCTION void PairSUS2MTPKokkos<DeviceType>::operator()(
 	      F_FLOAT base_val = static_cast<F_FLOAT>(0.0);
 	      F_FLOAT base_der = static_cast<F_FLOAT>(0.0);
 	      if (table_index >= 0) {
-	        const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
-	        const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
-	        const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
-	        const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
-	        base_val = v1 + ddr * (v2 - v1);
-	        base_der = d1 + ddr * (d2 - d1);
+	        eval_radial_packed_basic_mu_group(table_index, r_list, r_next, ddr, mu_group,
+	                                          base_val, base_der);
 	      } else {
 	        eval_radial_basic_mu_group(itype, jtype, dist, mu_group,
 	                                   base_val, base_der);
@@ -3006,12 +3031,8 @@ PairSUS2MTPKokkos<DeviceType>::operator()(
 	      F_FLOAT base_val = static_cast<F_FLOAT>(0.0);
 	      F_FLOAT base_der = static_cast<F_FLOAT>(0.0);
 	      if (table_index >= 0) {
-	        const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
-	        const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
-	        const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
-	        const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
-	        base_val = v1 + ddr * (v2 - v1);
-	        base_der = d1 + ddr * (d2 - d1);
+	        eval_radial_packed_basic_mu_group(table_index, r_list, r_next, ddr, mu_group,
+	                                          base_val, base_der);
 	      } else {
 	        eval_radial_basic_mu_group(itype, jtype, dist, mu_group,
 	                                   base_val, base_der);
@@ -3179,12 +3200,8 @@ PairSUS2MTPKokkos<DeviceType>::operator()(
 	        F_FLOAT val = 0.0;
 	        F_FLOAT der = 0.0;
 	        if (table_index >= 0) {
-	          const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
-	          const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
-	          const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
-	          const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
-	          val = v1 + ddr * (v2 - v1);
-	          der = d1 + ddr * (d2 - d1);
+	          eval_radial_packed_basic_mu_group(table_index, r_list, r_next, ddr, mu_group,
+	                                            val, der);
 	        } else {
 	          eval_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
 	        }
@@ -3225,12 +3242,8 @@ PairSUS2MTPKokkos<DeviceType>::operator()(
 	        F_FLOAT val = 0.0;
 	        F_FLOAT der = 0.0;
 	        if (table_index >= 0) {
-	          const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
-	          const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
-	          const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
-	          const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
-	          val = v1 + ddr * (v2 - v1);
-	          der = d1 + ddr * (d2 - d1);
+	          eval_radial_packed_basic_mu_group(table_index, r_list, r_next, ddr, mu_group,
+	                                            val, der);
 	        } else {
 	          eval_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
 	        }
@@ -3559,21 +3572,17 @@ PairSUS2MTPKokkos<DeviceType>::operator()(
 	                      sh_values, sh_ders);
 
 	    for (int mu_group = 0; mu_group < basic_mu_group_count; mu_group++) {
-      F_FLOAT val = 0.0;
-      F_FLOAT der = 0.0;
-      if (table_index >= 0) {
-        const F_FLOAT v1 = d_radial_list(table_index, r_list, mu_group);
-        const F_FLOAT v2 = d_radial_list(table_index, r_next, mu_group);
-        const F_FLOAT d1 = d_radial_der_list(table_index, r_list, mu_group);
-        const F_FLOAT d2 = d_radial_der_list(table_index, r_next, mu_group);
-        val = v1 + ddr * (v2 - v1);
-        der = d1 + ddr * (d2 - d1);
-      } else {
-        eval_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
-      }
+	      F_FLOAT val = 0.0;
+	      F_FLOAT der = 0.0;
+	      if (table_index >= 0) {
+	        eval_radial_packed_basic_mu_group(table_index, r_list, r_next, ddr, mu_group,
+	                                          val, der);
+	      } else {
+	        eval_radial_basic_mu_group(itype, jtype, dist, mu_group, val, der);
+	      }
 
-      for (int grouped_idx = d_basic_mu_offsets(mu_group);
-           grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
+	      for (int grouped_idx = d_basic_mu_offsets(mu_group);
+	           grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
 	        const int k = d_basic_grouped_indices(grouped_idx);
 	        const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
 	        F_FLOAT raw_contrib = 0.0;

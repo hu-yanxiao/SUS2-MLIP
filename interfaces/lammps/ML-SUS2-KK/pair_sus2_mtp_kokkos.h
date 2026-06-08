@@ -102,6 +102,9 @@ namespace LAMMPS_NS {
 	  KOKKOS_INLINE_FUNCTION void eval_radial_basic_mu_group(const int itype, const int jtype,
 	                                                         const F_FLOAT dist, const int mu_group,
 	                                                         F_FLOAT &val, F_FLOAT &der) const;
+	  KOKKOS_INLINE_FUNCTION void eval_radial_packed_basic_mu_group(
+	      const int table_index, const int r_list, const int r_next, const F_FLOAT ddr,
+	      const int mu_group, F_FLOAT &val, F_FLOAT &der) const;
 	  KOKKOS_INLINE_FUNCTION void eval_radial_value_basic_mu_group(
 	      const int itype, const int jtype, const F_FLOAT dist, const int mu_group,
 	      F_FLOAT &val) const;
@@ -319,6 +322,9 @@ namespace LAMMPS_NS {
   Kokkos::View<radial_table_value_type***, DeviceType,
                Kokkos::MemoryTraits<Kokkos::RandomAccess>>
 	      d_radial_der_list;                                     // Derivatives: [species_pairs][grid_size][basic_mu_group_count]
+  Kokkos::View<radial_table_value_type *, DeviceType,
+               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
+      d_radial_vd_list;                                      // Interleaved [value,derivative] for force kernels
 	  Kokkos::View<radial_table_value_type***, DeviceType,
 	               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
 	      d_two_layer_gate_radial_list;                           // Values: [species_pairs][grid_size][basic_mu_group_count]

@@ -1996,3 +1996,112 @@ extra per-team scratch likely reduced occupancy or worsened backend scheduling
 enough to overwhelm any saved global coefficient loads. The current stage-best
 remains the installed canonical binary with sha256
 `4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161`.
+
+### Accepted phase-best: packed main radial value/derivative table
+
+Date: 2026-06-09.
+
+Candidate change: keep the existing main radial value table and derivative table,
+but add a flat interleaved force-path table:
+
+```text
+d_radial_vd_list[((table_index * list_grid_size + grid) * basic_mu_group_count + mu_group) * 2 + 0] = R
+d_radial_vd_list[((table_index * list_grid_size + grid) * basic_mu_group_count + mu_group) * 2 + 1] = dR/dr
+```
+
+The table is generated in the same coefficient loop as the original
+`d_radial_list` and `d_radial_der_list`. Value-only alpha/basic paths keep using
+`d_radial_list`; only force kernels that need both `R` and `dR/dr` use the
+interleaved table. The interpolation formula is unchanged:
+
+```text
+R(r) = R0 + ddr * (R1 - R0)
+dR(r)/dr = D0 + ddr * (D1 - D0)
+```
+
+This is mathematically identical to the previous two-table read path. ZBL,
+two-layer gate first-layer radial, tanh gate multiplier, force accumulation,
+virial/stress, and communication logic are unchanged.
+
+Build and verification:
+
+```text
+build job: 3770874 on c04u01g
+verify job: 3770875 on c04u01g
+repeat job: 3770876 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/packed_radial_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_packed_radial_candidate_20260609
+candidate sha256:
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
+Correctness against CPU SUS2-SH LAMMPS:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 5.076636e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.590896e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.829085e-10 |
+
+Same-node A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Previous stage-best | Packed main radial | Change |
+| --- | ---: | ---: | ---: |
+| gate | 340.39 katom-step/s | 358.45 katom-step/s | +5.30% |
+| no-gate | 751.42 katom-step/s | 838.45 katom-step/s | +11.57% |
+
+Candidate evflag0 profile:
+
+```text
+profile_gate_evflag0 total = 0.443920429 s
+  first_layer = 0.0504187100 s
+  first_finalize = 0.0460338779 s
+  first_derivs = 0.1103781550 s
+  main_basic = 0.0510071991 s
+  products = 0.0169847533 s
+  nbh_der = 0.0328772605 s
+  main_force = 0.1177797930 s
+profile_nogate_evflag0 total = 0.228269660 s
+  main_basic = 0.0402022581 s
+  products = 0.0170660143 s
+  nbh_der = 0.0329649563 s
+  main_force = 0.1294965370 s
+```
+
+Memory impact for the benchmark table shape
+`64 species pairs x 12001 grid points x 20 mu groups`: the existing main
+radial value+derivative tables use about `234.39 MB`; this candidate adds one
+more interleaved `R,dR` table of about the same size. This is acceptable for the
+A100 benchmark, but it should be kept visible when moving to much larger
+species/radial grids.
+
+Decision: accepted as the current phase-best. It passes the no-gate target
+(`838.45 >= 800.00 katom-step/s`) and improves gate throughput, but gate remains
+below the requested `400.00 katom-step/s` target.
+
+### Rejected candidate: packed two-layer gate radial value/derivative table
+
+Date: 2026-06-09.
+
+Candidate change: add a second interleaved flat table for the first-layer gate
+radial `R^{gate}` and `dR^{gate}/dr`, then use it in the first-layer derivative
+force kernels. The math is the same as the accepted main radial packing: both
+original tables and the packed table were generated from the same
+`two_layer_gate_radial_coeffs` loop and the same linear interpolation.
+
+Outcome: rejected before runtime verification. Build job `3770877` on `c04u01g`
+was killed after the NVHPC CUDA host backend remained in `cpp2` for several
+minutes while compiling `pair_sus2_mtp_kokkos.cpp.o`, with no candidate binary
+produced. This resembles the earlier struct-view attempt: mathematically clean
+data-layout changes can still push the single large Kokkos translation unit into
+unacceptable NVHPC backend compile time. The source was reverted to the accepted
+main radial packed version.
+
+Operational lesson: do not add more Kokkos device views/helpers to this monolithic
+translation unit unless the expected runtime gain is large enough to justify the
+compiler risk. For future gate speed work, prefer reducing kernel work or data
+traffic within already-compiled structures, or split the Kokkos translation unit
+before adding more table variants.
