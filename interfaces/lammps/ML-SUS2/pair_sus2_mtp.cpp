@@ -2057,6 +2057,9 @@ void PairSUS2MTP::compute(int eflag, int vflag)
   const int R = radial_basis_size;
   const int pairs_count = C * C;
   const int K_ = K_scaling;
+  const bool trace_first_site =
+      is_sh_model && env_flag_enabled("SUS2_SH_TRACE_FIRST_SITE") &&
+      comm->me == 0;
 
 
   // Loop over all provided neighbourhoods
@@ -2473,6 +2476,25 @@ void PairSUS2MTP::compute(int eflag, int vflag)
       continue;
     }
 
+    auto trace_cpu_moments = [&](const char *stage) {
+      if (!trace_first_site || ii != 0) return;
+      std::ostringstream oss;
+      oss.setf(std::ios::scientific);
+      oss.precision(16);
+      oss << "SUS2_SH_TRACE CPU " << stage << " first_moments";
+      const int moment_limit = std::min(alpha_moment_count, 12);
+      for (int k = 0; k < moment_limit; k++)
+        oss << " m[" << k << "]=" << moment_tensor_vals[k];
+      oss << " mapped_scalars";
+      const int scalar_limit = std::min(alpha_scalar_count, 8);
+      for (int k = 0; k < scalar_limit; k++) {
+        const int idx = alpha_moment_mapping[k];
+        oss << " B" << k << "(m[" << idx << "])=" << moment_tensor_vals[idx];
+      }
+      utils::logmesg(lmp, "{}\n", oss.str());
+    };
+    trace_cpu_moments("after_basic");
+
     // ------------ Contruct Other Alphas  ------------
     const int * __restrict times_a0 = alpha_times_a0;
     const int * __restrict times_a1 = alpha_times_a1;
@@ -2487,6 +2509,7 @@ void PairSUS2MTP::compute(int eflag, int vflag)
 
       moments[times_out[k]] += val2 * val0 * val1;
     }
+    trace_cpu_moments("after_products");
     // ------------ Compute Basis Set From Alpha Map ------------
     if (eflag_atom || eflag_global) {
       // SUS2-MLIP: Include shift_coeffs in energy calculation

@@ -26,25 +26,37 @@ PairStyle(sus2mtp/kk/host,PairSUS2MTPKokkos<LMPHostType>);
 #ifndef LMP_PAIR_SUS2MTP_KOKKOS_H
 #define LMP_PAIR_SUS2MTP_KOKKOS_H
 
-#include "kokkos_type.h"
-#include "neigh_list_kokkos.h"
-#include "pair_kokkos.h"
+	#include "kokkos_type.h"
+	#include "kokkos_base.h"
+	#include "neigh_list_kokkos.h"
+	#include "pair_kokkos.h"
 #include "../ML-SUS2/pair_sus2_mtp.h"
 
 namespace LAMMPS_NS {
 
-template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
- public:
-  // Structs for kernels
-  struct TagPairSUS2MTPInitMomentValsDers {};
-  struct TagPairSUS2MTPComputeEnvGate {};
-  struct TagPairSUS2MTPApplyEnvGate {};
-  struct TagPairSUS2MTPComputeAlphaBasic {};
-  struct TagPairSUS2MTPComputeAlphaTimes {};
-  struct TagPairSUS2MTPSetScalarNbhDers {};
-  struct TagPairSUS2MTPComputeNbhDers {};
-  struct TagPairSUS2MTPComputeEnvRhoChain {};
-  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeForce {};
+	template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP, public KokkosBase {
+	 public:
+	  // Structs for kernels
+	  struct TagPairSUS2MTPInitMomentValsDers {};
+	  struct TagPairSUS2MTPPackForwardComm {};
+	  struct TagPairSUS2MTPUnpackForwardComm {};
+	  struct TagPairSUS2MTPPackReverseComm {};
+	  struct TagPairSUS2MTPUnpackReverseComm {};
+	  struct TagPairSUS2MTPComputeEnvGate {};
+	  struct TagPairSUS2MTPApplyEnvGate {};
+	  struct TagPairSUS2MTPComputeGateFirstLayer {};
+	  struct TagPairSUS2MTPComputeGateFirstFinalize {};
+	  struct TagPairSUS2MTPComputeGateFirstDerivs {};
+	  struct TagPairSUS2MTPComputeGateMainAlphaBasic {};
+	  struct TagPairSUS2MTPComputeAlphaBasic {};
+	  struct TagPairSUS2MTPComputeAlphaTimes {};
+	  struct TagPairSUS2MTPSetScalarNbhDers {};
+	  struct TagPairSUS2MTPComputeNbhDers {};
+	  struct TagPairSUS2MTPComputeEnvRhoChain {};
+	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeGateMainForce {};
+	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeGateChainForce {};
+	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeZBLForce {};
+	  template <int NEIGHFLAG, int EVFLAG> struct TagPairSUS2MTPComputeForce {};
 
   enum { EnabledNeighFlags = HALF | HALFTHREAD };
   enum { COUL_FLAG = 0 };
@@ -57,10 +69,16 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   ~PairSUS2MTPKokkos() override;
   void compute(int, int) override;
   void settings(int, char **) override;
-  void coeff(int, char **) override;
-  void init_style() override;
-  double init_one(int, int) override;
-  void build_preinterpolation_table();
+	  void coeff(int, char **) override;
+	  void init_style() override;
+	  double init_one(int, int) override;
+	  void build_preinterpolation_table();
+	  int pack_forward_comm_kokkos(int, DAT::tdual_int_1d, DAT::tdual_double_1d &,
+	                               int, int *) override;
+	  void unpack_forward_comm_kokkos(int, int, DAT::tdual_double_1d &) override;
+	  int pack_reverse_comm_kokkos(int, int, DAT::tdual_double_1d &) override;
+	  void unpack_reverse_comm_kokkos(int, DAT::tdual_int_1d,
+	                                  DAT::tdual_double_1d &) override;
 
   // ========== Kokkos kernels ==========
   //Utility routines
@@ -77,12 +95,28 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
 
   KOKKOS_INLINE_FUNCTION F_FLOAT int_pow(F_FLOAT base, int exp) const;
 
-  KOKKOS_INLINE_FUNCTION void eval_radial_basic_mu_group(const int itype, const int jtype,
-                                                         const F_FLOAT dist, const int mu_group,
-                                                         F_FLOAT &val, F_FLOAT &der) const;
-	  KOKKOS_INLINE_FUNCTION void eval_env_gate_weighted_basis(
-	      const int itype, const int jtype, const F_FLOAT dist, F_FLOAT *weighted_basis,
-	      F_FLOAT *weighted_basis_der) const;
+	  KOKKOS_INLINE_FUNCTION void eval_radial_basic_mu_group(const int itype, const int jtype,
+	                                                         const F_FLOAT dist, const int mu_group,
+	                                                         F_FLOAT &val, F_FLOAT &der) const;
+	  KOKKOS_INLINE_FUNCTION void eval_radial_value_basic_mu_group(
+	      const int itype, const int jtype, const F_FLOAT dist, const int mu_group,
+	      F_FLOAT &val) const;
+	  KOKKOS_INLINE_FUNCTION void eval_gate_radial_basic_mu_group(
+	      const int itype, const int jtype, const F_FLOAT dist, const int mu_group,
+	      F_FLOAT &val, F_FLOAT &der) const;
+	  KOKKOS_INLINE_FUNCTION void eval_gate_radial_value_basic_mu_group(
+	      const int itype, const int jtype, const F_FLOAT dist, const int mu_group,
+	      F_FLOAT &val) const;
+	  KOKKOS_INLINE_FUNCTION void eval_main_gate_radial_value_basic_mu_group(
+	      const int itype, const int jtype, const F_FLOAT dist, const int mu_group,
+	      const int gate_atom_index, F_FLOAT &val) const;
+	  KOKKOS_INLINE_FUNCTION void eval_main_gate_radial_basic_mu_group(
+	      const int itype, const int jtype, const F_FLOAT dist, const int mu_group,
+	      const int gate_atom_index, F_FLOAT &val, F_FLOAT &der,
+	      F_FLOAT &gate_residual_val) const;
+		  KOKKOS_INLINE_FUNCTION void eval_env_gate_weighted_basis(
+		      const int itype, const int jtype, const F_FLOAT dist, F_FLOAT *weighted_basis,
+		      F_FLOAT *weighted_basis_der) const;
 	  KOKKOS_INLINE_FUNCTION void eval_env_gate_rho(const int itype, const F_FLOAT dist,
 	                                                F_FLOAT &rho, F_FLOAT &rho_der) const;
 
@@ -91,19 +125,49 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   // Device-side radial basis function calculation for RBChebyshev_sss
 
   //Kernels for initing working views
-  KOKKOS_INLINE_FUNCTION
-  void operator()(TagPairSUS2MTPInitMomentValsDers, const int &ii, const int &k) const;
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPInitMomentValsDers, const int &ii, const int &k) const;
+
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPPackForwardComm, const int &ii) const;
+
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPUnpackForwardComm, const int &ii) const;
+
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPPackReverseComm, const int &ii) const;
+
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPUnpackReverseComm, const int &ii) const;
 
   // Kernels for computation
   KOKKOS_INLINE_FUNCTION
   void operator()(TagPairSUS2MTPComputeEnvGate, const int &ii) const;
 
-  KOKKOS_INLINE_FUNCTION
-  void operator()(TagPairSUS2MTPApplyEnvGate, const int &ii) const;
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPApplyEnvGate, const int &ii) const;
 
-  KOKKOS_INLINE_FUNCTION
-  void
-  operator()(TagPairSUS2MTPComputeAlphaBasic,
+	  KOKKOS_INLINE_FUNCTION
+	  void
+		  operator()(TagPairSUS2MTPComputeGateFirstLayer,
+		             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateFirstLayer>::member_type
+		                 &team) const;
+
+		  KOKKOS_INLINE_FUNCTION
+		  void operator()(TagPairSUS2MTPComputeGateFirstFinalize, const int &ii) const;
+
+		  KOKKOS_INLINE_FUNCTION
+		  void operator()(TagPairSUS2MTPComputeGateFirstDerivs, const int &ii) const;
+
+		  KOKKOS_INLINE_FUNCTION
+	  void
+	  operator()(TagPairSUS2MTPComputeGateMainAlphaBasic,
+	             const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainAlphaBasic>::member_type
+	                 &team) const;
+
+	  KOKKOS_INLINE_FUNCTION
+	  void
+	  operator()(TagPairSUS2MTPComputeAlphaBasic,
              const typename Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeAlphaBasic>::member_type
                  &team) const;
 
@@ -116,12 +180,42 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   KOKKOS_INLINE_FUNCTION
   void operator()(TagPairSUS2MTPComputeNbhDers, const int &ii) const;
 
-  KOKKOS_INLINE_FUNCTION
-  void operator()(TagPairSUS2MTPComputeEnvRhoChain, const int &ii) const;
+	  KOKKOS_INLINE_FUNCTION
+	  void operator()(TagPairSUS2MTPComputeEnvRhoChain, const int &ii) const;
 
-  template <int NEIGHFLAG, int EVFLAG>
-  KOKKOS_INLINE_FUNCTION void
-  operator()(TagPairSUS2MTPComputeForce<NEIGHFLAG, EVFLAG>,
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeGateMainForce<NEIGHFLAG, EVFLAG>,
+	             const int &ii) const;
+
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeGateMainForce<NEIGHFLAG, EVFLAG>, const int &ii,
+	             EV_FLOAT &) const;
+
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeGateChainForce<NEIGHFLAG, EVFLAG>,
+	             const int &ii) const;
+
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeGateChainForce<NEIGHFLAG, EVFLAG>, const int &ii,
+	             EV_FLOAT &) const;
+
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeZBLForce<NEIGHFLAG, EVFLAG>,
+	             const int &ii) const;
+
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeZBLForce<NEIGHFLAG, EVFLAG>, const int &ii,
+	             EV_FLOAT &) const;
+
+	  template <int NEIGHFLAG, int EVFLAG>
+	  KOKKOS_INLINE_FUNCTION void
+	  operator()(TagPairSUS2MTPComputeForce<NEIGHFLAG, EVFLAG>,
              const int &ii) const;    // This eventually calls the below version
 
   template <int NEIGHFLAG, int EVFLAG>
@@ -139,9 +233,11 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
 
   int eflag, vflag;    // Energy and virial flag
 
-  typename AT::t_neighbors_2d d_neighbors;    //
-  typename AT::t_int_1d_randomread d_ilist;
-  typename AT::t_int_1d_randomread d_numneigh;
+	  typename AT::t_neighbors_2d d_neighbors;    //
+	  typename AT::t_int_1d_randomread d_ilist;
+	  typename AT::t_int_1d_randomread d_numneigh;
+	  typename AT::t_int_1d d_sendlist;
+	  typename AT::t_double_1d_um v_buf;
 
   DAT::ttransform_kkacc_1d k_eatom;
   DAT::ttransform_kkacc_1d_6 k_vatom;
@@ -159,6 +255,8 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   Kokkos::View<int **, DeviceType> d_alpha_index_basic;      // For constructing of basic alphas.
   Kokkos::View<int **, DeviceType> d_alpha_index_times;      // For combining alphas
   Kokkos::View<int *, DeviceType> d_alpha_moment_mapping;    // Maps alphas to basis functions.
+  Kokkos::View<int *, DeviceType> d_alpha_basic_sh_index;     // Real-SH flat index for SUS2-SH basic alphas.
+  Kokkos::View<double *, DeviceType> d_alpha_times_coeff;     // Tensor-product coefficient for SH products.
 
   // SUS2-MLIP mapping arrays
   Kokkos::View<int *, DeviceType> d_mu_to_K;              // Mapping from radial function to scaling dimension
@@ -177,7 +275,7 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   // The learned coefficients.
   Kokkos::View<double *, DeviceType> d_species_coeffs;     // The species-based constants
   Kokkos::View<double *, DeviceType> d_linear_coeffs;      // Basis coeffs
-  
+
   // SUS2-MLIP regression coefficients (unified array)
   // Layout: [shift_coeffs][scal_coeffs][radial_basis_coeffs]
   // Use offsets to access different sections
@@ -192,10 +290,16 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
       d_radial_list;                                         // Values: [species_pairs][grid_size][basic_mu_group_count]
   Kokkos::View<radial_table_value_type***, DeviceType,
                Kokkos::MemoryTraits<Kokkos::RandomAccess>>
-      d_radial_der_list;                                     // Derivatives: [species_pairs][grid_size][basic_mu_group_count]
-  Kokkos::View<radial_table_value_type***, DeviceType,
-               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
-      d_env_gate_radial_list;                                 // Values: [species_pairs][grid_size][6]
+	      d_radial_der_list;                                     // Derivatives: [species_pairs][grid_size][basic_mu_group_count]
+	  Kokkos::View<radial_table_value_type***, DeviceType,
+	               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
+	      d_two_layer_gate_radial_list;                           // Values: [species_pairs][grid_size][basic_mu_group_count]
+	  Kokkos::View<radial_table_value_type***, DeviceType,
+	               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
+	      d_two_layer_gate_radial_der_list;                       // Derivatives: [species_pairs][grid_size][basic_mu_group_count]
+	  Kokkos::View<radial_table_value_type***, DeviceType,
+	               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
+	      d_env_gate_radial_list;                                 // Values: [species_pairs][grid_size][6]
 	  Kokkos::View<radial_table_value_type***, DeviceType,
 	               Kokkos::MemoryTraits<Kokkos::RandomAccess>>
 	      d_env_gate_radial_der_list;                             // Derivatives: [species_pairs][grid_size][6]
@@ -212,10 +316,22 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   // Global working buffers.
   Kokkos::View<moment_buffer_value_type **, DeviceType> d_moment_tensor_vals;
   Kokkos::View<nbh_der_buffer_value_type **, DeviceType> d_nbh_energy_ders_wrt_moments;
-  Kokkos::View<double *, DeviceType> d_env_gate_values;
-  Kokkos::View<double *, DeviceType> d_env_gate_der_prefactors;
-  Kokkos::View<double *, DeviceType> d_env_gate_rho_chain_values;
-  Kokkos::View<moment_buffer_value_type **, DeviceType> d_env_gate_activation_basic_vals;
+	  Kokkos::View<double *, DeviceType> d_env_gate_values;
+	  Kokkos::View<double *, DeviceType> d_env_gate_der_prefactors;
+	  Kokkos::View<double *, DeviceType> d_env_gate_rho_chain_values;
+	  Kokkos::View<moment_buffer_value_type **, DeviceType> d_env_gate_activation_basic_vals;
+	  Kokkos::View<double *, DeviceType> d_two_layer_gate_values;
+	  Kokkos::View<double *, DeviceType> d_two_layer_gate_adjoints;
+	  Kokkos::View<double ***, DeviceType> d_two_layer_gate_first_derivs;
+	  Kokkos::View<double **, DeviceType> d_two_layer_gate_mu_multipliers;
+	  Kokkos::View<double **, DeviceType> d_two_layer_gate_mu_derivs;
+	  Kokkos::View<int *, DeviceType> d_two_layer_gate_weight_moment_indices;
+	  Kokkos::View<double *, DeviceType> d_two_layer_gate_weights;
+	  Kokkos::View<double *, DeviceType> d_two_layer_gate_additive_coeffs;
+	  Kokkos::View<int *, DeviceType> d_zbl_atomic_numbers;
+	  Kokkos::View<double *, DeviceType> d_zbl_pair_inner_cutoffs;
+	  Kokkos::View<double *, DeviceType> d_zbl_pair_outer_cutoffs;
+	  Kokkos::View<double *, DeviceType> d_zbl_pair_outer_sq;
 
   // Typedefs for shared memory
   typedef Kokkos::View<F_FLOAT **[3], typename DeviceType::scratch_memory_space,
@@ -224,13 +340,15 @@ template <class DeviceType> class PairSUS2MTPKokkos : public PairSUS2MTP {
   typedef Kokkos::View<F_FLOAT **, typename DeviceType::scratch_memory_space,
                        Kokkos::MemoryTraits<Kokkos::Unmanaged>>
       shared_double_2d;    // Used for radial basis vals, ders, and dist powers
-  
+
   // SUS2-MLIP parameters
-  int L_max;             // Maximum moment tensor level
-  int K_scaling;         // Scaling dimension parameter
-  int regression_coeffs_count;    // Total size of unified regression_coeffs array
-  int basic_mu_group_count;       // Number of unique mu values in alpha_index_basic
-  int need_dup;
+	  int L_max;             // Maximum moment tensor level
+	  int K_scaling;         // Scaling dimension parameter
+	  int regression_coeffs_count;    // Total size of unified regression_coeffs array
+	  int basic_mu_group_count;       // Number of unique mu values in alpha_index_basic
+	  int two_layer_gate_product_limit = 0;
+	  int first;
+	  int need_dup;
 
   // ---------- Define the forces, per-atom energy, and virials----------
   using KKDeviceType = typename KKDevice<DeviceType>::value;
