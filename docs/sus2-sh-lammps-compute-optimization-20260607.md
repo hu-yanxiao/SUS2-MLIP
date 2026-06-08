@@ -1575,3 +1575,63 @@ Decision: accepted as the current GPU Kokkos stage-best because it gives a
 small but clean gate speedup while preserving no-gate single-layer SH
 performance and CPU/GPU correctness. The rejected full scratch-adjoint variant
 must not be revived without a separate no-gate regression fix.
+
+### Rejected `inv_dist` Reuse Candidate - 2026-06-09
+
+Candidate idea: hoist `inv_dist = 1.0 / dist` once per active edge and reuse it
+in SH derivative contractions instead of emitting several equivalent `1/dist`
+expressions. This was mathematically identical to the accepted source: every
+replacement stayed after the same `rsq > 0` and cutoff checks, and the ZBL force
+path was not changed.
+
+Build and verification:
+
+```text
+build job: 3770842 on c04u01g
+verify job: 3770844 on c04u01g, manually stopped after candidate gate run500
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/invdist_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_invdist_candidate_20260609
+candidate sha256:
+8afc45d7cc79643010b8674d2ba50023e170a7297ae7bef41b445235e9ca4cfb
+```
+
+CPU/GPU correctness before stopping the job:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.827798e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 9.093205e-10 |
+
+Same-node A/B on `c04u01g`, `replicate 2 2 2`, one A100:
+
+| Case | Accepted installed | `inv_dist` candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate run500 | 337.601 katom-step/s | 334.715 katom-step/s | -0.85% |
+| no-gate run500 | 751.424 katom-step/s | not run | n/a |
+
+Candidate profile at evflag0 before stopping:
+
+```text
+gate total    = 0.502485860 s
+no-gate total = 0.268672617 s
+```
+
+Decision: rejected. The compiler/runtime did not turn the manual reciprocal
+hoist into a speedup; gate run100 and run500 were both slower than the accepted
+installed binary. The source on the local developer worktree and the remote
+LAMMPS source tree were restored to the accepted stage-best hashes:
+
+```text
+pair_sus2_mtp_kokkos.cpp
+d028e9be227d31d52deb56fdac0acf57b0840ee9a659ca56804d690c50e92aeb
+
+pair_sus2_mtp_kokkos.h
+0539ce97045843e05a7f085c963b72e20fa52edfe341ce6cfa3e7bcabb84f7f9
+
+installed canonical binary
+3dc2c35872bb84f3a4d816b5f12de189c0686fccdc0f4820f8437840cf356239
+```
