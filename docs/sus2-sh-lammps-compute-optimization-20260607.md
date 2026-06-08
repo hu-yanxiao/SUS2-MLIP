@@ -293,6 +293,67 @@ vectorizing the small radial-group loop. The accepted code keeps the value-only
 real-SH helper for basic-moment kernels, but does not use the rejected
 `ThreadVectorRange` reduction over `basic_mu_group_count`.
 
+### Rejected Kokkos Experiment: Team-Size Environment Sweep
+
+Run directory:
+
+```text
+jobid 3770795
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_team_sweep_20260608
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_gatekk_candidate_20260608
+sha256 066c8e02b423164695849a6d5f2f95292d27842d580c2cb6a3f9df6ae9b9dbab
+```
+
+Candidate source hashes:
+
+```text
+pair_sus2_mtp_kokkos.cpp d83fb02fc36e9d6a0bc447868927299d337f5c009e081e944267c22d003b84a0
+pair_sus2_mtp_kokkos.h   5a47a8b3ebc11fe1c0ba5f3a58be25da48906a0f14de4759602ac37c801cb700
+```
+
+Candidate idea: expose Kokkos team sizes through environment variables while
+keeping the default launch sizes unchanged:
+
+```text
+SUS2_SH_KK_ALPHA_TEAM_SIZE
+SUS2_SH_KK_FORCE_TEAM_SIZE
+SUS2_SH_KK_GATE_DERIV_TEAM_SIZE
+SUS2_SH_KK_GATE_CHAIN_TEAM_SIZE
+```
+
+The sweep used the same `2x2x2` replicated benchmark on one A100 with
+`sus2mtp/kk/device ... chunksize 129600 tabstep 0.0005`.
+
+| Variant | Gate run100 | No-gate run100 | Gate throughput | No-gate throughput | Gate/no-gate |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| default a16/f32/d32 | 43.1825 s | 19.1681 s | 329.467 katom-step/s | 742.233 katom-step/s | 0.443886 |
+| force16 a16/f16/d32 | 46.9384 s | 23.7713 s | 303.104 katom-step/s | 598.503 katom-step/s | 0.506436 |
+| force64 a16/f64/d32 | 43.2457 s | 19.5242 s | 328.985 katom-step/s | 728.696 katom-step/s | 0.451471 |
+| deriv16 a16/f32/d16 | 46.4136 s | 19.2569 s | 306.531 katom-step/s | 738.811 katom-step/s | 0.414898 |
+| deriv64 a16/f32/d64 | 42.8848 s | 19.1837 s | 331.754 katom-step/s | 741.630 katom-step/s | 0.447331 |
+| alpha8 a8/f32/d32 | 45.2171 s | 19.7811 s | 314.642 katom-step/s | 719.232 katom-step/s | 0.437469 |
+| alpha32 a32/f32/d32 | 42.3851 s | 19.7798 s | 335.665 katom-step/s | 719.279 katom-step/s | 0.466669 |
+| all16 a16/f16/d16 | 50.1768 s | 24.2008 s | 283.541 katom-step/s | 587.881 katom-step/s | 0.482311 |
+
+The best gate-only setting, `alpha32`, improved the 100-step gate throughput by
+only about 1.7-1.9% over the default and simultaneously slowed no-gate by about
+3.9%. The no-gate target of `800 katom-step/s` and gate target of
+`400 katom-step/s` were still not reached.
+
+Decision: rejected. Launch-size tuning does not address the remaining Kokkos
+hot path. Keep the accepted stage-best code and binary:
+
+```text
+source pair_sus2_mtp_kokkos.cpp 474d794850284ac7f4251d58e8ff85ecd03d21050b1549da006d3e7c1923294d
+binary /work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_tabstep_double_compute1
+sha256 bea9719ef8f520fb42ba4eb58c12c1c49aee3e7d85be6fa5eb2eeaf6d640d2a3
+```
+
 ## Rejected Experiment: Scalar Additive Gate Coefficients
 
 Run directories:
