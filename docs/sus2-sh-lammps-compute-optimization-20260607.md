@@ -1230,3 +1230,48 @@ expensive than the saved `radial_vals/radial_ders` loads. This is especially
 bad for gate, where it regressed Pair time by about 8.2%. Local and server
 source, plus the active default LAMMPS build, were restored to the accepted
 first-local-vector stage-best after the test.
+
+## Rejected Experiment: Recompute Gate Edge Table Metadata
+
+Run directories:
+
+```text
+correctness: /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_recompute_table_info_run0_8c_20260608
+speed:       /work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_recompute_table_info_vs_stagebest_ab_40c_20260608
+jobids:      3769663, 3769664
+```
+
+Candidate binary:
+
+```text
+/work/phy-weigw/apps/lammps-10Dec2025/src/lmp_ml_sus2_avx2_noipo.recompute_table_info_20260608
+sha256 64f901fa29233675b3cef99b7ba6c9ed8c84f944dee239c6c9c2ed24a0ac7f8f
+```
+
+Candidate idea: remove the cached two-layer gate edge table metadata
+`table_index`, `table_bin`, and `table_frac`. The first-layer pass still uses
+the table metadata immediately for gate radial values, but it no longer stores
+three edge streams. The main additive pass recomputes table metadata from the
+cached `dist`, current center type, and cached neighbor type before evaluating
+the same additive table formula.
+
+Correctness on run0 was exact:
+
+- no-gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- no-gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+- gate force and pressure dumps: `max_abs = 0`, `rms = 0`
+- gate PE/Press/Pxx/Pyy/Pzz: diff `0`
+
+Same-node 40-rank A/B on `b03u34a`, stagebest-first order:
+
+| Case | Stage-best Pair avg | Candidate Pair avg | Pair speedup | Loop speedup |
+| --- | ---: | ---: | ---: | ---: |
+| gate | 4.98190 s | 5.01475 s | 0.993x | 0.993x |
+| no-gate | 1.81220 s | 1.81190 s | 1.000x | 1.000x |
+
+Decision: rejected. Recomputing table bin/frac is mathematically equivalent
+but the extra arithmetic/function path is slightly more expensive than the
+saved edge metadata streams on the gate benchmark. No-gate is effectively
+unchanged because this candidate only touches the two-layer gate path. Local
+and server source, plus the active default LAMMPS build, were restored to the
+accepted first-local-vector stage-best after the test.
