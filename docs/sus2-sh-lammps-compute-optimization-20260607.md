@@ -1870,3 +1870,64 @@ the illegal instruction in the stable reference phase. The same script completed
 on `c04u01g`. Until the GPU build is moved fully to a host-GCC path, speed
 verification should avoid CPU-incompatible GPU nodes or explicitly pin to a
 known-good host.
+
+### Rejected candidate: no-gate force coeff scratch cache
+
+Date: 2026-06-09.
+
+Candidate change: mirror the gate main force team's coefficient scratch cache in
+the no-gate `ComputeForceTeam` kernel. The intended math-preserving optimization
+was to load
+
+```text
+d_nbh_energy_ders_wrt_moments(ii, k)
+```
+
+once per center atom into a per-team `s_basic_coeffs(k)` buffer, then reuse that
+inside the neighbor and `mu_group` loops for the SH branch. No force formula,
+neighbor traversal, radial value, ZBL, or virial path was changed.
+
+Build and verification:
+
+```text
+build job: 3770865 on c04u01g
+verify job: 3770866 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/force_coeff_scratch_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_force_coeff_scratch_candidate_20260609
+candidate sha256:
+b37a59f575df8237eb0cd13e4b8250d7a2907ac0009a51813f3962798a276ede
+```
+
+Correctness against the CPU SUS2-SH LAMMPS implementation remained unchanged:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.566638e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.823855e-10 |
+
+Same-node A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Installed stage-best | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate | 340.305 katom-step/s | 340.321 katom-step/s | +0.00% |
+| no-gate | 750.980 katom-step/s | 713.254 katom-step/s | -5.02% |
+| gate/no-gate | 0.453148 | 0.477139 | ratio changes only because no-gate slowed |
+
+Candidate profile at evflag0:
+
+```text
+profile_gate_evflag0 total = 0.485955164 s
+profile_nogate_evflag0 main_force = 0.169295617 s
+profile_nogate_evflag0 total = 0.268110839 s
+```
+
+Decision: rejected. The scratch cache preserved math but did not reduce the
+dominant no-gate force time, and run500 performance regressed materially. The
+extra per-team scratch likely reduced occupancy or worsened backend scheduling
+enough to overwhelm any saved global coefficient loads. The current stage-best
+remains the installed canonical binary with sha256
+`4567450e46b63fe4cea1041f2209e85e68505c2eb5e1836f77938ee233110161`.
