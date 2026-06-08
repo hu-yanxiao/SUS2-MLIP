@@ -2105,3 +2105,82 @@ translation unit unless the expected runtime gain is large enough to justify the
 compiler risk. For future gate speed work, prefer reducing kernel work or data
 traffic within already-compiled structures, or split the Kokkos translation unit
 before adding more table variants.
+
+### Rejected candidate: gate basic scratch accumulation
+
+Date: 2026-06-09.
+
+Candidate change: in `ComputeGateFirstLayer` and `ComputeGateMainAlphaBasic`,
+replace per-neighbor `atomic_add` into `d_moment_tensor_vals(ii,k)` with
+per-team scratch accumulation `s_basic_sums(team_rank,k)` and a final team
+reduction over `team_size`. No formula was changed:
+
+```text
+B_i,k^gate += sum_j R_gate_ij,mu Y_k(rhat_ij)
+B_i,k^main += sum_j R_main_ij,mu [1 + A tanh(a_Zj,mu f_j)] Y_k(rhat_ij)
+```
+
+Build and verification:
+
+```text
+build job: 3770878 on c04u01g
+verify job: 3770879 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/basic_scratch_reduce_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_basic_scratch_reduce_candidate_20260609
+candidate sha256:
+cdd82183ad5dcef0f2eeaef71154b865e7fa09be31c6c37cde9be00817163ff0
+```
+
+Correctness against CPU SUS2-SH LAMMPS remained at the previous precision:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.835793e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 5.076636e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 9.338534e-10 |
+
+Performance clearly regressed. Same-node stable baseline in the verification
+directory gave:
+
+```text
+stable gate run500 = 358.31 katom-step/s
+stable no-gate run500 = 838.80 katom-step/s
+```
+
+Candidate gate `run 100` dropped to `302.01 katom-step/s`; the `run 500` part
+was killed early after the profile already showed a large regression. Candidate
+evflag0 profile:
+
+```text
+profile_gate_evflag0 total = 0.518202974 s
+  first_layer = 0.0842114234 s
+  first_finalize = 0.0460249403 s
+  first_derivs = 0.1104601050 s
+  main_basic = 0.0916069150 s
+  products = 0.0169574348 s
+  nbh_der = 0.0328864601 s
+  main_force = 0.1176114650 s
+  chain_force = 0.0015211751 s
+profile_nogate_evflag0 total = 0.231030747 s
+```
+
+Compared with the accepted packed-radial profile (`gate total = 0.443920429 s`,
+`first_layer = 0.0504187100 s`, `main_basic = 0.0510071991 s`), the scratch
+reduction made the two affected kernels much slower. The likely reason is that
+the added scratch footprint and explicit team reduction reduce occupancy and
+increase serial work more than the local atomic removal helps.
+
+Decision: rejected. The active remote source was restored to the accepted
+packed-radial version:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
