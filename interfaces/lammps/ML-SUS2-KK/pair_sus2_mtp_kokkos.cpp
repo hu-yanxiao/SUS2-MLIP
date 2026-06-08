@@ -1771,6 +1771,10 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	              chunk_size, force_team_size, force_vector_length);
 	          Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainForceTeam<HALF>>
 	              policy_force(chunk_size, force_team_size, force_vector_length);
+	          const int force_scratch_size =
+	              scratch_size_helper<F_FLOAT>(alpha_index_basic_count);
+	          policy_force = policy_force.set_scratch_size(
+	              0, Kokkos::PerTeam(force_scratch_size));
 	          Kokkos::parallel_for("ComputeGateMainForceTeam", policy_force, *this);
 	        } else if (neighflag == HALFTHREAD) {
 		          int force_team_size = team_size_default;
@@ -1779,6 +1783,10 @@ template <class DeviceType> void PairSUS2MTPKokkos<DeviceType>::compute(int efla
 	              chunk_size, force_team_size, force_vector_length);
 	          Kokkos::TeamPolicy<DeviceType, TagPairSUS2MTPComputeGateMainForceTeam<HALFTHREAD>>
 	              policy_force(chunk_size, force_team_size, force_vector_length);
+	          const int force_scratch_size =
+	              scratch_size_helper<F_FLOAT>(alpha_index_basic_count);
+	          policy_force = policy_force.set_scratch_size(
+	              0, Kokkos::PerTeam(force_scratch_size));
 	          Kokkos::parallel_for("ComputeGateMainForceTeam", policy_force, *this);
 	        }
 		      }
@@ -3009,6 +3017,15 @@ PairSUS2MTPKokkos<DeviceType>::operator()(
   const int itype = type[i] - 1;
   const F_FLOAT xi[3] = {x(i, 0), x(i, 1), x(i, 2)};
 
+  shared_double_1d s_basic_coeffs(team.team_scratch(0), alpha_index_basic_count);
+  if (is_sh_model) {
+    Kokkos::parallel_for(Kokkos::TeamThreadRange(team, alpha_index_basic_count),
+                         [&](const int k) {
+      s_basic_coeffs(k) = d_nbh_energy_ders_wrt_moments(ii, k);
+    });
+    team.team_barrier();
+  }
+
   F_FLOAT center_fx = static_cast<F_FLOAT>(0.0);
   F_FLOAT center_fy = static_cast<F_FLOAT>(0.0);
   F_FLOAT center_fz = static_cast<F_FLOAT>(0.0);
@@ -3075,7 +3092,7 @@ PairSUS2MTPKokkos<DeviceType>::operator()(
         for (int grouped_idx = d_basic_mu_offsets(mu_group);
              grouped_idx < d_basic_mu_offsets(mu_group + 1); grouped_idx++) {
           const int k = d_basic_grouped_indices(grouped_idx);
-          const F_FLOAT coeff = d_nbh_energy_ders_wrt_moments(ii, k);
+          const F_FLOAT coeff = s_basic_coeffs(k);
           const int sh_idx = d_alpha_basic_sh_index(k);
           dot_y += coeff * sh_values[sh_idx];
           dot_d0 += coeff * sh_ders[3 * sh_idx + 0];

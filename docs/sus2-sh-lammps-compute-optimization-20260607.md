@@ -1635,3 +1635,80 @@ pair_sus2_mtp_kokkos.h
 installed canonical binary
 3dc2c35872bb84f3a4d816b5f12de189c0686fccdc0f4820f8437840cf356239
 ```
+
+### Accepted Gate Main-Force Scratch Candidate - 2026-06-09
+
+Candidate idea: cache only the per-center SH adjoint coefficients
+`d_nbh_energy_ders_wrt_moments(ii,k)` in team scratch inside
+`GateMainForceTeam`, then use the scratch values in the SH contraction for the
+main two-layer gate force. This is mathematically identical: the cached values
+are copied from the same per-center adjoint view after the product backprop and
+before the neighbor loop, and no product order, radial value, SH value, force
+formula, ZBL term, gate multiplier, or gate adjoint update is changed. The
+ordinary no-gate `ComputeForceTeam` path is not modified.
+
+Build and verification:
+
+```text
+build job: 3770850 on c04u01g
+full verify job: 3770854 on c04u01g
+repeat gate-only A/B job: 3770856 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/gateforce_scratch_verify_20260609
+repeat directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/gateforce_scratch_repeat_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_gateforce_scratch_candidate_20260609
+candidate sha256:
+345770229e108abffe09f2910bde95337f63427b0aad8ffc65fbdab81b25ad10
+```
+
+CPU/GPU correctness against the CPU SUS2-SH LAMMPS implementation:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.687424e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 9.343501e-10 |
+
+Same-node full A/B on `c04u01g`, `replicate 2 2 2`, one A100, `run 500`:
+
+| Case | Previous installed | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate | 337.688 katom-step/s | 338.803 katom-step/s | +0.33% |
+| no-gate | 751.392 katom-step/s | 751.431 katom-step/s | +0.01% |
+| gate/no-gate | 0.449417 | 0.450877 | +0.32% |
+
+Gate-only repeat A/B on the same node:
+
+| Case | Previous installed | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| gate repeat | 337.358 katom-step/s | 338.221 katom-step/s | +0.26% |
+
+Candidate profile at evflag0:
+
+```text
+gate first_derivs = 0.110747877 s
+gate main_force   = 0.159864817 s
+gate total        = 0.488617221 s
+no-gate main_force = 0.168865198 s
+no-gate total      = 0.268226364 s
+```
+
+Decision: accepted as a small but repeatable gate speedup. The performance gain
+is only about 0.3%, so this does not change the broader optimization picture:
+the current GPU Kokkos stage-best is still below the 400 katom-step/s gate and
+800 katom-step/s no-gate targets for the 2x2x2 benchmark. The installed
+canonical binary and source hashes after acceptance are:
+
+```text
+pair_sus2_mtp_kokkos.cpp
+fd020e545f6a1fad341be72637f28ef61f7878c2ed24b6a834ce9aa9ee7eb92b
+
+pair_sus2_mtp_kokkos.h
+0539ce97045843e05a7f085c963b72e20fa52edfe341ce6cfa3e7bcabb84f7f9
+
+installed canonical binary
+345770229e108abffe09f2910bde95337f63427b0aad8ffc65fbdab81b25ad10
+```
