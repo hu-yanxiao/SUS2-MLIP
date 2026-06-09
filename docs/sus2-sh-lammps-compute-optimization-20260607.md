@@ -2185,6 +2185,91 @@ canonical binary sha256 =
 4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
 ```
 
+### Rejected candidate: gate SH/table-only force tags
+
+Date: 2026-06-09.
+
+Candidate change: add two dedicated Kokkos tags for the current GPU gate
+combination:
+
+```text
+TagPairSUS2MTPComputeGateFirstDerivsSHTable
+TagPairSUS2MTPComputeGateMainForceSHTable
+```
+
+The dispatch was restricted to the mathematically identical fast path where the
+model is SUS2-SH, the shared-radial gate table exists, the main radial packed
+table exists, and all `species_count^2` pairs are tabulated. The fallback tags
+were left in place for `/kk/host`, partial tables, and any non-current gate
+combination. The formula was unchanged:
+
+```text
+d f_i / d r_ij =
+  sum_mu d/dr [R_gate_ij,mu(r_ij) sum_k c_i,k Y_k(rhat_ij)]
+
+main force and gate adjoint use:
+  R_main_ij,mu(r_ij) [1 + A tanh(a_Zj,mu f_j)]
+  d/df_j = R_main_ij,mu(r_ij) A a_Zj,mu sech^2(a_Zj,mu f_j)
+```
+
+Build and verification:
+
+```text
+build job: 3770899 on c04u01g
+verify job: 3770900 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/shtable_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_shtable_candidate_20260609
+candidate sha256:
+3bac5d40375cf54ae94d0acaf8972abdccbb83159db1dc3ae37c7001a4771d16
+```
+
+Correctness against CPU SUS2-SH LAMMPS remained at the previous precision:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.829126e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.967319e-10 |
+
+Same-node speed comparison at `chunksize 142272`:
+
+| Version | gate katom-step/s | no-gate katom-step/s |
+| --- | ---: | ---: |
+| stable packed-radial | 371.014 | 855.589 |
+| SH/table-only candidate | 363.252 | 855.495 |
+
+The profile showed only a small `first_derivs` improvement and a small
+`main_force` regression:
+
+```text
+stable gate profile total = 0.426452629 s
+  first_derivs = 0.111686617 s
+  main_force = 0.115211779 s
+candidate gate profile total = 0.425553752 s
+  first_derivs = 0.111240005 s
+  main_force = 0.115843523 s
+```
+
+The 500-step throughput regressed despite the slightly lower profile total,
+which indicates this fast-path specialization is within noise and may worsen
+instruction/register behavior in the real run. It also increased the monolithic
+Kokkos translation unit build wall time to `448 s`.
+
+Decision: rejected. The active remote source and canonical binary were restored
+to the accepted packed-radial version:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
 ### Accepted runtime setting: one chunk for the 2x2x2 benchmark
 
 Date: 2026-06-09.
