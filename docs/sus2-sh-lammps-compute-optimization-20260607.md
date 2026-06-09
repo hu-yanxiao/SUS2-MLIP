@@ -2185,6 +2185,80 @@ canonical binary sha256 =
 4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
 ```
 
+### Rejected candidate: first-deriv valid-edge zero-write removal
+
+Date: 2026-06-09.
+
+Candidate change: in the two first-layer derivative kernels, remove the
+unconditional three-component zero write at the top of each neighbor edge and
+write zeros only for invalid edges outside `max_cutoff_sq`. Valid edges still
+write the final `d f_i / d r_ij` values before `chain_force` reads the buffer,
+so the semantics were unchanged:
+
+```text
+invalid edge:
+  d_two_layer_gate_first_derivs(i,j,:) = 0
+
+valid edge:
+  d_two_layer_gate_first_derivs(i,j,:) =
+    d/dr_ij sum_mu R_gate_ij,mu(r_ij) dot_mu(Y)
+```
+
+Build and verification:
+
+```text
+build job: 3771027 on c04u01g
+verify job: 3771102 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/firstderiv_zero_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_firstderiv_zero_candidate_20260609
+candidate sha256:
+d8043508dd6d083911c4838d24d14e618c9181db940a1b9322c6c51b3e881927
+```
+
+Correctness against CPU SUS2-SH LAMMPS stayed at the accepted precision:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 8.691267e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 4.840382e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 8.955619e-10 |
+
+Same-node speed comparison at `chunksize 142272`:
+
+| Version | gate katom-step/s | no-gate katom-step/s |
+| --- | ---: | ---: |
+| stable packed-radial | 371.055 | 855.274 |
+| first-deriv zero-write candidate | 370.871 | 855.157 |
+
+The candidate also lost slightly in the per-step profile:
+
+```text
+stable gate profile total = 0.425523885 s
+  first_derivs = 0.111598248 s
+  main_force = 0.115538403 s
+candidate gate profile total = 0.426252004 s
+  first_derivs = 0.111877210 s
+  main_force = 0.115810070 s
+```
+
+The saved invalid-edge writes are not in the hot path for this benchmark and
+the changed store pattern did not reduce memory traffic enough to matter.
+
+Decision: rejected. The active remote source and canonical binary were restored
+to the accepted packed-radial version:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
 ### Rejected candidate: gate SH/table-only force tags
 
 Date: 2026-06-09.
