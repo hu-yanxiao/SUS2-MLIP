@@ -2515,3 +2515,122 @@ e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
 canonical binary sha256 =
 4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
 ```
+
+### Rejected final candidate: packed two-layer gate derivative table
+
+Date: 2026-06-09.
+
+Candidate change: use the existing gate derivative table view as a packed
+`[value, derivative]` table for first-layer derivative kernels. The original
+first-layer forward table was retained for the forward gate pass, while the
+manual derivative hot loops loaded both `R_gate` and `dR_gate/dr` from the
+packed derivative table. The mathematical formula was unchanged:
+
+```text
+f_i = sum_mu R_gate_ij,mu(r_ij) dot_mu[Y(rhat_ij)]
+d f_i / d r_ij =
+  sum_mu (dR_gate_ij,mu/dr dot_mu + R_gate_ij,mu d dot_mu/dr)
+```
+
+Build and verification:
+
+```text
+build job: 3771308 on c04u01g
+verify job: 3771316 on c04u01g
+performance job: 3771317 on c04u01g
+verify directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/gatepackder_verify_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_gatepackder_candidate_20260609
+candidate sha256:
+abe14258b961efb06ed0f6e2e1a4bcae34f61f35a2b5c141460701394d13e8a2
+```
+
+Correctness against CPU SUS2-SH LAMMPS passed before the verify script hit its
+known analysis-order bug:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 4.840382e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.217308e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 5.076636e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 9.085433e-10 |
+
+Same-node speed comparison at `chunksize 142272`:
+
+| Version | gate katom-step/s | no-gate katom-step/s |
+| --- | ---: | ---: |
+| stable packed-radial | 371.128 | 857.351 |
+| packed gate-derivative candidate | 370.641 | 857.361 |
+
+The single-step profile moved in the right direction for gate but not enough
+to survive the 500-step benchmark:
+
+```text
+stable gate profile total = 0.426541641 s
+  first_derivs = 0.111409232 s
+  nbh_der = 0.0367241576 s
+  main_force = 0.115543306 s
+candidate gate profile total = 0.425299760 s
+  first_derivs = 0.111268688 s
+  nbh_der = 0.0356480759 s
+  main_force = 0.115321213 s
+```
+
+Decision: rejected. The candidate was numerically correct but gate throughput
+regressed from `371.128` to `370.641` katom-step/s in the 500-step run. The
+active remote source was restored to the accepted packed-radial version and
+the canonical binary was left unchanged:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
+### Final GPU Kokkos version after the last attempt
+
+Date: 2026-06-09.
+
+Final decision: keep the accepted packed-radial GPU Kokkos source and the
+`chunksize 142272 tabstep 0.0005` benchmark setting. The last candidate did
+not improve the 500-step gate throughput, so no further source candidate is
+accepted in this round.
+
+Final canonical files:
+
+```text
+remote LAMMPS source:
+/work/phy-weigw/apps/lammps-10Dec2025/src/KOKKOS/pair_sus2_mtp_kokkos.cpp
+/work/phy-weigw/apps/lammps-10Dec2025/src/KOKKOS/pair_sus2_mtp_kokkos.h
+
+canonical GPU binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_tabstep_double_compute1
+```
+
+Final hashes:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
+Final measured `run 500` numbers on the benchmark system:
+
+| Case | katom-step/s | Status |
+| --- | ---: | --- |
+| no-gate SH | 857.350-857.361 | above the 800 target |
+| two-layer gate | 371.128 | below the 400 target |
+
+The remaining gate bottleneck is still compute-side kernel work rather than
+communication. In the accepted profile at `inum = 142272`, the largest gate
+terms are `main_force ~= 0.116 s`, `first_derivs ~= 0.111 s`,
+`main_basic ~= 0.051 s`, and `first_layer ~= 0.049 s`; forward/reverse comm is
+only about `0.00035 s` combined.
