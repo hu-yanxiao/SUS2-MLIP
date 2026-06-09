@@ -2185,6 +2185,70 @@ canonical binary sha256 =
 4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
 ```
 
+### Rejected candidate: Kokkos team-size environment sweep
+
+Date: 2026-06-09.
+
+Candidate change: expose GPU Kokkos team sizes through environment variables
+for the alpha/basic, first-layer gate derivative, main gate force, gate chain,
+and no-gate force kernels. The default launch sizes were unchanged unless an
+environment variable was set, so the candidate was mathematically identical to
+the accepted packed-radial version at default settings.
+
+Build and verification:
+
+```text
+build job: 3771303 on c04u01g
+verification job: 3771304 on c04u01g
+performance job: 3771305 on c04u01g
+directory:
+/work/phy-weigw/hyx/5.28-mof-cl-h2o/gate/lammps_gate_vs_nogate/codex_gatekk_gate_team_verify_20260608/teamenv_candidate_20260609
+candidate binary:
+/work/phy-weigw/20260321_Test/lammps-sus2kk-v45-all-double-centroidstress/lmp.v45_all_double_centroidstress_teamenv_candidate_20260609
+candidate sha256:
+61a1f713553c496cdcb933dc9a870ea416d76ea778ff8bcaee5f2933433591d5
+```
+
+Correctness against CPU SUS2-SH LAMMPS remained at the previous precision:
+
+| Case | dE | dPress | max force diff | RMS force diff |
+| --- | ---: | ---: | ---: | ---: |
+| gate run0 | 0 | 0 | 1.0e-8 | 5.076636e-11 |
+| no-gate run0 | 0 | 0 | 1.0e-7 | 9.348417e-10 |
+| gate force1 | n/a | n/a | 1.0e-8 | 5.076636e-11 |
+| no-gate force1 | n/a | n/a | 1.0e-7 | 9.470373e-10 |
+
+The best 100-step gate setting was:
+
+```text
+SUS2_SH_KK_ALPHA_TEAM_SIZE=32
+SUS2_SH_KK_GATE_DERIV_TEAM_SIZE=64
+```
+
+Same-node `run 500` comparison at `chunksize 142272`:
+
+| Version | gate katom-step/s | no-gate katom-step/s |
+| --- | ---: | ---: |
+| stable packed-radial | 371.084 | 857.649 |
+| candidate default | 370.968 | 857.946 |
+| candidate best gate env | 379.959 | 830.342 |
+
+Decision: rejected as a source/default optimization. The best gate-only setting
+improves gate throughput by about `2.4%`, but the same setting slows no-gate by
+about `3.2%` and still leaves gate below the `400 katom-step/s` target. This is
+useful only as an optional gate benchmark/runtime tuning knob, not as a generic
+algorithmic improvement. The active remote source and canonical binary were
+restored to the accepted packed-radial version:
+
+```text
+pair_sus2_mtp_kokkos.cpp sha256 =
+f8b30d03590e2dcbd30d1d6ef8caa2ecb6a4e01e1796643489ee03fbdfe5eead
+pair_sus2_mtp_kokkos.h sha256 =
+e32286b970392a6f40992d3aa66b66fa19631db68e9ef9f1317562ff742ef8c2
+canonical binary sha256 =
+4a4fcf99b93cc71a83295d76c801672a3c7f32be9303a9b31a17b9a267750c31
+```
+
 ### Rejected candidate: first-deriv valid-edge zero-write removal
 
 Date: 2026-06-09.
